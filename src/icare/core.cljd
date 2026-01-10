@@ -1,0 +1,20 @@
+(ns icare.core
+  (:require ["package:flutter/material.dart" :as m]
+            [cljd.flutter :as f]
+            [icare.state :refer [store state->ui]]
+            [icare.ui :refer [ui->widget]]))
+
+(defn main []
+  (f/run
+    :bind {:store store}
+    (m/MaterialApp
+      .title "iCare"
+      .theme (m/ThemeData .primarySwatch m.Colors/pink))
+    .home
+    (m/Scaffold)
+    .body
+    (m/SafeArea)
+    :watch [state store]
+    (-> state                   ;;state is the end-user representation of the app
+        state->ui               ;;ui is the programmers representation of the app
+        ui->widget)))          ;;widgets are the machine representation of the app

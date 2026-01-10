@@ -1,0 +1,202 @@
+(ns icare.ui
+  (:require ["package:flutter/material.dart" :as m]
+            [cljd.flutter :as f]
+            [icare.state :refer []]))
+
+(defn render-reorderable-list [ui]
+  (let [{:keys [ui-type on-reorder items]} ui]
+    (f/widget
+      :get [:store]
+      (m/ReorderableListView
+       .padding (m/EdgeInsets.symmetric .horizontal 20)
+       .onReorder (on-reorder store)
+       .children (mapv ui->widget items)))))
+
+(defn render-task-card [ui]
+  (let [{:keys [initially-expanded title on-rename-title add-tasks? key title tasks]} ui]
+    (f/widget
+     :key key
+     :get [:store]
+     (m/ExpansionTile
+      .initiallyExpanded initially-expanded
+      .controlAffinity m.ListTileControlAffinity/leading
+      .expandedCrossAxisAlignment m.CrossAxisAlignment/start
+      .expandedAlignment m.Alignment/topLeft
+      .title (m/TextField
+              .style (m/TextStyle
+                       .fontSize 22
+                       .fontWeight m.FontWeight/bold
+                       .color m.Colors/black)
+              .onSubmitted (on-rename-title store)
+              .decoration nil
+              .controller (m/TextEditingController. .text title))
+      .children (conj (mapv ui->widget tasks))))))
+
+(defn render-editable-task [ui]
+  (let [{:keys [title on-complete on-edit-task-title completed subitems]} ui]
+    (f/widget
+     :get [:store]
+     (m/Column)
+     .children
+     [(m/Row .children
+        [(f/widget
+          :padding {:right 0 :top 22}
+          (m/IconButton
+           .iconSize 22
+           .onPressed (on-complete store))
+          .icon
+          (m/Icon (if completed
+                    m.Icons/check_box
+                    m.Icons/check_box_outline_blank)
+                  .color m.Colors/pink))
+         (f/widget
+          (m/SizedBox .width 250)
+          (m/TextField
+           .style (m/TextStyle
+                           .fontSize 22
+                           .fontWeight m.FontWeight/normal
+                           .color m.Colors/black
+                           .decoration (if completed
+                                         m.TextDecoration/lineThrough
+                                         m.TextDecoration/none))
+           .onSubmitted (on-edit-task-title store)
+           .decoration nil
+           .controller (m/TextEditingController. .text title)))])
+      (m/Column .children (mapv ui->widget subitems))])))
+
+(defn render-ronly-task [ui]
+  (let [{:keys [title completed subitems]} ui]
+    (f/widget
+     (m/Column)
+     .children
+     [(m/Row .children
+        [(f/widget
+           :padding {:right 0 :top 2}
+           (m/Icon (if completed
+                          m.Icons/check_box
+                          m.Icons/check_box_outline_blank
+                        .size 22
+                        .color m.Colors/pink)))
+         (f/widget
+          (m/SizedBox .width 250)
+          (m/Text title
+                  .style (m/TextStyle
+                           .fontSize 22
+                           .fontWeight m.FontWeight/normal
+                           .color m.Colors/black
+                           .decoration (if completed
+                                         m.TextDecoration/lineThrough
+                                         m.TextDecoration/none))))])
+      (m/Column .children (mapv ui->widget subitems))])))
+
+(defn render-subitem-time [ui]
+  (let [{:keys [time]} ui
+        time (.parse DateTime time)]
+    (f/widget
+     (m/Padding
+      .padding (m/EdgeInsets.only .left 15 .top 4 .bottom 4))
+     (m/Row
+      .children [(m/Icon m.Icons/subdirectory_arrow_right_rounded
+                      .size 16
+                      .color m.Colors/grey)
+                 (m/SizedBox .width 4)
+                 (m/Text (str "Completed at " (.-hour time)":"(.-minute time))
+                         .style (m/TextStyle
+                                  .fontSize 14
+                                  .fontWeight m.FontWeight/normal
+                                  .color m.Colors/grey))]))))
+
+(defn render-subitem-image [ui]
+  (let [{:keys [url]} ui]
+    (f/widget
+      (m/Padding
+       .padding (m/EdgeInsets.only .left 15 .top 4 .bottom 4))
+      (m/Row
+       .crossAxisAlignment m.CrossAxisAlignment/start
+       .children [(m/Icon m.Icons/subdirectory_arrow_right_rounded
+                       .size 16
+                       .color m.Colors/orange)
+                  (m/SizedBox .width 4)
+                  (m/Container
+                   .width 200
+                   .height 120
+                   .decoration (m/BoxDecoration
+                                 .border (m/Border.all
+                                           .color m.Colors/orange
+                                           .width 2)
+                                 .borderRadius (m/BorderRadius.circular 8)
+                                 .image (m/DecorationImage
+                                          .fit m.BoxFit/cover
+                                          .image (m/NetworkImage url))))]))))
+
+(defn render-friend-search-area [ui]
+  (let [{:keys [on-search]} ui]
+    (f/widget
+     :key "friend-search-area"
+     :get [:store]
+     :padding {:left 15 :bottom 12 :top 0}
+     (m/Row
+      .children [(f/widget
+                  (m/Padding
+                   .padding (m/EdgeInsets.only .right 8 .top 2))
+                  (m/Icon m.Icons/person_add
+                          .size 22
+                          .color m.Colors/pink))
+                 (f/widget
+                  :let [text-controller (m/TextEditingController.)]
+                  (m/SizedBox .width 180)
+                  (m/TextField
+                   .textInputAction m.TextInputAction/done
+                   .onSubmitted (on-search store text-controller)
+                   .decoration (m/InputDecoration
+                                 .hintText "Find Friend"
+                                 .hintStyle (m/TextStyle
+                                              .fontSize 22
+                                              .fontWeight m.FontWeight/normal
+                                              .color m.Colors/grey))
+                   .controller text-controller
+                   .style (m/TextStyle
+                            .fontSize 22
+                            .fontWeight m.FontWeight/normal
+                            .color m.Colors/black)))]))))
+
+(defn render-add-task-area [ui]
+  (let [{:keys [on-add-task]} ui]
+    (f/widget
+     :get [:store]
+     (m/Row
+      .children [(f/widget
+                  :padding {:right 8 :top 2}
+                  (m/Icon m.Icons/add
+                          .size 22
+                          .color m.Colors/pink))
+                 (f/widget
+                  :let [text-controller (m/TextEditingController.)]
+                  (m/SizedBox .width 180)
+                  (m/TextField
+                   .textInputAction m.TextInputAction/done
+                   .onSubmitted (on-add-task store text-controller)
+                   .decoration (m/InputDecoration
+                                 .hintText "New Task..."
+                                 .hintStyle (m/TextStyle
+                                              .fontSize 22
+                                              .fontWeight m.FontWeight/normal
+                                              .color m.Colors/grey))
+                   .controller text-controller
+                   .style (m/TextStyle
+                            .fontSize 22
+                            .fontWeight m.FontWeight/normal
+                            .color m.Colors/black)))]))))
+
+(defn ui->widget [ui]
+  (let [{:keys [ui-type]} ui]
+   (cond
+     (= ui-type :reorderable-list)   (render-reorderable-list ui)
+     (= ui-type :task-card)          (render-task-card ui)
+     (= ui-type :ronly-task)         (render-ronly-task ui)
+     (= ui-type :editable-task)      (render-editable-task ui)
+     (= ui-type :subitem-time)       (render-subitem-time ui)
+     (= ui-type :subitem-image)      (render-subitem-image ui)
+     (= ui-type :friend-search-area) (render-friend-search-area ui)
+     (= ui-type :add-task-area)      (render-add-task-area ui)
+     :else (throw (Exception. (str "ui->widget tried to render an unknonw ui element: " ui))))))
