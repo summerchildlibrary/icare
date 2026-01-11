@@ -1,7 +1,8 @@
 (ns icare.ui
   (:require ["package:flutter/material.dart" :as m]
             [cljd.flutter :as f]
-            [icare.state :refer []]))
+            [icare.state :refer []]
+            ["package:flutter_svg/flutter_svg.dart" :as svg]))
 
 (defn render-reorderable-list [ui]
   (let [{:keys [ui-type on-reorder items]} ui]
@@ -18,6 +19,7 @@
      :key key
      :get [:store]
      (m/ExpansionTile
+      .childrenPadding (m/EdgeInsets.only .bottom 20)
       .initiallyExpanded initially-expanded
       .controlAffinity m.ListTileControlAffinity/leading
       .expandedCrossAxisAlignment m.CrossAxisAlignment/start
@@ -30,25 +32,26 @@
               .onSubmitted (on-rename-title store)
               .decoration nil
               .controller (m/TextEditingController. .text title))
-      .children (conj (mapv ui->widget tasks))))))
+      .children (mapv ui->widget tasks)))))
 
 (defn render-editable-task [ui]
   (let [{:keys [title on-complete on-edit-task-title completed subitems]} ui]
     (f/widget
      :get [:store]
+     :padding {:left 40}
      (m/Column)
      .children
-     [(m/Row .children
+     [(m/Row
+       .children
         [(f/widget
-          :padding {:right 0 :top 22}
-          (m/IconButton
-           .iconSize 22
-           .onPressed (on-complete store))
-          .icon
+          :padding {:right 5 :top 2}
+          (m/GestureDetector
+           .onTap (on-complete store))
           (m/Icon (if completed
                     m.Icons/check_box
                     m.Icons/check_box_outline_blank)
-                  .color m.Colors/pink))
+                  .color m.Colors/green
+                  .size 22))
          (f/widget
           (m/SizedBox .width 250)
           (m/TextField
@@ -67,16 +70,17 @@
 (defn render-ronly-task [ui]
   (let [{:keys [title completed subitems]} ui]
     (f/widget
+     :padding {:left 40}
      (m/Column)
      .children
      [(m/Row .children
         [(f/widget
-           :padding {:right 0 :top 2}
-           (m/Icon (if completed
-                          m.Icons/check_box
-                          m.Icons/check_box_outline_blank
-                        .size 22
-                        .color m.Colors/pink)))
+          :padding {:right 5 :top 2}
+          (m/Icon (if completed
+                         m.Icons/check_box
+                         m.Icons/check_box_outline_blank)
+                  .size 22
+                  .color m.Colors/grey))
          (f/widget
           (m/SizedBox .width 250)
           (m/Text title
@@ -93,55 +97,59 @@
   (let [{:keys [time]} ui
         time (.parse DateTime time)]
     (f/widget
-     (m/Padding
-      .padding (m/EdgeInsets.only .left 15 .top 4 .bottom 4))
+     :padding {:left 15 :bottom 4}
      (m/Row
-      .children [(m/Icon m.Icons/subdirectory_arrow_right_rounded
-                      .size 16
-                      .color m.Colors/grey)
+      .children [
+                 (f/widget
+                  :padding {:bottom 2}
+                  (svg/SvgPicture.asset
+                   "assets/icons/ph--arrow-bend-down-right-duotone.svg"
+                   .colorFilter (m/ColorFilter.mode m/Colors.pink m/BlendMode.srcIn)
+                   .width 16
+                   .height 16))
                  (m/SizedBox .width 4)
                  (m/Text (str "Completed at " (.-hour time)":"(.-minute time))
                          .style (m/TextStyle
                                   .fontSize 14
                                   .fontWeight m.FontWeight/normal
-                                  .color m.Colors/grey))]))))
+                                  .color m.Colors/pink))]))))
 
 (defn render-subitem-image [ui]
   (let [{:keys [url]} ui]
     (f/widget
-      (m/Padding
-       .padding (m/EdgeInsets.only .left 15 .top 4 .bottom 4))
-      (m/Row
-       .crossAxisAlignment m.CrossAxisAlignment/start
-       .children [(m/Icon m.Icons/subdirectory_arrow_right_rounded
-                       .size 16
-                       .color m.Colors/orange)
-                  (m/SizedBox .width 4)
-                  (m/Container
-                   .width 200
-                   .height 120
-                   .decoration (m/BoxDecoration
-                                 .border (m/Border.all
-                                           .color m.Colors/orange
-                                           .width 2)
-                                 .borderRadius (m/BorderRadius.circular 8)
-                                 .image (m/DecorationImage
-                                          .fit m.BoxFit/cover
-                                          .image (m/NetworkImage url))))]))))
+     :padding {:left 15 :bottom 4}
+     (m/Row
+      .crossAxisAlignment m.CrossAxisAlignment/start
+      .children [(svg/SvgPicture.asset
+                  "assets/icons/ph--arrow-bend-down-right-duotone.svg"
+                  .colorFilter (m/ColorFilter.mode m/Colors.orange m/BlendMode.srcIn)
+                  .width 16
+                  .height 16)
+                 (m/SizedBox .width 4)
+                 (m/Container
+                  .width 200
+                  .height 120
+                  .decoration (m/BoxDecoration
+                                .border (m/Border.all
+                                          .color m.Colors/orange
+                                          .width 2)
+                                .borderRadius (m/BorderRadius.circular 8)
+                                .image (m/DecorationImage
+                                         .fit m.BoxFit/cover
+                                         .image (m/NetworkImage url))))]))))
 
 (defn render-friend-search-area [ui]
   (let [{:keys [on-search]} ui]
     (f/widget
      :key "friend-search-area"
      :get [:store]
-     :padding {:left 15 :bottom 12 :top 0}
+     :padding {:left 15 :bottom 15}
      (m/Row
       .children [(f/widget
-                  (m/Padding
-                   .padding (m/EdgeInsets.only .right 8 .top 2))
+                  :padding {:right 20 :top 2}
                   (m/Icon m.Icons/person_add
                           .size 22
-                          .color m.Colors/pink))
+                          .color m.Colors/black))
                  (f/widget
                   :let [text-controller (m/TextEditingController.)]
                   (m/SizedBox .width 180)
@@ -164,12 +172,13 @@
   (let [{:keys [on-add-task]} ui]
     (f/widget
      :get [:store]
+     :padding {:left 40}
      (m/Row
       .children [(f/widget
-                  :padding {:right 8 :top 2}
+                  :padding {:right 5 :top 2}
                   (m/Icon m.Icons/add
                           .size 22
-                          .color m.Colors/pink))
+                          .color m.Colors/green))
                  (f/widget
                   :let [text-controller (m/TextEditingController.)]
                   (m/SizedBox .width 180)

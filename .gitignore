@@ -60,3 +60,4 @@ test/cljd-out/
 /macos/
 /web/
 /windows/
+/REPL.lock

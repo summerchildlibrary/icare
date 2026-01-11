@@ -63,7 +63,7 @@
                                       (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
                                                                (subvec tasks (inc task-idx))))))
                                (swap! store assoc-in
-                                      [:reorderable-items reorderable-item-idx task-idx :title] value))))
+                                      [:reorderable-items reorderable-item-idx :tasks task-idx :title] value))))
 
 
      :completed completed
@@ -90,8 +90,7 @@
 
 (defn person->ui [reorderable-item-idx person]
   (let [{:keys [user? name tasks uuid]} person
-        tasks (mapv #(conj % {:reorderable-item-idx reorderable-item-idx}) tasks)
-        task->ui (if user? user-task->ui friend-task->ui)]
+        tasks (mapv #(conj % {:reorderable-item-idx reorderable-item-idx}) tasks)]
     {:ui-type :task-card
      :initially-expanded user?
      :add-tasks? user?
@@ -99,11 +98,15 @@
      :title name
      :on-rename-title (fn [store]
                         (fn [value]
-                          (when (not (empty? value))
+                          (if (empty? value)
+                            (swap! store update :reorderable-items
+                                   (fn [items]
+                                     (vec (concat (subvec items 0 reorderable-item-idx)
+                                                  (subvec items (inc reorderable-item-idx))))))
                             (swap! store assoc-in [:reorderable-items reorderable-item-idx :name] value))))
      :tasks (if user?
-              (conj (mapv task->ui (range) tasks) (add-tasks->ui reorderable-item-idx))
-              (mapv task->ui (range) tasks))}))
+              (conj (mapv user-task->ui (range) tasks) (add-tasks->ui reorderable-item-idx))
+              (mapv friend-task->ui (range) tasks))}))
 
 (defn friend-search->ui []
   {:ui-type :friend-search-area

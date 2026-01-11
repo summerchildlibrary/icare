@@ -8,8 +8,7 @@
   (f/run
     :bind {:store store}
     (m/MaterialApp
-      .title "iCare"
-      .theme (m/ThemeData .primarySwatch m.Colors/pink))
+      .title "iCare")
     .home
     (m/Scaffold)
     .body
@@ -17,4 +16,4 @@
     :watch [state store]
     (-> state                   ;;state is the end-user representation of the app
         state->ui               ;;ui is the programmers representation of the app
-        ui->widget)))          ;;widgets are the machine representation of the app
+        ui->widget)))           ;;widgets are the machine representation of the app
