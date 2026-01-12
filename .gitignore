@@ -53,7 +53,8 @@ test/cljd-out/
 /.nrepl-port
 /.gitattributes
 /analysis_options.yaml
-/android/
+
+# Magit
 /ios/
 /lib/
 /linux/

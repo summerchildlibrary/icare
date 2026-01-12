@@ -78,7 +78,7 @@
 
 (defn add-tasks->ui [reorderable-item-idx]
   {:ui-type :add-task-area
-   :on-add-task (fn [store text-controller]
+   :on-add-task (fn [store ^m/TextEditingController text-controller]
                   (fn [value]
                     (.clear text-controller)
                     (when (not (empty? value))
@@ -110,7 +110,7 @@
 
 (defn friend-search->ui []
   {:ui-type :friend-search-area
-   :on-search (fn [store text-controller]
+   :on-search (fn [store ^m/TextEditingController text-controller]
                 (fn [value]
                   (.clear text-controller)
                   (when (not (empty? value))

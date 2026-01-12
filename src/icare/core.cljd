@@ -1,11 +1,33 @@
 (ns icare.core
   (:require ["package:flutter/material.dart" :as m]
+            ["package:dart_nostr/dart_nostr.dart" :refer [Nostr NostrKeyPairs]]
+            ["package:flutter_secure_storage/flutter_secure_storage.dart" :refer [FlutterSecureStorage]]
             [cljd.flutter :as f]
             [icare.state :refer [store state->ui]]
             [icare.ui :refer [ui->widget]]))
 
+(defn get-secure-credentials-future [key-generator]
+  (let [storage (FlutterSecureStorage)
+        contains-private-key? (await (.containsKey storage .key "private-key"))
+        contains-public-key? (await (.containsKey storage .key "public-key"))]
+    (cond
+      (and contains-private-key? contains-public-key?)
+      (let [private-key (await (.read storage .key "private-key"))
+            public-key (await (.read storage .key "public-key"))]
+        [private-key public-key])
+
+      (and (not contains-private-key?) (not contains-public-key?))
+      (let [{:flds [private public]} ^NostrKeyPairs (key-generator)]
+        (await (.write storage .key "private-key" .value private))
+        (await (.write storage .key "public-key" .value public))
+        [private public])
+
+      :else (throw (Exception. "Secure credentials exist partially")))))
+
 (defn main []
   (f/run
+    :let [nostr-instance Nostr.instance
+          credentials-future (get-secure-credentials-future (.-generateKeyPair (.-keysService nostr-instance)))]
     :bind {:store store}
     (m/MaterialApp
       .title "iCare")
@@ -13,7 +35,17 @@
     (m/Scaffold)
     .body
     (m/SafeArea)
-    :watch [state store]
-    (-> state                   ;;state is the end-user representation of the app
-        state->ui               ;;ui is the programmers representation of the app
-        ui->widget)))           ;;widgets are the machine representation of the app
+    (m/FutureBuilder
+     .future credentials-future
+     .builder (fn [context ^m/AsyncSnapshot snapshot]
+                (cond
+                  (.-hasData snapshot)
+                  (let [[private-key public-key] (.-data snapshot)]
+                    (f/widget
+                     :watch [state store]
+                     (-> state                   ;;state is the end-user representation of the app
+                         state->ui               ;;ui is the programmers representation of the app
+                         ui->widget)))           ;;widgets are the machine representation of the app
+
+                  :else
+                  (m/Text "Loading..."))))))
