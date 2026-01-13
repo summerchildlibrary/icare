@@ -5,7 +5,7 @@
             ["package:flutter_svg/flutter_svg.dart" :as svg]))
 
 (defn render-reorderable-list [ui]
-  (let [{:keys [ui-type on-reorder items]} ui]
+  (let [{:keys [on-reorder items]} ui]
     (f/widget
       :get [:store]
       (m/ReorderableListView
@@ -14,7 +14,7 @@
        .children (mapv ui->widget items)))))
 
 (defn render-task-card [ui]
-  (let [{:keys [initially-expanded title on-rename-title add-tasks? key title tasks]} ui]
+  (let [{:keys [initially-expanded title on-rename-title key title tasks]} ui]
     (f/widget
      :key key
      :get [:store]
@@ -68,8 +68,9 @@
       (m/Column .children (mapv ui->widget subitems))])))
 
 (defn render-ronly-task [ui]
-  (let [{:keys [title completed subitems]} ui]
+  (let [{:keys [title completed subitems liked on-liked]} ui]
     (f/widget
+     :get [:store]
      :padding {:left 40}
      (m/Column)
      .children
@@ -77,10 +78,10 @@
         [(f/widget
           :padding {:right 5 :top 2}
           (m/Icon (if completed
-                         m.Icons/check_box
-                         m.Icons/check_box_outline_blank)
+                         m/Icons.check_box
+                         m/Icons.check_box_outline_blank)
                   .size 22
-                  .color m.Colors/grey))
+                  .color m/Colors.grey))
          (f/widget
           (m/SizedBox .width 250)
           (m/Text title
@@ -89,8 +90,16 @@
                            .fontWeight m.FontWeight/normal
                            .color m.Colors/black
                            .decoration (if completed
-                                         m.TextDecoration/lineThrough
-                                         m.TextDecoration/none))))])
+                                         m/TextDecoration.lineThrough
+                                         m/TextDecoration.none))))
+         (f/widget
+          (m/GestureDetector
+           .onTap (on-liked store))
+          (m/Icon (if liked
+                    m/Icons.favorite
+                    m/Icons.favorite_border)
+                  .size 22
+                  .color m/Colors.red))])
       (m/Column .children (mapv ui->widget subitems))])))
 
 (defn render-subitem-time [ui]
@@ -171,7 +180,7 @@
 (defn render-add-task-area [ui]
   (let [{:keys [on-add-task]} ui]
     (f/widget
-     :get [:store]
+     :get [:store :uuid]
      :padding {:left 40}
      (m/Row
       .children [(f/widget
@@ -180,11 +189,12 @@
                           .size 22
                           .color m.Colors/green))
                  (f/widget
-                  :let [text-controller (m/TextEditingController.)]
+                  :let [text-controller (m/TextEditingController.)
+                        randomHexGenerator (.-v4 uuid)]
                   (m/SizedBox .width 180)
                   (m/TextField
                    .textInputAction m.TextInputAction/done
-                   .onSubmitted (on-add-task store text-controller)
+                   .onSubmitted (on-add-task store text-controller randomHexGenerator)
                    .decoration (m/InputDecoration
                                  .hintText "New Task..."
                                  .hintStyle (m/TextStyle
@@ -197,15 +207,128 @@
                             .fontWeight m.FontWeight/normal
                             .color m.Colors/black)))]))))
 
+(defn render-undo-redo-area [ui]
+  (let [{:keys [x y on-undo on-redo on-move]} ui]
+    (f/widget
+     :get [:store]
+     :let [left-width (atom 50)
+           right-width (atom 50)]
+     (m/Positioned
+      .left x
+      .top y)
+     (m/Opacity
+      .opacity 0.7)
+     (m/SizedBox
+      .width 170
+      .height 60)
+     (m/GestureDetector
+       .onPanUpdate (on-move store))
+     (m/Center)
+     (m/Row
+      .mainAxisAlignment m.MainAxisAlignment/center
+      .children [(f/widget
+                   (m/GestureDetector
+                    .onTap (fn []
+                             (reset! left-width 80)
+                             (Future.delayed (Duration .milliseconds 300)
+                                             (fn [] (reset! left-width 50) nil))
+                             nil))
+                   :watch [left-w left-width]
+                   m/Stack
+                   .children [(f/widget
+                               ;; (m/Positioned .right 0 .top 0 .bottom 0 .left 0)
+                               (m/AnimatedContainer
+                                 .duration (Duration .milliseconds 300)
+                                 .decoration (m/BoxDecoration
+                                               .color m.Colors/green
+                                               .borderRadius (m/BorderRadius.only
+                                                              .bottomLeft (m/Radius.circular 30)
+                                                              .topLeft (m/Radius.circular 30))
+                                               .boxShadow [(m/BoxShadow
+                                                             .color m.Colors/black26
+                                                             .blurRadius 8
+                                                             .offset (m/Offset. 0 4))])
+                                 .curve m/Curves.easeOutBack
+                                 .width left-w
+                                 .height 60))
+                              (f/widget
+                               (m/Positioned.fill)
+                               (m/Icon m/Icons.undo
+                                       .size 30
+                                       .color m.Colors/white))])
+                 (f/widget
+                  (m/Container
+                   .width 6))
+                 (f/widget
+                  (m/GestureDetector
+                    .onTap (fn []
+                             (reset! right-width 80)
+                             (Future.delayed (Duration .milliseconds 300)
+                                             (fn [] (reset! right-width 50) nil))
+                             nil))
+                  :watch [right-w right-width]
+                   m/Stack
+                   .children [(m/AnimatedContainer
+                                .duration (Duration .milliseconds 300)
+                                .decoration (m/BoxDecoration
+                                              .color m.Colors/green
+                                              .borderRadius (m/BorderRadius.only
+                                                             .topRight (m/Radius.circular 30)
+                                                             .bottomRight (m/Radius.circular 30))
+                                              .boxShadow [(m/BoxShadow
+                                                            .color m.Colors/black26
+                                                            .blurRadius 8
+                                                            .offset (m/Offset. 0 4))])
+                                .curve m/Curves.easeOutBack
+                                .width right-w
+                               .height 60)
+                              (m/Positioned.fill
+                                .child (m/Icon m/Icons.redo
+                                               .size 30
+                                               .color m.Colors/white))])]))))
+
+     ;; (m/Row
+     ;;  .mainAxisAlignment m.MainAxisAlignment/center
+     ;;  .children [(f/widget
+     ;;              :padding {:right 10}
+     ;;              (m/GestureDetector
+     ;;               .onTap (on-undo store))
+     ;;              (m/Icon m.Icons/undo
+     ;;                      .size 30
+     ;;                      .color m.Colors/white))
+     ;;             (f/widget
+     ;;              (m/AnimatedContainer
+     ;;               .color m.Colors/white
+     ;;               .duration (Duration .milliseconds 300)
+     ;;               .width 5))
+     ;;             (f/widget
+     ;;              :padding {:left 10}
+     ;;              (m/GestureDetector
+     ;;               .onTap (on-redo store))
+     ;;              (m/Icon m.Icons/redo
+     ;;                      .size 30
+     ;;                      .color m.Colors/white))]))))
+
+
+(defn render-screen-base [ui]
+  (let [{:keys [undo-redo reorderable-list]} ui]
+    (f/widget
+     m/Stack
+     .children
+     [(ui->widget reorderable-list)
+      (ui->widget undo-redo)])))
+
 (defn ui->widget [ui]
   (let [{:keys [ui-type]} ui]
-   (cond
-     (= ui-type :reorderable-list)   (render-reorderable-list ui)
-     (= ui-type :task-card)          (render-task-card ui)
-     (= ui-type :ronly-task)         (render-ronly-task ui)
-     (= ui-type :editable-task)      (render-editable-task ui)
-     (= ui-type :subitem-time)       (render-subitem-time ui)
-     (= ui-type :subitem-image)      (render-subitem-image ui)
-     (= ui-type :friend-search-area) (render-friend-search-area ui)
-     (= ui-type :add-task-area)      (render-add-task-area ui)
+   (condp = ui-type
+     :screen-base            (render-screen-base ui)
+     :undo-redo-area         (render-undo-redo-area ui)
+     :reorderable-list       (render-reorderable-list ui)
+     :task-card              (render-task-card ui)
+     :ronly-task             (render-ronly-task ui)
+     :editable-task          (render-editable-task ui)
+     :subitem-time           (render-subitem-time ui)
+     :subitem-image          (render-subitem-image ui)
+     :friend-search-area     (render-friend-search-area ui)
+     :add-task-area          (render-add-task-area ui)
      :else (throw (Exception. (str "ui->widget tried to render an unknonw ui element: " ui))))))
