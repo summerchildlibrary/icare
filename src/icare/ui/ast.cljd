@@ -1,7 +1,8 @@
 (ns icare.ui.ast
   (:require ["package:flutter/material.dart" :as m]
             ["package:uuid/uuid.dart" :refer [Uuid]]
-            [icare.state :refer [dispatch!] :rename {dispatch! state-dispatch!}]
+            [icare.state :refer [dispatch! gather-pub-keys-and-uuids get-user-pub-key]
+             :rename {dispatch! state-dispatch!}]
             [icare.network :refer [dispatch!] :rename {dispatch! network-dispatch!}]))
 
 (def uuid-generator (.-v4 (Uuid)))
@@ -16,7 +17,7 @@
       :else (throw (Exception. (str "task-subitems->ast was given a task subitem with unknown type: " type))))))
 
 (defn user-task->ast [task-idx task]
-  (let [{:keys [title completed subitems reorderable-item-idx]} task]
+  (let [{:keys [title completed subitems reorderable-item-idx liked-by]} task]
     {:ui-type :editable-task
      :title title
      :on-complete (fn []
@@ -34,7 +35,10 @@
                                                :task-idx task-idx
                                                :title title})))
      :completed completed
-     :subitems (mapv task-subitems->ast subitems)}))
+     :subitems (mapv task-subitems->ast
+                     (if (seq liked-by)
+                       (concat [{:type :liked-list :value liked-by}] subitems)
+                       subitems))}))
 
 (defn friend-task->ast [task-idx task]
   (let [{:keys [title completed liked subitems reorderable-item-idx creator-pub-key uuid]} task]
@@ -42,7 +46,7 @@
      :title title
      :completed completed
      :on-liked (fn []
-                 (network-dispatch! {:type :send-liked-event
+                 (network-dispatch! {:type :liked-event
                                      :liked (not liked)
                                      :creator-pub-key creator-pub-key
                                      :task-uuid uuid})
@@ -59,14 +63,21 @@
                   (when (not (empty? value))
                     (let [new-task {:title value
                                     :uuid (uuid-generator)
+                                    :liked-by #{}
                                     :completed false
                                     :subitems []}]
-                      (network-dispatch! {:type :send-update-task-event
-                                          :task new-task
-                                          :task-uuid (:uuid new-task)})
                       (state-dispatch! {:type :add-user-task
                                         :user-card-idx reorderable-item-idx
-                                        :new-task new-task}))))})
+                                        :new-task new-task})
+                      (network-dispatch! {:type :update-task-event
+                                          :task new-task
+                                          :task-uuid (:uuid new-task)})
+                      (let [{:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids)
+                            user-pub-key (get-user-pub-key)]
+                        (network-dispatch! {:type :reactions-request
+                                            :user-pub-key user-pub-key
+                                            :user-task-uuids user-task-uuids
+                                            :friend-pub-keys friend-pub-keys})))))})
 
 (defn person->ast [reorderable-item-idx person]
   (let [{:keys [user? name tasks pub-key]} person
@@ -87,9 +98,21 @@
               (conj (mapv user-task->ast (range) tasks) (add-tasks->ast reorderable-item-idx))
               (mapv friend-task->ast (range) tasks))}))
 
+;;TODO we probably don't want a friend search, easier to
+;;have local discovery and adding friends via sharing links
+;;either way this is just for demo purposes
 (defn friend-search->ast []
   {:ui-type :friend-search-area
    :on-search (fn [value]
+                (let [{:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids)
+                      user-pub-key (get-user-pub-key)]
+                  (when-not (empty? value)
+                    (network-dispatch! {:type :tasks-request
+                                        :friend-pub-keys (conj friend-pub-keys value)})
+                    (network-dispatch! {:type :reactions-request
+                                        :user-pub-key user-pub-key
+                                        :user-task-uuids user-task-uuids
+                                        :friend-pub-keys (conj friend-pub-keys value)})))
                 (state-dispatch! {:type :add-friend
                                   :pub-key value}))})
 

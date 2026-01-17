@@ -2,9 +2,10 @@
   (:require ["package:nostr/nostr.dart" :refer [Event Request Filter]]
             ["dart:io" :refer [WebSocket]]
             ["dart:convert" :refer [jsonDecode]]
-            [cljd.reader :refer [read-string]]))
+            [cljd.reader :refer [read-string]]
+            [icare.state :refer [dispatch!] :rename {dispatch! state-dispatch!}]))
 
-(defonce send-events false)
+(defonce send-events true)
 (defonce initialized? (atom false))
 (defonce private-key (atom nil))
 (defonce web-socket (atom nil))
@@ -14,22 +15,6 @@
 (def liked-event-kind 39506)
 (def update-task-event-kind 39505)
 
-(defn generate-reactions-request [user-pub-key user-task-uuids friend-pub-keys]
-  (let [a-tags (mapv (fn [task-uuid]
-                       (str update-task-event-kind ":" user-pub-key ":" task-uuid))
-                    user-task-uuids)]
-    (Request "reactions"
-             [(Filter
-               .authors friend-pub-keys
-               .kinds [liked-event-kind]
-               .a a-tags)])))
-
-(defn generate-tasks-request [friend-pub-keys]
-  (Request "tasks"
-           [(Filter
-             .authors friend-pub-keys
-             .kinds [update-task-event-kind])]))
-
 (defn handle-event [data]
   (try
     (let [subscription-id (get data 1)
@@ -37,18 +22,27 @@
           event ^Event (.fromJson Event event-json)]
       (condp = (.-kind event)
         liked-event-kind
-        (do
-          ;; (dispatch-to-state-manager! {:type :liked-event :content (read-string (.-content event))})
+        (let [content-map (read-string (.-content event))
+              task-uuid (get content-map :task-uuid)
+              liked (get content-map :liked)
+              creator-pub-key (.-pubkey event)]
+          (state-dispatch! {:type :liked-event :liked liked
+                            :task-uuid task-uuid :creator-pub-key creator-pub-key})
           (prn "Received liked event:" (.-content event) "with tags:" (.-tags event)))
 
         update-task-event-kind
-        (do
-          ;; (dispatch-to-state-manager! {:type :update-task-event :event event})
-          (prn "Received update task event:" (.-content event) "with tags:" (.-tags event)))
+        (let [task-data (read-string (.-content event))
+              d-tags (.-tags event)
+              task-uuid (second d-tags)
+              creator-pub-key (.-pubkey event)]
+          (when-not (nil? task-data)
+            (state-dispatch! {:type :update-task-event :task task-data
+                              :task-uuid task-uuid :creator-pub-key creator-pub-key})
+            (prn "Received update task event:" task-data "with tags:" (.-tags event))))
 
         (prn "Unhandled event kind:" (.-kind event) "with content:" (.-content event))))
     (catch Exception e
-      (prn "Event message from server does not comply to NIP01:" e))))
+      (prn "Event message from server does not comply to either NIP01 or my custom protocol:" e))))
 
 (defn handle-ok [data]
   (try
@@ -62,44 +56,6 @@
                                                               message "No message"))))
     (catch Exception e
       (prn "Ok message from server does not comply to NIP01:" e))))
-
-;;we want to support offline first workflows
-;;that means that the first time we connect to the websocket
-;;we should resend all our tasks and receive all possible tasks
-;;if we can't connect, don't even try to queue just don't send anything because we can't
-;;the next time we connect we will resend everything
-
-(defn generate-liked-event [liked creator-pub-key task-uuid]
-  (.from Event
-         .kind liked-event-kind
-         .content (prn-str {:liked liked :task-uuid task-uuid})
-         .tags [(.from #/(List String) ["a" (str update-task-event-kind ":" creator-pub-key ":" task-uuid)])]
-         .privkey @private-key))
-
-(defn send-liked-event! [event]
-  (let [{:keys [liked creator-pub-key task-uuid]} event
-        event ^Event (generate-liked-event liked creator-pub-key task-uuid)]
-    (.add ^WebSocket @web-socket (.serialize event))))
-
-(defn generate-update-task-event [task-data task-uuid]
-  (.from Event
-         .kind update-task-event-kind
-         .content (prn-str task-data)
-         .tags [(.from #/(List String) ["d" task-uuid])]
-         .privkey @private-key))
-
-(defn send-update-task-event! [event]
-  (let [{:keys [task-data task-uuid]} event
-        event ^Event (generate-update-task-event task-data task-uuid)]
-    (.add ^WebSocket @web-socket (.serialize event))))
-
-(defn dispatch! [action]
-  (if (and send-events @web-socket @initialized?)
-    (condp = (:type action)
-      :send-liked-event (send-liked-event! action)
-      :send-update-task-event (send-update-task-event! action)
-      (prn "Unhandled action type in network manager:" (:type action)))
-    (prn "WebSocket not initialized")))
 
 (defn initialize-web-socket! []
   (when-not @web-socket
@@ -127,6 +83,66 @@
 
 (defn initialize-network! [new-private-key]
   (when-not @initialized?
+    (prn "Initializing network manager...")
     (reset! initialized? true)
     (reset! private-key new-private-key)
     (initialize-web-socket!)))
+
+;;we want to support offline first workflows
+;;that means that the first time we connect to the websocket
+;;we should resend all our tasks and receive all possible tasks
+;;if we can't connect, don't even try to queue just don't send anything because we can't
+;;the next time we connect we will resend everything
+
+(defn generate-liked-event [event]
+  (let [{:keys [liked creator-pub-key task-uuid]} event]
+    (-> (.from Event
+               .kind liked-event-kind
+               .content (prn-str {:liked liked :task-uuid task-uuid})
+               .tags [(.from #/(List String) ["a" (str update-task-event-kind ":" creator-pub-key ":" task-uuid)])]
+               .privkey @private-key)
+        .serialize)))
+
+(defn generate-update-task-event [event]
+  (let [{:keys [task task-uuid]} event]
+    (-> (.from Event
+               .kind update-task-event-kind
+               .content (prn-str task)
+               .tags [(.from #/(List String) ["d" task-uuid])]
+               .privkey @private-key)
+        .serialize)))
+
+(defn generate-reactions-request [event]
+  (let [{:keys [user-pub-key user-task-uuids friend-pub-keys]} event
+        a-tags (or (mapv (fn [task-uuid]
+                           (str update-task-event-kind ":" user-pub-key ":" task-uuid))
+                        user-task-uuids)
+                   [])]
+    (-> (Request "reactions"
+                 [(Filter
+                   .authors friend-pub-keys
+                   .kinds [liked-event-kind]
+                   .a a-tags)])
+        .serialize)))
+
+(defn generate-tasks-request [event]
+  (let [{:keys [friend-pub-keys]} event]
+    (-> (Request "tasks"
+                 [(Filter
+                   .authors friend-pub-keys
+                   .kinds [update-task-event-kind])])
+        .serialize)))
+
+(defn create-message [event]
+  (condp = (:type event)
+    :liked-event (generate-liked-event event)
+    :update-task-event (generate-update-task-event event)
+    :reactions-request (generate-reactions-request event)
+    :tasks-request (generate-tasks-request event)
+    (prn "Unhandled action type in network manager:" (:type event))))
+
+(defn dispatch! [event]
+  (if (and send-events @web-socket @initialized?)
+    (do (.add ^WebSocket @web-socket (create-message event))
+        (prn "Sent event to relay:" (create-message event)))
+    (prn "WebSocket not initialized while trying to send event:" (create-message event))))

@@ -14,15 +14,17 @@
                                            :tasks [{:title "wake up"
                                                     :uuid (uuid-generator)
                                                     :completed false
-                                                    :subitems [{:type :liked-list :value #{1}}]}
+                                                    :liked-by #{1}
+                                                    :subitems []}
                                                    {:title "go to monkey bars"
                                                     :uuid (uuid-generator)
                                                     :completed true
+                                                    :liked-by #{}
                                                     :subitems [{:type :time :value "2026-01-06 09:18:04Z"}
                                                                {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
                                           {:type :friend
                                            :name "Jun"
-                                           :pub-key 1
+                                           :pub-key "b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"
                                            :tasks [{:title "Defeated bear"
                                                     :uuid (uuid-generator)
                                                     :liked false
@@ -42,7 +44,7 @@
                                           {:type :friend-search}]
                       :undo-redo {:x 240 :y 700}}))
 
-;;Helper functions. Read only
+;;Helper functions. Read only operations.
 
 (defn friend-search-at-bottom? [reorderable-items]
   (= :friend-search (:type (last reorderable-items))))
@@ -58,16 +60,24 @@
   (let [{:keys [tasks]} person]
     (mapv (fn [task] (:uuid task)) tasks)))
 
-(defn gather-pub-keys-and-uuids [state]
-  (reduce
-   (fn [acc reorderable-item]
-     (condp = (:type reorderable-item)
-       :user (assoc acc :user-task-uuids (get-person-task-uuids reorderable-item))
-       :friend (update acc :friend-pub-keys conj (:pub-key reorderable-item))
-       acc))
-   {:user-task-uuids nil
-    :friend-pub-keys []}
-   (:reorderable-items state)))
+(defn gather-pub-keys-and-uuids []
+  (let [reorderable-items (:reorderable-items @store)]
+    (reduce
+     (fn [acc reorderable-item]
+       (condp = (:type reorderable-item)
+         :user (assoc acc :user-task-uuids (get-person-task-uuids reorderable-item))
+         :friend (update acc :friend-pub-keys conj (:pub-key reorderable-item))
+         acc))
+     {:user-task-uuids nil
+      :friend-pub-keys []}
+     reorderable-items)))
+
+(defn get-user-pub-key []
+  (let [reorderable-items (:reorderable-items @store)]
+    (->> reorderable-items
+         (filter #(= :user (:type %)))
+         first
+         :pub-key)))
 
 (defn get-reorderable-item-idx-by-predicate [reorderable-items predicate]
   (->> reorderable-items
@@ -75,6 +85,9 @@
        (filter (fn [[idx item]] (predicate item)))
        first
        ((fn [[idx item]] idx))))
+
+(defn uuid->task-idx [tasks task-uuid]
+  (get-reorderable-item-idx-by-predicate tasks #(= (:uuid %) task-uuid)))
 
 (defn pub-key->reorderable-item-idx [reorderable-items pub-key]
   (get-reorderable-item-idx-by-predicate
@@ -91,16 +104,43 @@
 ;;
 ;;
 
-;;TODO we need to something about network event
+;;TODO we need to something about events coming through the network
 ;;so that we can batch them. Not neccessary now.
 ;;network event handler
-(defn handle-liked-event [state event])
+(defn handle-liked-event [state event]
+  (let [{:keys [liked task-uuid creator-pub-key]} event
+        user-card-idx (get-user-reorderable-item-idx (:reorderable-items state))
+        task-idx (uuid->task-idx
+                  (get-in state [:reorderable-items user-card-idx :tasks])
+                  task-uuid)]
+    (if liked
+      (update-in state
+                [:reorderable-items user-card-idx :tasks task-idx :liked-by]
+                conj creator-pub-key)
+      (update-in state
+                [:reorderable-items user-card-idx :tasks task-idx :liked-by]
+                disj creator-pub-key))))
 
 ;;network event handler
-(defn handle-update-task-event [state event])
+(defn handle-update-task-event [state event]
+  (let [{:keys [task task-uuid creator-pub-key]} event
+        card-idx (pub-key->reorderable-item-idx
+                   (:reorderable-items state)
+                   creator-pub-key)
+        task-idx (uuid->task-idx
+                  (get-in state [:reorderable-items card-idx :tasks])
+                  task-uuid)]
+    (cond
+      (nil? card-idx) state ;;we don't have this person yet
+      (nil? task-idx) (update-in state ;;new task
+                                [:reorderable-items card-idx :tasks]
+                                conj task)
+      :else (assoc-in state ;;update existing task
+                      [:reorderable-items card-idx :tasks task-idx]
+                      task))))
 
 (defn handle-complete-user-task[state event]
-  (let [{:keys [user-card-idx task-idx completed]} event]
+  (let [{:keys [user-card-idx task-idx completed creator-pub-key]} event]
     (update-in state [:reorderable-items user-card-idx :tasks task-idx]
            (fn [task]
              (let [new-task (assoc task :completed completed)]
@@ -157,7 +197,7 @@
       (update state :reorderable-items
               (fn [items]
                 (let [new-friend {:type :friend
-                                  :pub-key (uuid-generator) ;;obviously this is wrong TODO
+                                  :pub-key pub-key ;;obviously this is wrong TODO
                                   :name pub-key ;;obviously this is wrong TODO
                                   :tasks []}]
                   (if (friend-search-at-bottom? items)
@@ -226,6 +266,7 @@
 
 ;;Call this function from core, this is the intended way to get a reference to the store
 (defn initialize-state! [pub-key]
+  (prn "Initializing state with pub key:" pub-key)
   (reset! initialized? true)
   (update-user-pub-key! pub-key)
   store)
