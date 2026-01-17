@@ -17,14 +17,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.13.0"
+  bech32:
+    dependency: transitive
+    description:
+      name: bech32
+      sha256: "156cbace936f7720c79a79d16a03efad343b1ef17106716e04b8b8e39f99f7f7"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.2"
   bip340:
     dependency: transitive
     description:
       name: bip340
-      sha256: "9a2f454d3f5e2d67a1b21494203132786d95bde8784e7ada74adac00df3ddc11"
+      sha256: "2a92f6ed68959f75d67c9a304c17928b9c9449587d4f75ee68f34152f7f69e87"
       url: "https://pub.dev"
     source: hosted
-    version: "0.1.0"
+    version: "0.2.0"
   boolean_selector:
     dependency: transitive
     description:
@@ -81,22 +89,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.8"
-  dart_nostr:
-    dependency: "direct main"
-    description:
-      name: dart_nostr
-      sha256: f46a8a6d61d34411f9a21deb4e864a2445ff9ef04e6f2363c58639f739278c2f
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.3-dev"
-  equatable:
-    dependency: transitive
-    description:
-      name: equatable
-      sha256: "3e0141505477fd8ad55d6eb4e7776d3fe8430be8e497ccb1521370c3f21a3e2b"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.0.8"
   fake_async:
     dependency: transitive
     description:
@@ -280,6 +272,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.17.0"
+  nostr:
+    dependency: "direct main"
+    description:
+      name: nostr
+      sha256: a99942e4eedd5823d16f42e6df96240488028666a329ee1047552f79db564123
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.5.0"
   path:
     dependency: transitive
     description:

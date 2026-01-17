@@ -1,23 +1,22 @@
-(ns icare.ui
+(ns icare.ui.build
   (:require ["package:flutter/material.dart" :as m]
+            ["package:flutter_svg/flutter_svg.dart" :as svg]
             [cljd.flutter :as f]
-            [icare.state :refer []]
-            ["package:flutter_svg/flutter_svg.dart" :as svg]))
+            [icare.state :refer [get-pub-to-name-map]]
+            [cljd.string :as str]))
 
 (defn render-reorderable-list [ui]
   (let [{:keys [on-reorder items]} ui]
     (f/widget
-      :get [:store]
       (m/ReorderableListView
        .padding (m/EdgeInsets.symmetric .horizontal 20)
-       .onReorder (on-reorder store)
-       .children (mapv ui->widget items)))))
+       .onReorder on-reorder
+       .children (mapv ast->widget items)))))
 
 (defn render-task-card [ui]
   (let [{:keys [initially-expanded title on-rename-title key title tasks]} ui]
     (f/widget
      :key key
-     :get [:store]
      (m/ExpansionTile
       .childrenPadding (m/EdgeInsets.only .bottom 20)
       .initiallyExpanded initially-expanded
@@ -29,15 +28,14 @@
                        .fontSize 22
                        .fontWeight m.FontWeight/bold
                        .color m.Colors/black)
-              .onSubmitted (on-rename-title store)
+              .onSubmitted on-rename-title
               .decoration nil
               .controller (m/TextEditingController. .text title))
-      .children (mapv ui->widget tasks)))))
+      .children (mapv ast->widget tasks)))))
 
 (defn render-editable-task [ui]
   (let [{:keys [title on-complete on-edit-task-title completed subitems]} ui]
     (f/widget
-     :get [:store]
      :padding {:left 40}
      (m/Column)
      .children
@@ -46,7 +44,7 @@
         [(f/widget
           :padding {:right 5 :top 2}
           (m/GestureDetector
-           .onTap (on-complete store))
+           .onTap on-complete)
           (m/Icon (if completed
                     m.Icons/check_box
                     m.Icons/check_box_outline_blank)
@@ -62,15 +60,14 @@
                            .decoration (if completed
                                          m.TextDecoration/lineThrough
                                          m.TextDecoration/none))
-           .onSubmitted (on-edit-task-title store)
+           .onSubmitted on-edit-task-title
            .decoration nil
            .controller (m/TextEditingController. .text title)))])
-      (m/Column .children (mapv ui->widget subitems))])))
+      (m/Column .children (mapv ast->widget subitems))])))
 
 (defn render-ronly-task [ui]
   (let [{:keys [title completed subitems liked on-liked]} ui]
     (f/widget
-     :get [:store]
      :padding {:left 40}
      (m/Column)
      .children
@@ -94,13 +91,39 @@
                                          m/TextDecoration.none))))
          (f/widget
           (m/GestureDetector
-           .onTap (on-liked store))
+           .onTap on-liked)
           (m/Icon (if liked
                     m/Icons.favorite
                     m/Icons.favorite_border)
                   .size 22
                   .color m/Colors.red))])
-      (m/Column .children (mapv ui->widget subitems))])))
+      (m/Column .children (mapv ast->widget subitems))])))
+
+(defn render-subitem-liked-list [ui]
+  (let [{:keys [liked-by]} ui]
+    (f/widget
+     :padding {:left 15 :bottom 4}
+     :let [liked-by (mapv (get-pub-to-name-map) liked-by)]
+     (m/Row
+      .children [(svg/SvgPicture.asset
+                  "assets/icons/ph--arrow-bend-down-right-duotone.svg"
+                  .colorFilter (m/ColorFilter.mode m/Colors.red m/BlendMode.srcIn)
+                  .width 16
+                  .height 16)
+                 (m/SizedBox .width 4)
+                 (m/Text (cond
+                           (= 1 (count liked-by))
+                           (str "Liked by " (first liked-by))
+
+                           (= 2 (count liked-by))
+                           (str "Liked by " (str/join " and " liked-by))
+
+                           :else (str "Liked by " (str/join ", " (butlast liked-by))
+                                      ", and " (last liked-by)))
+                    .style (m/TextStyle
+                             .fontSize 14
+                             .fontWeight m.FontWeight/normal
+                             .color m.Colors/red))]))))
 
 (defn render-subitem-time [ui]
   (let [{:keys [time]} ui
@@ -151,7 +174,6 @@
   (let [{:keys [on-search]} ui]
     (f/widget
      :key "friend-search-area"
-     :get [:store]
      :padding {:left 15 :bottom 15}
      (m/Row
       .children [(f/widget
@@ -164,7 +186,9 @@
                   (m/SizedBox .width 180)
                   (m/TextField
                    .textInputAction m.TextInputAction/done
-                   .onSubmitted (on-search store text-controller)
+                   .onSubmitted (fn [& args]
+                                  (.clear text-controller)
+                                  (apply on-search args))
                    .decoration (m/InputDecoration
                                  .hintText "Find Friend"
                                  .hintStyle (m/TextStyle
@@ -180,7 +204,6 @@
 (defn render-add-task-area [ui]
   (let [{:keys [on-add-task]} ui]
     (f/widget
-     :get [:store :uuid]
      :padding {:left 40}
      (m/Row
       .children [(f/widget
@@ -189,12 +212,13 @@
                           .size 22
                           .color m.Colors/green))
                  (f/widget
-                  :let [text-controller (m/TextEditingController.)
-                        randomHexGenerator (.-v4 uuid)]
+                  :let [text-controller (m/TextEditingController.)]
                   (m/SizedBox .width 180)
                   (m/TextField
                    .textInputAction m.TextInputAction/done
-                   .onSubmitted (on-add-task store text-controller randomHexGenerator)
+                   .onSubmitted (fn [& args]
+                                   (.clear text-controller)
+                                   (apply on-add-task args))
                    .decoration (m/InputDecoration
                                  .hintText "New Task..."
                                  .hintStyle (m/TextStyle
@@ -210,7 +234,6 @@
 (defn render-undo-redo-area [ui]
   (let [{:keys [x y on-undo on-redo on-move]} ui]
     (f/widget
-     :get [:store]
      :let [left-width (atom 50)
            right-width (atom 50)]
      (m/Positioned
@@ -222,7 +245,7 @@
       .width 170
       .height 60)
      (m/GestureDetector
-       .onPanUpdate (on-move store))
+       .onPanUpdate on-move)
      (m/Center)
      (m/Row
       .mainAxisAlignment m.MainAxisAlignment/center
@@ -243,7 +266,9 @@
                                                .color m.Colors/green
                                                .borderRadius (m/BorderRadius.only
                                                               .bottomLeft (m/Radius.circular 30)
-                                                              .topLeft (m/Radius.circular 30))
+                                                              .topLeft (m/Radius.circular 30)
+                                                              .topRight (m/Radius.circular 2)
+                                                              .bottomRight (m/Radius.circular 2))
                                                .boxShadow [(m/BoxShadow
                                                              .color m.Colors/black26
                                                              .blurRadius 8
@@ -274,7 +299,9 @@
                                               .color m.Colors/green
                                               .borderRadius (m/BorderRadius.only
                                                              .topRight (m/Radius.circular 30)
-                                                             .bottomRight (m/Radius.circular 30))
+                                                             .bottomRight (m/Radius.circular 30)
+                                                             .topLeft (m/Radius.circular 2)
+                                                             .bottomLeft (m/Radius.circular 2))
                                               .boxShadow [(m/BoxShadow
                                                             .color m.Colors/black26
                                                             .blurRadius 8
@@ -287,27 +314,6 @@
                                                .size 30
                                                .color m.Colors/white))])]))))
 
-     ;; (m/Row
-     ;;  .mainAxisAlignment m.MainAxisAlignment/center
-     ;;  .children [(f/widget
-     ;;              :padding {:right 10}
-     ;;              (m/GestureDetector
-     ;;               .onTap (on-undo store))
-     ;;              (m/Icon m.Icons/undo
-     ;;                      .size 30
-     ;;                      .color m.Colors/white))
-     ;;             (f/widget
-     ;;              (m/AnimatedContainer
-     ;;               .color m.Colors/white
-     ;;               .duration (Duration .milliseconds 300)
-     ;;               .width 5))
-     ;;             (f/widget
-     ;;              :padding {:left 10}
-     ;;              (m/GestureDetector
-     ;;               .onTap (on-redo store))
-     ;;              (m/Icon m.Icons/redo
-     ;;                      .size 30
-     ;;                      .color m.Colors/white))]))))
 
 
 (defn render-screen-base [ui]
@@ -315,10 +321,10 @@
     (f/widget
      m/Stack
      .children
-     [(ui->widget reorderable-list)
-      (ui->widget undo-redo)])))
+     [(ast->widget reorderable-list)
+      (ast->widget undo-redo)])))
 
-(defn ui->widget [ui]
+(defn ast->widget [ui]
   (let [{:keys [ui-type]} ui]
    (condp = ui-type
      :screen-base            (render-screen-base ui)
@@ -327,8 +333,9 @@
      :task-card              (render-task-card ui)
      :ronly-task             (render-ronly-task ui)
      :editable-task          (render-editable-task ui)
+     :subitem-liked-list     (render-subitem-liked-list ui)
      :subitem-time           (render-subitem-time ui)
      :subitem-image          (render-subitem-image ui)
      :friend-search-area     (render-friend-search-area ui)
      :add-task-area          (render-add-task-area ui)
-     :else (throw (Exception. (str "ui->widget tried to render an unknonw ui element: " ui))))))
+     (throw (Exception. (str "ast->widget tried to render an unknonw ui element: " ui))))))

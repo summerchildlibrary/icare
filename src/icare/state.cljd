@@ -1,40 +1,73 @@
 (ns icare.state
-  (:require ["package:flutter/material.dart" :as m]
-            [cljd.flutter :as f]))
+  (:require ["package:uuid/uuid.dart" :refer [Uuid]]))
 
-(def store (atom {:reorderable-items [{:type :user
-                                       :name "Me"
-                                       :pub-key nil
-                                       :tasks [{:title "wake up"
-                                                :uuid 0
-                                                :completed false
-                                                :subitems []}
-                                               {:title "go to monkey bars"
-                                                :uuid 1
-                                                :completed true
-                                                :subitems [{:type :time :value "2026-01-06 09:18:04Z"}
-                                                           {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
-                                      {:type :friend
-                                       :name "Jun"
-                                       :pub-key 1
-                                       :tasks [{:title "Defeated bear"
-                                                :uuid 2
-                                                :liked false
-                                                :completed false
-                                                :subitems []}
-                                               {:title "go to sleep"
-                                                :uuid 3
-                                                :liked false
-                                                :completed true
-                                                :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-                                               {:title "went for walk"
-                                                :uuid 4
-                                                :liked false
-                                                :completed true
-                                                :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                                           {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
-                                      {:type :friend-search}]
-                  :undo-redo {:x 240 :y 700}}))
+(def uuid-generator (.-v4 (Uuid)))
+
+
+;;This namespace defines all side effects on our store
+;;
+(defonce initialized? (atom false))
+
+(defonce store (atom {:reorderable-items [{:type :user
+                                           :name "Me"
+                                           :pub-key nil
+                                           :tasks [{:title "wake up"
+                                                    :uuid (uuid-generator)
+                                                    :completed false
+                                                    :subitems [{:type :liked-list :value #{1}}]}
+                                                   {:title "go to monkey bars"
+                                                    :uuid (uuid-generator)
+                                                    :completed true
+                                                    :subitems [{:type :time :value "2026-01-06 09:18:04Z"}
+                                                               {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
+                                          {:type :friend
+                                           :name "Jun"
+                                           :pub-key 1
+                                           :tasks [{:title "Defeated bear"
+                                                    :uuid (uuid-generator)
+                                                    :liked false
+                                                    :completed false
+                                                    :subitems []}
+                                                   {:title "go to sleep"
+                                                    :uuid (uuid-generator)
+                                                    :liked false
+                                                    :completed true
+                                                    :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                                                   {:title "went for walk"
+                                                    :uuid (uuid-generator)
+                                                    :liked false
+                                                    :completed true
+                                                    :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                                               {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
+                                          {:type :friend-search}]
+                      :undo-redo {:x 240 :y 700}}))
+
+;;Helper functions. Read only
+
+(defn friend-search-at-bottom? [reorderable-items]
+  (= :friend-search (:type (last reorderable-items))))
+
+(defn get-pub-to-name-map []
+  (let [reorderable-items (:reorderable-items @store)]
+    (into {}
+          (->> reorderable-items
+               (filter #(#{:friend :user} (:type %)))
+               (map (juxt :pub-key :name))))))
+
+(defn get-person-task-uuids [person]
+  (let [{:keys [tasks]} person]
+    (mapv (fn [task] (:uuid task)) tasks)))
+
+(defn gather-pub-keys-and-uuids [state]
+  (reduce
+   (fn [acc reorderable-item]
+     (condp = (:type reorderable-item)
+       :user (assoc acc :user-task-uuids (get-person-task-uuids reorderable-item))
+       :friend (update acc :friend-pub-keys conj (:pub-key reorderable-item))
+       acc))
+   {:user-task-uuids nil
+    :friend-pub-keys []}
+   (:reorderable-items state)))
 
 (defn get-reorderable-item-idx-by-predicate [reorderable-items predicate]
   (->> reorderable-items
@@ -53,168 +86,151 @@
    reorderable-items
    #(= (:type %) :user)))
 
-(defn update-user-pub-key! [store pub-key]
+;;
+;;DISPATCH HANDLERS
+;;
+;;
+
+;;TODO we need to something about network event
+;;so that we can batch them. Not neccessary now.
+;;network event handler
+(defn handle-liked-event [state event])
+
+;;network event handler
+(defn handle-update-task-event [state event])
+
+(defn handle-complete-user-task[state event]
+  (let [{:keys [user-card-idx task-idx completed]} event]
+    (update-in state [:reorderable-items user-card-idx :tasks task-idx]
+           (fn [task]
+             (let [new-task (assoc task :completed completed)]
+               (cond (and (not completed)
+                          (seq (:subitems new-task))
+                          (-> (:subitems new-task) first :type (= :time)))
+                     (update new-task
+                             :subitems subvec 1)
+                     completed
+                     (update new-task
+                             :subitems #(apply vector {:type :time
+                                                       :value (.toIso8601String (DateTime/now))} %))
+                     :else new-task))))))
+
+(defn handle-delete-user-task [state event]
+  (let [{:keys [user-card-idx task-idx]} event]
+    (update-in state [:reorderable-items user-card-idx :tasks]
+               (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
+                                        (subvec tasks (inc task-idx))))))))
+
+(defn handle-rename-user-task [state event]
+  (let [{:keys [user-card-idx task-idx title]} event]
+    (assoc-in state
+              [:reorderable-items user-card-idx :tasks task-idx :title]
+              title)))
+
+(defn handle-like-friend-task [state event]
+  (let [{:keys [friend-card-idx task-idx liked]} event]
+    (assoc-in state
+              [:reorderable-items friend-card-idx :tasks task-idx :liked]
+              liked)))
+
+(defn handle-add-user-task [state event]
+  (let [{:keys [user-card-idx new-task]} event]
+    (update-in state
+               [:reorderable-items user-card-idx :tasks]
+               conj new-task)))
+
+(defn handle-delete-card [state event]
+  (let [{:keys [card-idx]} event]
+    (update state :reorderable-items
+            (fn [items]
+              (vec (concat (subvec items 0 card-idx)
+                           (subvec items (inc card-idx))))))))
+(defn handle-rename-card [state event]
+  (let [{:keys [card-idx name]} event]
+    (assoc-in state
+              [:reorderable-items card-idx :name]
+              name)))
+
+(defn handle-add-friend [state event]
+  (let [{:keys [pub-key]} event]
+    (if-not (empty? pub-key)
+      (update state :reorderable-items
+              (fn [items]
+                (let [new-friend {:type :friend
+                                  :pub-key (uuid-generator) ;;obviously this is wrong TODO
+                                  :name pub-key ;;obviously this is wrong TODO
+                                  :tasks []}]
+                  (if (friend-search-at-bottom? items)
+                    (vec (concat (subvec items 0 (dec (count items)))
+                                 [new-friend]
+                                 (subvec items (dec (count items)))))
+                    (conj items new-friend)))))
+      state)))
+
+(defn handle-reorder-items [state event]
+  (let [{:keys [from-index to-index]} event]
+    (update state :reorderable-items
+            (fn [items]
+              (vec
+                (if (< from-index to-index)
+                  (concat (subvec items 0 from-index)
+                          (subvec items (inc from-index) (inc to-index))
+                          [(nth items from-index)]
+                          (subvec items (inc to-index)))
+                  (concat (subvec items 0 to-index)
+                          [(nth items from-index)]
+                          (subvec items to-index from-index)
+                          (subvec items (inc from-index)))))))))
+
+(defn handle-move-undo-redo [state event]
+  (let [{:keys [dx dy]} event]
+    (update-in state [:undo-redo]
+               (fn [undo-redo]
+                 (let [{:keys [x y]} undo-redo]
+                   {:x (+ x dx)
+                    :y (+ y dy)})))))
+
+(defn apply-state-event [state event]
+  (condp = (:type event)
+    :liked-event (handle-liked-event state event)
+    :update-task-event (handle-update-task-event state event)
+    :complete-user-task (handle-complete-user-task state event)
+    :delete-user-task (handle-delete-user-task state event)
+    :rename-user-task (handle-rename-user-task state event)
+    :like-friend-task (handle-like-friend-task state event)
+    :add-user-task (handle-add-user-task state event)
+    :delete-card (handle-delete-card state event)
+    :rename-card (handle-rename-card state event)
+    :add-friend (handle-add-friend state event)
+    :reorder-items (handle-reorder-items state event)
+    :move-undo-redo (handle-move-undo-redo state event)
+    (throw (Exception (str "No dispatch function found for event: " event)))))
+
+;;TODO
+;;at some point I'll have to implement event batching
+;;To do that, disptach network events should queue events
+;;then we have to write a flush function that clears the
+;;queue and runs swap! store (reduce #(... appply-network-event acc event) state queue)
+;;We should be careful about when to run this flush since we want to be fairly responsive...
+;;but you'll get the idea
+(defn dispatch! [event]
+  (if-not @initialized?
+    (throw (Exception. "State store not initialized yet! Call initialize-state! from core first."))
+    (swap! store apply-state-event event)))
+
+(defn update-user-pub-key! [pub-key]
   (swap! store update :reorderable-items
          (fn [items]
            (let [user-idx (get-user-reorderable-item-idx items)]
              (assoc-in items [user-idx :pub-key] pub-key)))))
 
-(defn friend-search-at-bottom? [reorderable-items]
-  (= :friend-search (:type (last reorderable-items))))
+;;Call this function from core, this is the intended way to get a reference to the store
+(defn initialize-state! [pub-key]
+  (reset! initialized? true)
+  (update-user-pub-key! pub-key)
+  store)
 
-(defn task-subitems->ui [subitem]
-  (let [{:keys [type value]} subitem]
-    (cond
-      (= type :time) {:ui-type :subitem-time :time value}
-      (= type :image) {:ui-type :subitem-image :url value}
-      :else (throw (Exception. (str "task-subitems->ui was given a task subitem with unknown type: " type))))))
-
-(defn user-task->ui [task-idx task]
-  (let [{:keys [title completed subitems reorderable-item-idx]} task]
-    {:ui-type :editable-task
-     :title title
-     :on-complete (fn [store]
-                    (fn []
-                      (swap! store update-in [:reorderable-items reorderable-item-idx :tasks task-idx]
-                             (fn [task]
-                               (let [new-task (assoc task :completed (not completed))]
-                                 (cond (and completed
-                                            (seq (:subitems new-task))
-                                            (-> (:subitems new-task) first :type (= :time)))
-                                       (update new-task
-                                               :subitems subvec 1)
-                                       (not completed)
-                                       (update new-task
-                                               :subitems #(apply vector {:type :time
-                                                                         :value (.toIso8601String (DateTime/now))} %))
-                                       :else new-task))))))
-     :on-edit-task-title (fn [store]
-                           (fn [value]
-                             (if (empty? value)
-                               (swap! store update-in [:reorderable-items reorderable-item-idx :tasks]
-                                      (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
-                                                               (subvec tasks (inc task-idx))))))
-                               (swap! store assoc-in
-                                      [:reorderable-items reorderable-item-idx :tasks task-idx :title] value))))
-
-
-     :completed completed
-     :subitems (mapv task-subitems->ui subitems)}))
-
-(defn friend-task->ui [task-idx task]
-  (let [{:keys [title completed liked subitems reorderable-item-idx]} task]
-    {:ui-type :ronly-task
-     :title title
-     :completed completed
-     :on-liked (fn [store]
-                 (fn []
-                   (swap! store assoc-in [:reorderable-items reorderable-item-idx :tasks task-idx :liked]
-                          (not liked))))
-
-     :liked liked
-     :subitems (mapv task-subitems->ui subitems)}))
-
-(defn add-tasks->ui [reorderable-item-idx]
-  {:ui-type :add-task-area
-   :on-add-task (fn [store ^m/TextEditingController text-controller random-hex-generator]
-                  (fn [value]
-                    (.clear text-controller)
-                    (when (not (empty? value))
-                      (swap! store update-in
-                             [:reorderable-items reorderable-item-idx :tasks]
-                             conj {:title value
-                                   :uuid (random-hex-generator)
-                                   :completed false
-                                   :subitems []}))))})
-
-(defn person->ui [reorderable-item-idx person]
-  (let [{:keys [user? name tasks pub-key]} person
-        tasks (mapv #(conj % {:reorderable-item-idx reorderable-item-idx}) tasks)]
-    {:ui-type :task-card
-     :initially-expanded user?
-     :add-tasks? user?
-     :key pub-key
-     :title name
-     :on-rename-title (fn [store]
-                        (fn [value]
-                          (if (empty? value)
-                            (swap! store update :reorderable-items
-                                   (fn [items]
-                                     (vec (concat (subvec items 0 reorderable-item-idx)
-                                                  (subvec items (inc reorderable-item-idx))))))
-                            (swap! store assoc-in [:reorderable-items reorderable-item-idx :name] value))))
-     :tasks (if user?
-              (conj (mapv user-task->ui (range) tasks) (add-tasks->ui reorderable-item-idx))
-              (mapv friend-task->ui (range) tasks))}))
-
-(defn friend-search->ui []
-  {:ui-type :friend-search-area
-   :on-search (fn [store ^m/TextEditingController text-controller]
-                (fn [value]
-                  (.clear text-controller)
-                  (when (not (empty? value))
-                    (swap! store update :reorderable-items
-                           (fn [items]
-                             (let [new-friend {:type :friend
-                                               :pub-key value ;;obviously this is wrong TODO
-                                               :name value
-                                               :tasks []}]
-                               (if (friend-search-at-bottom? items)
-                                 (vec (concat (subvec items 0 (dec (count items)))
-                                              [new-friend]
-                                              (subvec items (dec (count items)))))
-                                 (conj items new-friend))))))))})
-
-(defn list-item->ui [reorderable-item-idx item]
-  (let [{:keys [type]} item]
-    (cond
-      (= type :user) (person->ui reorderable-item-idx (conj item {:user? true}))
-      (= type :friend) (person->ui reorderable-item-idx (conj item {:user? false}))
-      (= type :friend-search) (friend-search->ui)
-      :else (throw (Exception. (str "list-item->ui was given a list item with unknown type: " type))))))
-
-(defn reorderable-list->ui [reorderable-items]
-  {:ui-type :reorderable-list
-   :on-reorder (fn [store]
-                 (fn [from-index to-index]
-                   (let [[from-index to-index] (if (< from-index to-index)
-                                                 [from-index (dec to-index)]
-                                                 [from-index to-index])
-                         reorder-state-list (fn [state]
-                                              (update state :reorderable-items
-                                                      (fn [items]
-                                                        (vec
-                                                          (if (< from-index to-index)
-                                                            (concat (subvec items 0 from-index)
-                                                                    (subvec items (inc from-index) (inc to-index))
-                                                                    [(nth items from-index)]
-                                                                    (subvec items (inc to-index)))
-                                                            (concat (subvec items 0 to-index)
-                                                                    [(nth items from-index)]
-                                                                    (subvec items to-index from-index)
-                                                                    (subvec items (inc from-index))))))))]
-                     (swap! store reorder-state-list))))
-
-   :items (mapv list-item->ui (range) reorderable-items)})
-
-(defn undo-redo->ui [undo-redo]
-  (let [{:keys [x y]} undo-redo]
-    {:ui-type :undo-redo-area
-     :x x
-     :y y
-     :on-move (fn [store]
-                (fn [^m/DragUpdateDetails details]
-                  (let [new-position (.-delta details)
-                        {:flds [dx dy]} new-position]
-                    (swap! store update :undo-redo
-                           (fn [{:keys [x y]}]
-                             {:x (+ x dx) :y (+ y dy)})))))
-
-     :on-undo identity
-     :on-redo identity}))
-
-(defn state->ui [state]
-  (let [{:keys [undo-redo reorderable-items]} state]
-    {:ui-type :screen-base
-     :undo-redo (undo-redo->ui undo-redo) ;
-     :reorderable-list (reorderable-list->ui reorderable-items)}))
+;;TODO derived state caching?
+;;things like pub-key->name list of friend pub keys ...
+;;although let's worry about the derived state performance issue when I actually start to get
+;;performance issues

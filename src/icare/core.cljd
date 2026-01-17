@@ -1,11 +1,12 @@
 (ns icare.core
   (:require ["package:flutter/material.dart" :as m]
-            ["package:dart_nostr/dart_nostr.dart" :refer [Nostr NostrKeyPairs]]
             ["package:flutter_secure_storage/flutter_secure_storage.dart" :refer [FlutterSecureStorage]]
-            ["package:uuid/uuid.dart" :refer [Uuid]]
+            ["package:nostr/nostr.dart" :refer [Keychain]]
             [cljd.flutter :as f]
-            [icare.state :refer [store state->ui update-user-pub-key!]]
-            [icare.ui :refer [ui->widget]]))
+            [icare.ui.ast :refer [state->ast]]
+            [icare.ui.build :refer [ast->widget]]
+            [icare.state :refer [initialize-state!]]
+            [icare.network :refer [initialize-network!]]))
 
 (defn ^Future get-secure-credentials-future [key-generator]
   (let [storage (FlutterSecureStorage)
@@ -18,7 +19,7 @@
         [private-key public-key])
 
       (and (not contains-private-key?) (not contains-public-key?))
-      (let [{:flds [private public]} ^NostrKeyPairs (key-generator)]
+      (let [{:flds [private public]} ^Keychain (key-generator)]
         (await (.write storage .key "private-key" .value private))
         (await (.write storage .key "public-key" .value public))
         [private public])
@@ -27,10 +28,7 @@
 
 (defn main []
   (f/run
-    :let [nostr-instance Nostr.instance
-          uuid (Uuid)
-          credentials-future (get-secure-credentials-future (.-generateKeyPair (.-keysService nostr-instance)))]
-    :bind {:store store :nostr nostr-instance :uuid uuid}
+    :let [credentials-future (get-secure-credentials-future (.-generate Keychain))]
     (m/MaterialApp
       .title "iCare")
     .home
@@ -39,16 +37,18 @@
     (m/SafeArea)
     (m/FutureBuilder
      .future credentials-future
-     .builder (fn [context ^m/AsyncSnapshot snapshot]
+     .initialData nil
+     .builder (fn [_ ^m/AsyncSnapshot snapshot]
                 (cond
-                  (.-hasData snapshot)
-                  (let [[private-key public-key] (.-data snapshot)]
-                    (update-user-pub-key! store public-key)
+                  (= m/ConnectionState.done (.-connectionState snapshot))
+                  (let [[private-key public-key] (.-data snapshot)
+                        store (initialize-state! public-key)]
+                    (initialize-network! private-key)
                     (f/widget
                      :watch [state store]
                      (-> state                   ;;state is the end-user representation of the app
-                         state->ui               ;;ui is the programmers representation of the app
-                         ui->widget)))           ;;widgets are the machine representation of the app
+                         state->ast              ;;ui is the programmers representation of the app
+                         ast->widget)))          ;;widgets are the machine representation of the app
 
                   :else
                   (m/Text "Loading..."))))))

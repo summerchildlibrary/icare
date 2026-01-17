@@ -54,6 +54,9 @@ test/cljd-out/
 /.gitattributes
 /analysis_options.yaml
 
+# Mine
+/.clj-kondo/
+
 # Magit
 /ios/
 /lib/
@@ -62,3 +65,4 @@ test/cljd-out/
 /web/
 /windows/
 /REPL.lock
+/.lsp/

@@ -1,0 +1,132 @@
+(ns icare.network
+  (:require ["package:nostr/nostr.dart" :refer [Event Request Filter]]
+            ["dart:io" :refer [WebSocket]]
+            ["dart:convert" :refer [jsonDecode]]
+            [cljd.reader :refer [read-string]]))
+
+(defonce send-events false)
+(defonce initialized? (atom false))
+(defonce private-key (atom nil))
+(defonce web-socket (atom nil))
+
+(def relay-url "wss://relay.damus.io")
+
+(def liked-event-kind 39506)
+(def update-task-event-kind 39505)
+
+(defn generate-reactions-request [user-pub-key user-task-uuids friend-pub-keys]
+  (let [a-tags (mapv (fn [task-uuid]
+                       (str update-task-event-kind ":" user-pub-key ":" task-uuid))
+                    user-task-uuids)]
+    (Request "reactions"
+             [(Filter
+               .authors friend-pub-keys
+               .kinds [liked-event-kind]
+               .a a-tags)])))
+
+(defn generate-tasks-request [friend-pub-keys]
+  (Request "tasks"
+           [(Filter
+             .authors friend-pub-keys
+             .kinds [update-task-event-kind])]))
+
+(defn handle-event [data]
+  (try
+    (let [subscription-id (get data 1)
+          event-json (get data 2)
+          event ^Event (.fromJson Event event-json)]
+      (condp = (.-kind event)
+        liked-event-kind
+        (do
+          ;; (dispatch-to-state-manager! {:type :liked-event :content (read-string (.-content event))})
+          (prn "Received liked event:" (.-content event) "with tags:" (.-tags event)))
+
+        update-task-event-kind
+        (do
+          ;; (dispatch-to-state-manager! {:type :update-task-event :event event})
+          (prn "Received update task event:" (.-content event) "with tags:" (.-tags event)))
+
+        (prn "Unhandled event kind:" (.-kind event) "with content:" (.-content event))))
+    (catch Exception e
+      (prn "Event message from server does not comply to NIP01:" e))))
+
+(defn handle-ok [data]
+  (try
+    (let [request-id (get data 1)
+          accepted (get data 2)
+          message (get data 3)]
+      (if accepted
+        (prn "Request" request-id "was accepted by server:" (if-not (empty? message)
+                                                              message "No message"))
+        (prn "Request" request-id "was rejected by server:" (if-not (empty? message)
+                                                              message "No message"))))
+    (catch Exception e
+      (prn "Ok message from server does not comply to NIP01:" e))))
+
+;;we want to support offline first workflows
+;;that means that the first time we connect to the websocket
+;;we should resend all our tasks and receive all possible tasks
+;;if we can't connect, don't even try to queue just don't send anything because we can't
+;;the next time we connect we will resend everything
+
+(defn generate-liked-event [liked creator-pub-key task-uuid]
+  (.from Event
+         .kind liked-event-kind
+         .content (prn-str {:liked liked :task-uuid task-uuid})
+         .tags [(.from #/(List String) ["a" (str update-task-event-kind ":" creator-pub-key ":" task-uuid)])]
+         .privkey @private-key))
+
+(defn send-liked-event! [event]
+  (let [{:keys [liked creator-pub-key task-uuid]} event
+        event ^Event (generate-liked-event liked creator-pub-key task-uuid)]
+    (.add ^WebSocket @web-socket (.serialize event))))
+
+(defn generate-update-task-event [task-data task-uuid]
+  (.from Event
+         .kind update-task-event-kind
+         .content (prn-str task-data)
+         .tags [(.from #/(List String) ["d" task-uuid])]
+         .privkey @private-key))
+
+(defn send-update-task-event! [event]
+  (let [{:keys [task-data task-uuid]} event
+        event ^Event (generate-update-task-event task-data task-uuid)]
+    (.add ^WebSocket @web-socket (.serialize event))))
+
+(defn dispatch! [action]
+  (if (and send-events @web-socket @initialized?)
+    (condp = (:type action)
+      :send-liked-event (send-liked-event! action)
+      :send-update-task-event (send-update-task-event! action)
+      (prn "Unhandled action type in network manager:" (:type action)))
+    (prn "WebSocket not initialized")))
+
+(defn initialize-web-socket! []
+  (when-not @web-socket
+    (let [ws (await (.connect WebSocket relay-url))]
+      (reset! web-socket ws)
+      (.listen ws
+               (fn [message]
+                 (try
+                   (let [data (jsonDecode message)]
+                     (condp = (get data 0)
+                       "OK" (handle-ok data)
+                       "EVENT" (handle-event data)
+                       "EOSE" nil
+                       "NOTICE" nil
+                       (prn "Unhandled WebSocket message:" data)))
+                   (catch Exception e
+                     (prn "Websocket message is not a json object" e))))
+
+               .onError (fn [error]
+                          (prn "WebSocket error:" error)
+                          (reset! web-socket nil))
+               .onDone (fn []
+                         (prn "WebSocket closed")
+                         (reset! web-socket nil))))))
+
+(defn initialize-network! [new-private-key]
+  (when-not @initialized?
+    (reset! initialized? true)
+    (reset! private-key new-private-key)
+    (initialize-web-socket!)))
