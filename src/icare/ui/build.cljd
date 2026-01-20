@@ -113,12 +113,12 @@
                  (m/SizedBox .width 4)
                  (m/Text (cond
                            (= 1 (count liked-by))
-                           (str "Liked by " (first liked-by))
+                           (str "Loved by " (first liked-by))
 
                            (= 2 (count liked-by))
-                           (str "Liked by " (str/join " and " liked-by))
+                           (str "Loved by " (str/join " and " liked-by))
 
-                           :else (str "Liked by " (str/join ", " (butlast liked-by))
+                           :else (str "Loved by " (str/join ", " (butlast liked-by))
                                       ", and " (last liked-by)))
                     .style (m/TextStyle
                              .fontSize 14

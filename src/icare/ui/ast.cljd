@@ -1,7 +1,7 @@
 (ns icare.ui.ast
   (:require ["package:flutter/material.dart" :as m]
             ["package:uuid/uuid.dart" :refer [Uuid]]
-            [icare.state :refer [dispatch! gather-pub-keys-and-uuids get-user-pub-key]
+            [icare.state :refer [dispatch! gather-pub-keys-and-uuids get-user-pub-key get-task-by-indexes]
              :rename {dispatch! state-dispatch!}]
             [icare.network :refer [dispatch!] :rename {dispatch! network-dispatch!}]))
 
@@ -24,16 +24,31 @@
                     (state-dispatch! {:type :complete-user-task
                                       :user-card-idx reorderable-item-idx
                                       :task-idx task-idx
-                                      :completed (not completed)}))
+                                      :completed (not completed)})
+                    (let [updated-task (get-task-by-indexes reorderable-item-idx task-idx)]
+                      (network-dispatch! {:type :update-task-event
+                                          :deleted false
+                                          :task updated-task})))
      :on-edit-task-title (fn [title]
                            (if (empty? title)
-                             (state-dispatch! {:type :delete-user-task
-                                               :user-card-idx reorderable-item-idx
-                                               :task-idx task-idx})
-                             (state-dispatch! {:type :rename-user-task
-                                               :user-card-idx reorderable-item-idx
-                                               :task-idx task-idx
-                                               :title title})))
+                             (do (state-dispatch! {:type :delete-user-task
+                                                   :user-card-idx reorderable-item-idx
+                                                   :task-idx task-idx})
+                                 ;;we can't get the deleted task after deleting it from state,
+                                 ;;in this case, we're only intrested in grabing
+                                 ;;a task with the correct uuid to send to the network
+                                 (network-dispatch! {:type :update-task-event
+                                                     :deleted true
+                                                     :task task}))
+                             (do (state-dispatch! {:type :rename-user-task
+                                                   :user-card-idx reorderable-item-idx
+                                                   :task-idx task-idx
+                                                   :title title})
+                                 (let [updated-task (get-task-by-indexes reorderable-item-idx task-idx)]
+                                   (network-dispatch! {:type :update-task-event
+                                                       :deleted false
+                                                       :task updated-task})))))
+
      :completed completed
      :subitems (mapv task-subitems->ast
                      (if (seq liked-by)
@@ -70,8 +85,8 @@
                                         :user-card-idx reorderable-item-idx
                                         :new-task new-task})
                       (network-dispatch! {:type :update-task-event
-                                          :task new-task
-                                          :task-uuid (:uuid new-task)})
+                                          :deleted false
+                                          :task new-task})
                       (let [{:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids)
                             user-pub-key (get-user-pub-key)]
                         (network-dispatch! {:type :reactions-request
@@ -89,8 +104,17 @@
      :title name
      :on-rename-title (fn [value]
                         (if (empty? value)
-                          (state-dispatch! {:type :delete-card
-                                            :card-idx reorderable-item-idx})
+                          (do (state-dispatch! {:type :delete-card
+                                                :card-idx reorderable-item-idx})
+                              ;;stop receiving tasks and reactions from deleted friends
+                              (let [{:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids)
+                                    user-pub-key (get-user-pub-key)]
+                                (network-dispatch! {:type :tasks-request
+                                                    :friend-pub-keys friend-pub-keys})
+                                (network-dispatch! {:type :reactions-request
+                                                    :user-pub-key user-pub-key
+                                                    :user-task-uuids user-task-uuids
+                                                    :friend-pub-keys friend-pub-keys})))
                           (state-dispatch! {:type :rename-card
                                             :card-idx reorderable-item-idx
                                             :name value})))
@@ -104,17 +128,16 @@
 (defn friend-search->ast []
   {:ui-type :friend-search-area
    :on-search (fn [value]
+                (state-dispatch! {:type :add-friend
+                                  :pub-key value})
                 (let [{:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids)
                       user-pub-key (get-user-pub-key)]
-                  (when-not (empty? value)
-                    (network-dispatch! {:type :tasks-request
-                                        :friend-pub-keys (conj friend-pub-keys value)})
-                    (network-dispatch! {:type :reactions-request
-                                        :user-pub-key user-pub-key
-                                        :user-task-uuids user-task-uuids
-                                        :friend-pub-keys (conj friend-pub-keys value)})))
-                (state-dispatch! {:type :add-friend
-                                  :pub-key value}))})
+                  (network-dispatch! {:type :tasks-request
+                                      :friend-pub-keys friend-pub-keys})
+                  (network-dispatch! {:type :reactions-request
+                                      :user-pub-key user-pub-key
+                                      :user-task-uuids user-task-uuids
+                                      :friend-pub-keys friend-pub-keys})))})
 
 (defn list-item->ast [reorderable-item-idx item]
   (let [{:keys [type]} item]

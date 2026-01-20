@@ -14,7 +14,7 @@
                                            :tasks [{:title "wake up"
                                                     :uuid (uuid-generator)
                                                     :completed false
-                                                    :liked-by #{1}
+                                                    :liked-by #{"b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"}
                                                     :subitems []}
                                                    {:title "go to monkey bars"
                                                     :uuid (uuid-generator)
@@ -55,6 +55,9 @@
           (->> reorderable-items
                (filter #(#{:friend :user} (:type %)))
                (map (juxt :pub-key :name))))))
+
+(defn get-task-by-indexes [user-card-idx task-idx]
+  (get-in @store [:reorderable-items user-card-idx :tasks task-idx]))
 
 (defn get-person-task-uuids [person]
   (let [{:keys [tasks]} person]
@@ -99,6 +102,7 @@
    reorderable-items
    #(= (:type %) :user)))
 
+
 ;;
 ;;DISPATCH HANDLERS
 ;;
@@ -123,19 +127,39 @@
 
 ;;network event handler
 (defn handle-update-task-event [state event]
-  (let [{:keys [task task-uuid creator-pub-key]} event
+  (let [{:keys [task creator-pub-key]} event
+        task-uuid (:uuid task)
+        deleted? (:deleted task)
         card-idx (pub-key->reorderable-item-idx
                    (:reorderable-items state)
                    creator-pub-key)
-        task-idx (uuid->task-idx
-                  (get-in state [:reorderable-items card-idx :tasks])
-                  task-uuid)]
+        task-idx (when-not (nil? card-idx)
+                  (uuid->task-idx
+                   (get-in state [:reorderable-items card-idx :tasks])
+                   task-uuid))
+        user-pub-key (get-user-pub-key)
+        liked-by-user? (contains? (:liked-by task) user-pub-key)
+        task (if liked-by-user?
+               (conj task [:liked true])
+               (conj task [:liked false]))]
     (cond
-      (nil? card-idx) state ;;we don't have this person yet
+      ;;delete existing task
+      (and card-idx task-idx deleted?)
+      (update-in state
+                 [:reorderable-items card-idx :tasks]
+                 (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
+                                          (subvec tasks (inc task-idx))))))
+      ;;this is an error state, we get sent a delete message for an item we don't have
+      (and (or (nil? card-idx) (nil? task-idx)) deleted?)
+      state
+      ;;another error state, we get sent an item by someone we don't have
+      (nil? card-idx) state
+      ;;first time we see this task
       (nil? task-idx) (update-in state ;;new task
                                 [:reorderable-items card-idx :tasks]
                                 conj task)
-      :else (assoc-in state ;;update existing task
+      ;;update existing task
+      :else (assoc-in state
                       [:reorderable-items card-idx :tasks task-idx]
                       task))))
 
@@ -197,7 +221,7 @@
       (update state :reorderable-items
               (fn [items]
                 (let [new-friend {:type :friend
-                                  :pub-key pub-key ;;obviously this is wrong TODO
+                                  :pub-key pub-key
                                   :name pub-key ;;obviously this is wrong TODO
                                   :tasks []}]
                   (if (friend-search-at-bottom? items)
