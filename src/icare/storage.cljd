@@ -1,0 +1,60 @@
+(ns icare.storage
+  (:require ["package:path_provider/path_provider.dart" :refer [getApplicationDocumentsDirectory]]
+            ["package:flutter_secure_storage/flutter_secure_storage.dart" :refer [FlutterSecureStorage]]
+            ["dart:io" :refer [File]]
+            ["package:nostr/nostr.dart" :refer [Keychain]]
+            [cljd.edn :refer [read-string]]))
+
+;;This module is responsible for persisting the app state to local storage
+;;We also load our secure storage here
+;;basically storage handles all our persistent data needs
+
+(def store-file-name "icare_state.txt")
+(defonce initialized? (atom false))
+(defonce store-file (atom nil))
+
+(defn ^Future get-secure-credentials [key-generator]
+  (let [storage (FlutterSecureStorage)
+        contains-private-key? (await (.containsKey storage .key "private-key"))
+        contains-public-key? (await (.containsKey storage .key "public-key"))]
+    (cond
+      (and contains-private-key? contains-public-key?)
+      (let [private-key (await (.read storage .key "private-key"))
+            public-key (await (.read storage .key "public-key"))]
+        [private-key public-key])
+
+      (and (not contains-private-key?) (not contains-public-key?))
+      (let [{:flds [private public]} ^Keychain (key-generator)]
+        (await (.write storage .key "private-key" .value private))
+        (await (.write storage .key "public-key" .value public))
+        [private public])
+
+      :else (throw (Exception "Secure credentials exist partially")))))
+
+(defn ^Future initialize-storage! []
+  (when-not @initialized?
+    (prn "Initializing storage...")
+    (reset! initialized? true)
+    (let [directory (await (getApplicationDocumentsDirectory))
+          path (.-path directory)
+          file-path (str path "/" store-file-name)
+          file ^File (File file-path)
+          _ (when-not (await (.exists file))
+              (await (.create file)))]
+      (reset! store-file file)))
+  (let [[private-key public-key] (await (get-secure-credentials (.-generate Keychain))) ;;this is a little ugly for the sake of development code that constantly reloads.
+        serial-persisted-state (await (.readAsString ^File @store-file))
+        state (when-not (empty? serial-persisted-state) ;;read-string does this in clj but not in cljd
+                (read-string serial-persisted-state))]
+    [private-key public-key state]))
+
+(defn create-string [event]
+  (condp = (:type event)
+    :state-change-event (pr-str (:new-state event))
+    (throw (Exception
+            (str "tried to modify storage with an unknown event" event)))))
+
+(defn dispatch! [event]
+  (if-not @initialized?
+    (throw (Exception. "Tried to dispatch to storage before it was initialized"))
+    (await (.writeAsString ^File @store-file (create-string event)))))

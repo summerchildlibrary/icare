@@ -1,34 +1,19 @@
 (ns icare.core
   (:require ["package:flutter/material.dart" :as m]
-            ["package:flutter_secure_storage/flutter_secure_storage.dart" :refer [FlutterSecureStorage]]
-            ["package:nostr/nostr.dart" :refer [Keychain]]
             [cljd.flutter :as f]
             [icare.ui.ast :refer [state->ast]]
             [icare.ui.build :refer [ast->widget]]
-            [icare.state :refer [initialize-state!]]
-            [icare.network :refer [initialize-network!]]))
+            [icare.state :refer [initialize-state! gather-pub-keys-and-uuids get-user-pub-key]]
+            [icare.network :refer [initialize-network!]]
+            [icare.storage :refer [initialize-storage!]]))
 
-(defn ^Future get-secure-credentials-future [key-generator]
-  (let [storage (FlutterSecureStorage)
-        contains-private-key? (await (.containsKey storage .key "private-key"))
-        contains-public-key? (await (.containsKey storage .key "public-key"))]
-    (cond
-      (and contains-private-key? contains-public-key?)
-      (let [private-key (await (.read storage .key "private-key"))
-            public-key (await (.read storage .key "public-key"))]
-        [private-key public-key])
-
-      (and (not contains-private-key?) (not contains-public-key?))
-      (let [{:flds [private public]} ^Keychain (key-generator)]
-        (await (.write storage .key "private-key" .value private))
-        (await (.write storage .key "public-key" .value public))
-        [private public])
-
-      :else (throw (Exception. "Secure credentials exist partially")))))
-
+;;TODO we really want some sort of global dispatch manager
+;;that can route events to storage, network, and state modules
+;;This way, we can avoid circular dependencies between modules
+;;and avoid having watchers on the atoms and instead look
+;;at the actual dispatched events
 (defn main []
   (f/run
-    :let [credentials-future (get-secure-credentials-future (.-generate Keychain))]
     (m/MaterialApp
       .title "iCare")
     .home
@@ -36,14 +21,16 @@
     .body
     (m/SafeArea)
     (m/FutureBuilder
-     .future credentials-future
+     .future (initialize-storage!)
      .initialData nil
      .builder (fn [_ ^m/AsyncSnapshot snapshot]
                 (cond
                   (= m/ConnectionState.done (.-connectionState snapshot))
-                  (let [[private-key public-key] (.-data snapshot)
-                        store (initialize-state! public-key)]
-                    (initialize-network! private-key)
+                  (let [[private-key public-key persisted-state] (.-data snapshot)
+                        store (initialize-state! public-key persisted-state)
+                        {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids)
+                        user-pub-key (get-user-pub-key)]
+                    (initialize-network! private-key user-task-uuids friend-pub-keys user-pub-key)
                     (f/widget
                      :watch [state store]
                      (-> state                   ;;state is the end-user representation of the app
