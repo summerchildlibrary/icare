@@ -1,16 +1,19 @@
-# cljd_icare
+# iCare
 
-A new Flutter project.
+iCare is not a lame social media.
 
-## Getting Started
+To run this project you must first install clojuredart.
 
-This project is a starting point for a Flutter application.
+With clojuredart installed:
+1. clone this repo
+2. cd into this repo
+3. run ```clojure -M:cljd init```
 
-A few resources to get you started if this is your first Flutter project:
+To compile and run after installing:
+1. open a device emulator or setup flutter to run on a physical device
+2. Run ```flutter devices``` to get a list of all your available devices
+3. Run ```clojure -M:cljd flutter -d <device id from previous step>```
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+More documentation for running a clojuredart project can be found in the clojuredart github repo [here.](https://github.com/Tensegritics/ClojureDart)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+The code for this project lives in src/icare. I think the code makes the most sense when you start reading it from core.cljd. Here's a highish level diagram of the code's architecture.<img width="1704" height="1454" alt="icare_architecture" src="https://github.com/user-attachments/assets/7733d01d-68ff-4fdc-8265-60f059b6c86e" />
