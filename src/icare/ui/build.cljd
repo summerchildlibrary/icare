@@ -231,104 +231,17 @@
                             .fontWeight m.FontWeight/normal
                             .color m.Colors/black)))]))))
 
-(defn render-undo-redo-area [ui]
-  (let [{:keys [x y on-undo on-redo on-move]} ui]
-    (f/widget
-     :let [left-width (atom 50)
-           right-width (atom 50)]
-     (m/Positioned
-      .left x
-      .top y)
-     (m/Opacity
-      .opacity 0.7)
-     (m/SizedBox
-      .width 170
-      .height 60)
-     (m/GestureDetector
-       .onPanUpdate on-move)
-     (m/Center)
-     (m/Row
-      .mainAxisAlignment m.MainAxisAlignment/center
-      .children [(f/widget
-                   (m/GestureDetector
-                    .onTap (fn []
-                             (reset! left-width 80)
-                             (Future.delayed (Duration .milliseconds 300)
-                                             (fn [] (reset! left-width 50) nil))
-                             nil))
-                   :watch [left-w left-width]
-                   m/Stack
-                   .children [(f/widget
-                               ;; (m/Positioned .right 0 .top 0 .bottom 0 .left 0)
-                               (m/AnimatedContainer
-                                 .duration (Duration .milliseconds 300)
-                                 .decoration (m/BoxDecoration
-                                               .color m.Colors/green
-                                               .borderRadius (m/BorderRadius.only
-                                                              .bottomLeft (m/Radius.circular 30)
-                                                              .topLeft (m/Radius.circular 30)
-                                                              .topRight (m/Radius.circular 2)
-                                                              .bottomRight (m/Radius.circular 2))
-                                               .boxShadow [(m/BoxShadow
-                                                             .color m.Colors/black26
-                                                             .blurRadius 8
-                                                             .offset (m/Offset. 0 4))])
-                                 .curve m/Curves.easeOutBack
-                                 .width left-w
-                                 .height 60))
-                              (f/widget
-                               (m/Positioned.fill)
-                               (m/Icon m/Icons.undo
-                                       .size 30
-                                       .color m.Colors/white))])
-                 (f/widget
-                  (m/Container
-                   .width 6))
-                 (f/widget
-                  (m/GestureDetector
-                    .onTap (fn []
-                             (reset! right-width 80)
-                             (Future.delayed (Duration .milliseconds 300)
-                                             (fn [] (reset! right-width 50) nil))
-                             nil))
-                  :watch [right-w right-width]
-                   m/Stack
-                   .children [(m/AnimatedContainer
-                                .duration (Duration .milliseconds 300)
-                                .decoration (m/BoxDecoration
-                                              .color m.Colors/green
-                                              .borderRadius (m/BorderRadius.only
-                                                             .topRight (m/Radius.circular 30)
-                                                             .bottomRight (m/Radius.circular 30)
-                                                             .topLeft (m/Radius.circular 2)
-                                                             .bottomLeft (m/Radius.circular 2))
-                                              .boxShadow [(m/BoxShadow
-                                                            .color m.Colors/black26
-                                                            .blurRadius 8
-                                                            .offset (m/Offset. 0 4))])
-                                .curve m/Curves.easeOutBack
-                                .width right-w
-                               .height 60)
-                              (m/Positioned.fill
-                                .child (m/Icon m/Icons.redo
-                                               .size 30
-                                               .color m.Colors/white))])]))))
-
-
-
 (defn render-screen-base [ui]
-  (let [{:keys [undo-redo reorderable-list]} ui]
+  (let [{:keys [reorderable-list]} ui]
     (f/widget
      m/Stack
      .children
-     [(ast->widget reorderable-list)
-      (ast->widget undo-redo)])))
+     [(ast->widget reorderable-list)])))
 
 (defn ast->widget [ui]
   (let [{:keys [ui-type]} ui]
    (condp = ui-type
      :screen-base            (render-screen-base ui)
-     :undo-redo-area         (render-undo-redo-area ui)
      :reorderable-list       (render-reorderable-list ui)
      :task-card              (render-task-card ui)
      :ronly-task             (render-ronly-task ui)

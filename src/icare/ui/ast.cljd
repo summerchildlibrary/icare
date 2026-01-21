@@ -158,22 +158,7 @@
                                      :to-index to-index})))
    :items (mapv list-item->ast (range) reorderable-items)})
 
-(defn undo-redo->ast [undo-redo]
-  (let [{:keys [x y]} undo-redo]
-    {:ui-type :undo-redo-area
-     :x x
-     :y y
-     :on-move (fn [^m/DragUpdateDetails details]
-                (let [new-position (.-delta details)
-                      {:flds [dx dy]} new-position]
-                  (state-dispatch! {:type :move-undo-redo
-                                    :dx dx
-                                    :dy dy})))
-     :on-undo identity
-     :on-redo identity}))
-
 (defn state->ast [state]
-  (let [{:keys [undo-redo reorderable-items]} state]
+  (let [{:keys [reorderable-items]} state]
     {:ui-type :screen-base
-     :undo-redo (undo-redo->ast undo-redo) ;
      :reorderable-list (reorderable-list->ast reorderable-items)}))

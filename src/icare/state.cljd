@@ -1,7 +1,11 @@
 (ns icare.state
-  (:require ["package:uuid/uuid.dart" :refer [Uuid]]))
+  (:require ["package:uuid/uuid.dart" :refer [Uuid]]
+            [icare.storage
+             :refer [dispatch!]
+             :rename {dispatch! storage-dispatch!}]))
 
 (def uuid-generator (.-v4 (Uuid)))
+(def use-persistent-storage? true)
 
 
 ;;This namespace defines all side effects on our store
@@ -23,7 +27,7 @@
                                                     :subitems [{:type :time :value "2026-01-06 09:18:04Z"}
                                                                {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
                                           {:type :friend
-                                           :name "Jun"
+                                           :name "Example"
                                            :pub-key "b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"
                                            :tasks [{:title "Defeated bear"
                                                     :uuid (uuid-generator)
@@ -41,8 +45,7 @@
                                                     :completed true
                                                     :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
                                                                {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
-                                          {:type :friend-search}]
-                      :undo-redo {:x 240 :y 700}}))
+                                          {:type :friend-search}]}))
 
 ;;Helper functions. Read only operations.
 
@@ -280,7 +283,11 @@
 (defn dispatch! [event]
   (if-not @initialized?
     (throw (Exception. "State store not initialized yet! Call initialize-state! from core first."))
-    (swap! store apply-state-event event)))
+    (swap! store (fn [state]
+                  (let [new-state (apply-state-event state event)] ;;TODO this is messy, this is why we want a central dispatch manager
+                    (storage-dispatch! {:type :state-change-event
+                                        :new-state new-state})
+                    new-state)))))
 
 (defn update-user-pub-key! [pub-key]
   (swap! store update :reorderable-items
@@ -289,13 +296,22 @@
              (assoc-in items [user-idx :pub-key] pub-key)))))
 
 ;;Call this function from core, this is the intended way to get a reference to the store
-(defn initialize-state! [pub-key]
-  (prn "Initializing state with pub key:" pub-key)
-  (reset! initialized? true)
-  (update-user-pub-key! pub-key)
+(defn initialize-state! [pub-key persisted-state]
+  (when-not @initialized?
+    (prn "Initializing state with pub key:" pub-key)
+    (when-some [state persisted-state] ;;this is only nil the first time the app runs
+      (when use-persistent-storage? (reset! store state)))
+    (reset! initialized? true)
+    (update-user-pub-key! pub-key))
   store)
 
 ;;TODO derived state caching?
 ;;things like pub-key->name list of friend pub keys ...
 ;;although let's worry about the derived state performance issue when I actually start to get
 ;;performance issues
+;;we should implement this by creating another resource
+;;called derived-state that is also an atom, this atom
+;;has some initialize_derived-state! function that is called from
+;;core and sets up watches on the main store to update.
+;;Since we plan on making a central dispatch manager, we can
+;;also update derived state from there instead of using watches
