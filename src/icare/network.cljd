@@ -5,7 +5,7 @@
             [cljd.edn :refer [read-string]]
             [icare.state :refer [dispatch!] :rename {dispatch! state-dispatch!}]))
 
-(defonce send-events true)
+(defonce send-events false)
 (defonce initialized? (atom false))
 (defonce private-key (atom nil))
 (defonce web-socket (atom nil))
@@ -132,7 +132,6 @@
                        (prn "Unhandled WebSocket message:" data)))
                    (catch Exception e
                      (prn "Websocket message is not a json object" e))))
-
                .onError (fn [error]
                           (prn "WebSocket error:" error)
                           (reset! web-socket nil))
