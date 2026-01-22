@@ -21,26 +21,29 @@
      :padding {:vertical 6}
      (m/Material
       .elevation 4
-      .borderRadius (m/BorderRadius.circular 12)
-      .child (m/ExpansionTile
-              .childrenPadding (m/EdgeInsets.only .bottom 20)
-              .initiallyExpanded initially-expanded
-              .controlAffinity m.ListTileControlAffinity/leading
-              .expandedCrossAxisAlignment m.CrossAxisAlignment/start
-              .expandedAlignment m.Alignment/topLeft
-              .shape (m/RoundedRectangleBorder
-                      .borderRadius (m/BorderRadius.circular 12))
-              .collapsedShape (m/RoundedRectangleBorder
-                               .borderRadius (m/BorderRadius.circular 12))
-              .title (m/TextField
-                      .style (m/TextStyle
-                               .fontSize 22
-                               .fontWeight m.FontWeight/bold
-                               .color m.Colors/black)
-                      .onSubmitted on-rename-title
-                      .decoration nil
-                      .controller (m/TextEditingController. .text title))
-              .children (mapv ast->widget tasks))))))
+      .borderRadius (m/BorderRadius.circular 12))
+     (m/ExpansionTile
+      .childrenPadding (m/EdgeInsets.only .bottom 20)
+      .initiallyExpanded initially-expanded
+      ;; .controlAffinity m.ListTileControlAffinity/leading
+      .expandedCrossAxisAlignment m.CrossAxisAlignment/start
+      .expandedAlignment m.Alignment/topLeft
+      .shape (m/RoundedRectangleBorder
+              .borderRadius (m/BorderRadius.circular 12))
+      .collapsedShape (m/RoundedRectangleBorder
+                       .borderRadius (m/BorderRadius.circular 12))
+      .title (f/widget
+              (m/Align .alignment m/Alignment.centerLeft)
+              (m/SizedBox .width 150)
+              (m/TextField
+               .style (m/TextStyle
+                        .fontSize 22
+                        .fontWeight m/FontWeight.bold
+                        .color m/Colors.black)
+               .onSubmitted on-rename-title
+               .decoration nil
+               .controller (m/TextEditingController. .text title)))
+      .children (mapv ast->widget tasks)))))
 
 (defn render-editable-task [ui]
   (let [{:keys [title on-complete on-edit-task-title completed subitems]} ui]
@@ -227,13 +230,14 @@
 (defn render-add-task-area [ui]
   (let [{:keys [on-add-task]} ui]
     (f/widget
-     :padding {:left 33}
+     :padding {:left 20}
      (m/Row
       .children [(f/widget
-                  :padding {:right 17 :top 2}
-                  (m/Icon m.Icons/add
-                          .size 22
-                          .color m/Colors.red))
+                  (m/IconButton
+                   .icon (m/Icon m/Icons.add
+                                 .size 26
+                                 .color m.Colors/red)
+                   .onPressed nil))
                  (f/widget
                   :let [text-controller (m/TextEditingController.)]
                   (m/SizedBox .width 180)
