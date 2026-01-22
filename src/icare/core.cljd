@@ -1,5 +1,6 @@
 (ns icare.core
   (:require ["package:flutter/material.dart" :as m]
+            ["package:google_fonts/google_fonts.dart" :as gf]
             [cljd.flutter :as f]
             [icare.ui.ast :refer [state->ast]]
             [icare.ui.build :refer [ast->widget]]
@@ -15,7 +16,10 @@
 (defn main []
   (f/run
     (m/MaterialApp
-      .title "iCare")
+      .title "iCare"
+      .theme (m/ThemeData
+               .primarySwatch m/Colors.blue
+               .textTheme (gf/GoogleFonts.getTextTheme "Playwrite GB J")))
     .home
     (m/Scaffold)
     .body
