@@ -1,6 +1,7 @@
 (ns icare.core
   (:require ["package:flutter/material.dart" :as m]
             ["package:google_fonts/google_fonts.dart" :as gf]
+            ["package:flutter/services.dart" :as services]
             [cljd.flutter :as f]
             [icare.ui.ast :refer [state->ast]]
             [icare.ui.build :refer [ast->widget]]
@@ -23,6 +24,12 @@
     .home
     (m/Scaffold)
     .body
+    ;; (m/AnnotatedRegion
+    ;;  .value (services/SystemUiOverlayStyle
+    ;;          .systemNavigationBarColor (m/Color 0xFF0a3a07)
+    ;;          .systemNavigationBarIconBrightness services/Brightness.light
+    ;;          .statusBarColor (m/Color 0xFF0a3a07)
+    ;;          .statusBarIconBrightness services/Brightness.light))
     (m/SafeArea)
     (m/FutureBuilder
      .future (initialize-storage!)

@@ -19,10 +19,12 @@
     (f/widget
      :key key
      :padding {:vertical 6}
+     :let [expanded? (atom initially-expanded)] ;;TODO there is a bug with this approach where expanded? resets on reorder. To solve this we should add an expanded field to the store...
      (m/Material
       .elevation 4
       .borderRadius (m/BorderRadius.circular 12))
      (m/ExpansionTile
+      .onExpansionChanged #(reset! expanded? %)
       .childrenPadding (m/EdgeInsets.only .bottom 20)
       .initiallyExpanded initially-expanded
       .expandedCrossAxisAlignment m.CrossAxisAlignment/start
@@ -34,11 +36,12 @@
       .title (f/widget
               (m/Align .alignment m/Alignment.centerLeft)
               (m/SizedBox .width 150)
+              :watch [expanded? expanded?]
               (m/TextField
                .style (m/TextStyle
-                        .fontSize 22
+                        .fontSize 16
                         .fontWeight m/FontWeight.bold
-                        .color m/Colors.black)
+                        .color (if expanded? m/Colors.grey m/Colors.black))
                .onSubmitted on-rename-title
                .decoration nil
                .controller (m/TextEditingController. .text title)))
@@ -47,7 +50,7 @@
 (defn render-editable-task [ui]
   (let [{:keys [title on-complete on-edit-task-title completed subitems]} ui]
     (f/widget
-     :padding {:left 20 :bottom 20}
+     :padding {:left 20 :bottom 30}
      (m/Column)
      .children
      [(m/Row
@@ -85,7 +88,7 @@
 (defn render-ronly-task [ui]
   (let [{:keys [title completed subitems liked on-liked]} ui]
     (f/widget
-     :padding {:left 20 :bottom 20}
+     :padding {:left 20 :bottom 30}
      (m/Column)
      .children
      [(m/Row
