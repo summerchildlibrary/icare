@@ -139,13 +139,21 @@
                                       :user-task-uuids user-task-uuids
                                       :friend-pub-keys friend-pub-keys})))})
 
+(defn magic-add-button->ast [magic-add-button]
+  (let [{:keys [form]} magic-add-button
+        key "magic-add-button"]
+    (condp = form
+      :button {:ui-type :default-magic-add-button :on-press identity :key key}
+      (throw (Exception (str "magic-add-button->ast was given a button with unknown form: " form))))))
+
 (defn list-item->ast [reorderable-item-idx item]
   (let [{:keys [type]} item]
-    (cond
-      (= type :user) (person->ast reorderable-item-idx (conj item {:user? true}))
-      (= type :friend) (person->ast reorderable-item-idx (conj item {:user? false}))
-      (= type :friend-search) (friend-search->ast)
-      :else (throw (Exception. (str "list-item->ast was given a list item with unknown type: " type))))))
+    (condp = type
+      :user (person->ast reorderable-item-idx (conj item {:user? true}))
+      :friend (person->ast reorderable-item-idx (conj item {:user? false}))
+      :friend-search (friend-search->ast)
+      :magic-add-button (magic-add-button->ast item)
+      (throw (Exception (str "list-item->ast was given a list item with unknown type: " type))))))
 
 (defn reorderable-list->ast [reorderable-items]
   {:ui-type :reorderable-list

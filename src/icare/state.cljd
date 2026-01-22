@@ -5,7 +5,7 @@
              :rename {dispatch! storage-dispatch!}]))
 
 (def uuid-generator (.-v4 (Uuid)))
-(def use-persistent-storage? true)
+(def use-persistent-storage? false)
 
 
 ;;This namespace defines all side effects on our store
@@ -45,7 +45,9 @@
                                                     :completed true
                                                     :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
                                                                {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
-                                          {:type :friend-search}]}))
+                                          {:type :friend-search}
+                                          {:type :magic-add-button
+                                           :form :button}]}))
 
 ;;Helper functions. Read only operations.
 
