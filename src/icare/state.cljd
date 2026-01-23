@@ -14,6 +14,7 @@
 
 (defonce store (atom {:reorderable-items [{:type :user
                                            :name "Me"
+                                           :expanded? true
                                            :pub-key nil
                                            :tasks [{:title "wake up"
                                                     :uuid (uuid-generator)
@@ -28,6 +29,7 @@
                                                                ;; {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
                                           {:type :friend
                                            :name "Example"
+                                           :expanded? false
                                            :pub-key "b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"
                                            :tasks [{:title "Defeated bear"
                                                     :uuid (uuid-generator)
@@ -54,38 +56,42 @@
 (defn friend-search-at-bottom? [reorderable-items]
   (= :friend-search (:type (last reorderable-items))))
 
-(defn get-pub-to-name-map []
-  (let [reorderable-items (:reorderable-items @store)]
-    (into {}
-          (->> reorderable-items
-               (filter #(#{:friend :user} (:type %)))
-               (map (juxt :pub-key :name))))))
+(defn get-pub-to-name-map
+  ([] (get-pub-to-name-map @store))
+  ([state] (let [reorderable-items (:reorderable-items state)]
+             (into {}
+                   (->> reorderable-items
+                        (filter #(#{:friend :user} (:type %)))
+                        (map (juxt :pub-key :name)))))))
 
-(defn get-task-by-indexes [user-card-idx task-idx]
-  (get-in @store [:reorderable-items user-card-idx :tasks task-idx]))
+(defn get-task-by-indexes
+  ([user-card-idx task-idx] (get-task-by-indexes @store user-card-idx task-idx))
+  ([state user-card-idx task-idx] (get-in state [:reorderable-items user-card-idx :tasks task-idx])))
 
 (defn get-person-task-uuids [person]
   (let [{:keys [tasks]} person]
     (mapv (fn [task] (:uuid task)) tasks)))
 
-(defn gather-pub-keys-and-uuids []
-  (let [reorderable-items (:reorderable-items @store)]
-    (reduce
-     (fn [acc reorderable-item]
-       (condp = (:type reorderable-item)
-         :user (assoc acc :user-task-uuids (get-person-task-uuids reorderable-item))
-         :friend (update acc :friend-pub-keys conj (:pub-key reorderable-item))
-         acc))
-     {:user-task-uuids nil
-      :friend-pub-keys []}
-     reorderable-items)))
+(defn gather-pub-keys-and-uuids
+  ([] (gather-pub-keys-and-uuids @store))
+  ([state] (let [reorderable-items (:reorderable-items state)]
+             (reduce
+              (fn [acc reorderable-item]
+                (condp = (:type reorderable-item)
+                  :user (assoc acc :user-task-uuids (get-person-task-uuids reorderable-item))
+                  :friend (update acc :friend-pub-keys conj (:pub-key reorderable-item))
+                  acc))
+              {:user-task-uuids nil
+               :friend-pub-keys []}
+              reorderable-items))))
 
-(defn get-user-pub-key []
-  (let [reorderable-items (:reorderable-items @store)]
-    (->> reorderable-items
-         (filter #(= :user (:type %)))
-         first
-         :pub-key)))
+(defn get-user-pub-key
+  ([] (get-user-pub-key @store))
+  ([state] (let [reorderable-items (:reorderable-items state)]
+             (->> reorderable-items
+                  (filter #(= :user (:type %)))
+                  first
+                  :pub-key))))
 
 (defn get-reorderable-item-idx-by-predicate [reorderable-items predicate]
   (->> reorderable-items
@@ -228,6 +234,7 @@
                 (let [new-friend {:type :friend
                                   :pub-key pub-key
                                   :name pub-key ;;obviously this is wrong TODO
+                                  :expanded? false
                                   :tasks []}]
                   (if (friend-search-at-bottom? items)
                     (vec (concat (subvec items 0 (dec (count items)))
@@ -259,6 +266,16 @@
                    {:x (+ x dx)
                     :y (+ y dy)})))))
 
+(defn handle-card-expansion [state event]
+  (let [{:keys [card-idx expanded?]} event
+        state (update state :reorderable-items
+                      #(mapv (fn [item] (if (contains? item :expanded?)
+                                          (assoc item :expanded? false)
+                                          item))
+                             %))
+        state (assoc-in state [:reorderable-items card-idx :expanded?] expanded?)]
+    state))
+
 (defn apply-state-event [state event]
   (condp = (:type event)
     :liked-event (handle-liked-event state event)
@@ -273,6 +290,7 @@
     :add-friend (handle-add-friend state event)
     :reorder-items (handle-reorder-items state event)
     :move-undo-redo (handle-move-undo-redo state event)
+    :card-expansion (handle-card-expansion state event)
     (throw (Exception (str "No dispatch function found for event: " event)))))
 
 ;;TODO
