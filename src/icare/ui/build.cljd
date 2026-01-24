@@ -16,19 +16,30 @@
        .children (mapv ast->widget items)))))
 
 (defn render-task-card [ui]
-  (let [{:keys [expanded? on-expand idx title on-rename-title key title tasks]} ui]
+  (let [{:keys [expanded? on-expand idx title on-rename-title key title tasks]} ui
+        controller ^m/ExpansibleController ((get-pub-key-to-card-controller-map) key)]
+    (if expanded?
+      (.expand controller)
+      (.collapse controller))
     (f/widget
      :key key
      :padding {:vertical 6}
-     :let [controller ((get-pub-key-to-card-controller-map) key)]
+     :let [controller ^m/ExpansibleController ((get-pub-key-to-card-controller-map) key)
+           _ (do (if expanded?
+                   (.expand controller)
+                   (.collapse controller))
+                 nil)
+           expanded?-atom (atom (.isExpanded controller))] ;;track expansion locally to rebuild expansion tile properly
      (m/Material
       .elevation 4
       .borderRadius (m/BorderRadius.circular 12))
+     :watch [expanded? expanded?-atom]
      (m/ExpansionTile
       .controller controller
-      .onExpansionChanged on-expand
+      .onExpansionChanged (fn [expanded?]
+                            (reset! expanded?-atom expanded?)
+                            (on-expand expanded?))
       .childrenPadding (m/EdgeInsets.only .bottom 20)
-      .initiallyExpanded expanded?
       .expandedCrossAxisAlignment m.CrossAxisAlignment/start
       .expandedAlignment m.Alignment/topLeft
       .shape (m/RoundedRectangleBorder

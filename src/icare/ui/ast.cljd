@@ -75,10 +75,10 @@
      :key pub-key
      :idx reorderable-item-idx
      :title name
-     :on-expand (fn [_] (dispatch! {:type :card-expansion
-                                    :expanded? (not expanded?)
-                                    :card-idx reorderable-item-idx
-                                    :pub-key pub-key}))
+     :on-expand (fn [expanded?] (dispatch! {:type :card-expansion
+                                            :expanded? expanded?
+                                            :card-idx reorderable-item-idx
+                                            :pub-key pub-key}))
      :on-rename-title (fn [value]
                         (if (empty? value)
                           (dispatch! {:type :delete-card
