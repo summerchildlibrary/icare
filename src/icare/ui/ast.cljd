@@ -75,9 +75,10 @@
      :key pub-key
      :idx reorderable-item-idx
      :title name
-     :on-expand (fn [expanded?] (dispatch! {:type :card-expansion
-                                            :expanded? expanded?
-                                            :card-idx reorderable-item-idx}))
+     :on-expand (fn [_] (dispatch! {:type :card-expansion
+                                    :expanded? (not expanded?)
+                                    :card-idx reorderable-item-idx
+                                    :pub-key pub-key}))
      :on-rename-title (fn [value]
                         (if (empty? value)
                           (dispatch! {:type :delete-card
@@ -102,7 +103,16 @@
   (let [{:keys [form]} magic-add-button
         key "magic-add-button"]
     (condp = form
-      :button {:ui-type :default-magic-add-button :on-press identity :key key}
+      :button {:ui-type :magic-add-button
+               :form :button
+               :on-press (fn [] (dispatch! {:type :transform-magic-button
+                                            :to-form :card}))
+               :key key}
+      :card {:ui-type :magic-add-button
+             :form :card
+             :on-press (fn [] (dispatch! {:type :transform-magic-button
+                                            :to-form :button}))
+             :key key}
       (throw (Exception (str "magic-add-button->ast was given a button with unknown form: " form))))))
 
 (defn list-item->ast [reorderable-item-idx item]

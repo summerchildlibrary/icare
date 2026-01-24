@@ -2,7 +2,7 @@
   (:require ["package:flutter/material.dart" :as m]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             [cljd.flutter :as f]
-            [icare.resources.state :refer [get-pub-to-name-map]]
+            [icare.resources.derived-state :refer [get-pub-key-to-name-map get-pub-key-to-card-controller-map]]
             [cljd.string :as str]))
 
 (defn render-reorderable-list [ui]
@@ -20,19 +20,12 @@
     (f/widget
      :key key
      :padding {:vertical 6}
-     ;; :managed [controller (m/ExpansibleController)]
-     ;; :let [_ (.addPostFrameCallback m/WidgetsBinding.instance ;;TODO this is a hack essentially, we need to add a derived/utils state resource that builds from the state changes
-     ;;           (fn [_]
-     ;;             (try
-     ;;               (if expanded?
-     ;;                 (.expand controller)
-     ;;                 (.collapse controller))
-     ;;               (catch Exception e nil))))]
+     :let [controller ((get-pub-key-to-card-controller-map) key)]
      (m/Material
       .elevation 4
       .borderRadius (m/BorderRadius.circular 12))
      (m/ExpansionTile
-      ;; .controller controller
+      .controller controller
       .onExpansionChanged on-expand
       .childrenPadding (m/EdgeInsets.only .bottom 20)
       .initiallyExpanded expanded?
@@ -144,7 +137,7 @@
   (let [{:keys [liked-by]} ui]
     (f/widget
      :padding {:left 15 :bottom 4}
-     :let [liked-by (mapv (get-pub-to-name-map) liked-by)]
+     :let [liked-by (mapv (get-pub-key-to-name-map) liked-by)]
      (m/Row
       .children [(svg/SvgPicture.asset
                   "assets/icons/ph--arrow-bend-down-right-duotone.svg"
@@ -274,20 +267,33 @@
                             .color m.Colors/black)))]))))
 
 (defn render-magic-add-button [ui]
-  (let [{:keys [on-press key]} ui]
+  (let [{:keys [on-press key form]} ui]
     (f/widget
      :key key
-     :padding {:top 5}
+     :padding {:top 5 :bottom 100}
+     :let [width  (condp = form :button 70 :card 350)
+           height (condp = form :button 70 :card 100)]
      m/Center
-     (m/ElevatedButton
-      .onPressed on-press
-      .style (m/ElevatedButton.styleFrom
-               .backgroundColor m/Colors.orange
-               .shape (m/RoundedRectangleBorder
-                        .borderRadius (m/BorderRadius.circular 30))
-               .elevation 8))
+     (m/GestureDetector
+      .onTap on-press)
      .child
-     :padding {:left 12 :right 12 :top 12 :bottom 12}
+     (m/AnimatedContainer
+      .duration (Duration .milliseconds 500)
+      .curve m/Curves.bounceOut
+      .width  width
+      .height height
+      .decoration (m/BoxDecoration
+                    .border (m/Border.all
+                              .color (m/Colors.grey.withOpacity 0.5)
+                              .width 2)
+                    .color m/Colors.green
+                    .borderRadius (m/BorderRadius.circular 35)
+                    .boxShadow [(m/BoxShadow
+                                  .color (m/Colors.black.withOpacity 0.2)
+                                  .blurRadius 8
+                                  .offset (m/Offset 0 4))]))
+     .child
+     :padding {:left 0 :right 0 :top 0 :bottom 0}
      (m/Icon m.Icons/add
              .size 32
              .color m.Colors/white))))
@@ -310,7 +316,7 @@
      :subitem-liked-list             (render-subitem-liked-list ui)
      :subitem-time                   (render-subitem-time ui)
      :subitem-image                  (render-subitem-image ui)
-     :default-magic-add-button       (render-magic-add-button ui)
+     :magic-add-button               (render-magic-add-button ui)
      :friend-search-area             (render-friend-search-area ui)
      :add-task-area                  (render-add-task-area ui)
      (throw (Exception. (str "ast->widget tried to render an unknonw ui element: " ui))))))

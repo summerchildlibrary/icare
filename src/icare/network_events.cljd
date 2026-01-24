@@ -1,6 +1,7 @@
 (ns icare.network-events
   (:require ["package:nostr/nostr.dart" :refer [Event]]
             ["dart:convert" :refer [jsonDecode]]
+            ["dart:io" :refer [WebSocket]]
             [cljd.edn :refer [read-string]]
             [icare.resources.network :refer [liked-event-kind update-task-event-kind]]
             [icare.resources.dispatch :refer [dispatch!]]))
@@ -59,7 +60,7 @@
   (when-not (= @web-socket ws)
     (prn "Started listening to web socket events...")
     (reset! web-socket ws)
-    (.listen ws
+    (.listen ^WebSocket ws
              (fn [message]
                (try
                  (let [data (jsonDecode message)]

@@ -1,7 +1,8 @@
 (ns icare.resources.dispatch
   (:require [icare.resources.network :refer [dispatch!] :rename {dispatch! network-dispatch!}]
             [icare.resources.storage :refer [dispatch!] :rename {dispatch! storage-dispatch!}]
-            [icare.resources.state :refer [dispatch! get-task-by-indexes gather-pub-keys-and-uuids get-user-pub-key]
+            [icare.resources.derived-state :refer [dispatch!] :rename {dispatch! derived-state-dispatch!}]
+            [icare.resources.state :refer [dispatch! get-people-cards get-task-by-indexes gather-pub-keys-and-uuids get-user-pub-key]
              :rename {dispatch! state-dispatch!}]))
 
 ;;Central dispatch handler for all events (UI and network incoming).
@@ -21,7 +22,7 @@
     (if (network-only-events type)
       ;; Network-only events (no state change)
       (network-dispatch! event)
-      ;; Normal events (state + storage + maybe network)
+      ;; Normal events (state + storage + maybe network + maybe derived-state)
       (let [new-state (state-dispatch! event)]
         (storage-dispatch! {:type :state-change-event
                             :new-state new-state})
@@ -63,7 +64,10 @@
 
          :delete-card
          (let [{:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids new-state)
-               user-pub-key (get-user-pub-key new-state)]
+               user-pub-key (get-user-pub-key new-state)
+               people-cards (get-people-cards new-state)]
+           (derived-state-dispatch! {:type :derive-state
+                                     :people-cards people-cards})
            (network-dispatch! {:type :tasks-request
                                :friend-pub-keys friend-pub-keys})
            (network-dispatch! {:type :reactions-request
@@ -73,7 +77,10 @@
 
          :add-friend
          (let [{:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids new-state)
-               user-pub-key (get-user-pub-key new-state)]
+               user-pub-key (get-user-pub-key new-state)
+               people-cards (get-people-cards new-state)]
+           (derived-state-dispatch! {:type :derive-state
+                                     :people-cards people-cards})
            (network-dispatch! {:type :tasks-request
                                :friend-pub-keys friend-pub-keys})
            (network-dispatch! {:type :reactions-request
@@ -81,12 +88,21 @@
                                :user-task-uuids user-task-uuids
                                :friend-pub-keys friend-pub-keys}))
 
-      ;; State-only events (no network dispatch needed)
-         :rename-card nil
-         :card-expansion nil
-         :reorder-items nil
+         :rename-card ;;TODO this is a somewhat inneficient way to handle this case, we should have a derived state dispatch that just changes a name based on a pub-key
+         (let [people-cards (get-people-cards new-state)]
+           (derived-state-dispatch! {:type :derive-state
+                                     :people-cards people-cards}))
 
-      ;; Incoming network events (state-only, no outbound network)
+         :card-expansion
+         (let [people-cards (get-people-cards new-state)]
+           (derived-state-dispatch! {:type :update-expansions
+                                     :people-cards people-cards}))
+
+         ;;These events don't require any more dispatch calls
+         :reorder-items nil
+         :transform-magic-button nil
+
+         ;;Incoming network events, these events also don't require any more dispatch calls
          :liked-event nil
          :update-task-event nil
 

@@ -4,7 +4,6 @@
 (def uuid-generator (.-v4 (Uuid)))
 (def use-persistent-storage? false)
 
-
 ;;This namespace defines all side effects on our store
 ;;
 (defonce initialized? (atom false))
@@ -49,6 +48,10 @@
                                            :form :button}]}))
 
 ;;Helper functions. Read only operations.
+
+(defn get-people-cards
+  ([] (get-people-cards @store))
+  ([state] (filterv #(#{:friend :user} (:type %)) (:reorderable-items state))))
 
 (defn friend-search-at-bottom? [reorderable-items]
   (= :friend-search (:type (last reorderable-items))))
@@ -273,6 +276,12 @@
         state (assoc-in state [:reorderable-items card-idx :expanded?] expanded?)]
     state))
 
+(defn handle-transform-magic-button [state event]
+  (let [{:keys [to-form]} event]
+    (update state :reorderable-items
+            (fn [items]
+              (assoc-in items [(dec (count items)) :form] to-form)))))
+
 (defn apply-state-event [state event]
   (condp = (:type event)
     :liked-event (handle-liked-event state event)
@@ -288,6 +297,7 @@
     :reorder-items (handle-reorder-items state event)
     :move-undo-redo (handle-move-undo-redo state event)
     :card-expansion (handle-card-expansion state event)
+    :transform-magic-button (handle-transform-magic-button state event)
     (throw (Exception (str "No dispatch function found for event: " event)))))
 
 ;;TODO

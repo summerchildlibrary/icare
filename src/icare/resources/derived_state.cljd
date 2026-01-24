@@ -1,0 +1,111 @@
+(ns icare.resources.derived-state
+  (:require ["package:flutter/material.dart" :as m]))
+
+;;TODO it would be useful to store a set of friend-pub-keys and user-task-uuids
+(defonce derived-store (atom {:pub-key-to-name {}
+                              :pub-key-to-card-controller {}
+                              :active-pub-keys #{} ;;this is a helper value of the derived-store, it should always be empty after deriving the state. Its purpose is to make it easy to delete pubkeys that get removed from the actual state
+                              :user-pub-key nil}))
+
+
+;;Helper functions to read from the derived-store
+(defn get-user-pub-key
+  ([] (get-user-pub-key @derived-store))
+  ([derived-state] (:user-pub-key derived-state)))
+
+(defn get-pub-key-to-name-map
+  ([] (get-pub-key-to-name-map @derived-store))
+  ([derived-state] (:pub-key-to-name derived-state)))
+
+(defn get-pub-key-to-card-controller-map
+  ([] (get-pub-key-to-card-controller-map @derived-store))
+  ([derived-state] (:pub-key-to-card-controller derived-state)))
+
+;;Dispatch functions to modify the derived-store
+
+(defn remove-deleted-pub-keys [derived-state]
+  (let [old-pub-keys (keys (:pub-key-to-name derived-state))
+        active-pub-keys (:active-pub-keys derived-state)
+        discard-pub-keys (filter (complement active-pub-keys) old-pub-keys)]
+    (-> (reduce (fn [acc discard-pub-key]
+                  (.dispose ^m/ExpansibleController (get-in acc [:pub-key-to-card-controller discard-pub-key])) ;;clean up card controller resources before dissocing
+                  (-> acc
+                      (update :pub-key-to-name dissoc discard-pub-key)
+                      (update :pub-key-to-card-controller dissoc discard-pub-key)))
+                derived-state
+                discard-pub-keys)
+        (assoc :active-pub-keys #{}))))
+
+(defn update-derived-state [derived-state pub-key name expanded?]
+  (letfn [(add-missing-keys [derived-state]
+            (let [{:keys [pub-key-to-name pub-key-to-card-controller]} derived-state
+                  missing-pub-key? (or (not (contains? pub-key-to-name pub-key))
+                                       (not (contains? pub-key-to-card-controller pub-key)))
+                  derived-state (update derived-state :active-pub-keys conj pub-key)]
+              (if missing-pub-key?
+                (-> derived-state
+                    (assoc-in [:pub-key-to-name pub-key] name)
+                    (assoc-in [:pub-key-to-card-controller pub-key] (m/ExpansibleController)))
+                derived-state)))
+          (handle-name-changes [derived-state]
+            (let [{:keys [pub-key-to-name]} derived-state
+                  name-changed? (not= name
+                                      (get pub-key-to-name pub-key))]
+              (if name-changed?
+                (assoc-in derived-state [:pub-key-to-name pub-key] name)
+                derived-state)))
+          (handle-expansion-changes [derived-state]
+            (let [{:keys [pub-key-to-card-controller]} derived-state
+                  controller ^m/ExpansibleController (pub-key-to-card-controller pub-key)
+                  changed-expanded? (not= expanded?
+                                          (.-isExpanded controller))]
+              (when changed-expanded?
+                (if expanded?
+                  (.expand controller)
+                  (.collapse controller))
+                nil)
+              derived-state))]
+    (-> derived-state
+        add-missing-keys
+        handle-name-changes
+        handle-expansion-changes)))
+
+(defn derive-state [derived-state event]
+  (condp = (:type event)
+    :derive-state
+    (let [{:keys [people-cards]} event]
+      (-> (reduce (fn [acc card]
+                    (let [{:keys [pub-key name expanded?]} card
+                          user? (= (:type card) :user)]
+                      (cond
+                        user? (-> acc
+                                  (conj [:user-pub-key pub-key])
+                                  (update-derived-state pub-key name expanded?))
+                        :else (update-derived-state acc pub-key name expanded?))))
+                  derived-state
+                  people-cards)
+          remove-deleted-pub-keys))
+
+    :update-expansions ;;this is also implicitely handled by derive-state
+    (let [{:keys [people-cards]} event
+          {:keys [pub-key-to-card-controller]} derived-state]
+      (doall (for [card people-cards]
+               (let [{:keys [pub-key expanded?]} card
+                     controller ^m/ExpansibleController (pub-key-to-card-controller pub-key)
+                     changed-expanded? (not= expanded?
+                                             (.-isExpanded controller))]
+                 (when changed-expanded?
+                   (if expanded?
+                     (.expand controller)
+                     (.collapse controller))
+                   nil))))
+      derived-state)
+
+    (throw (Exception (str "derive-state received unknown event type: " event)))))
+
+(defn dispatch! [event]
+  (swap! derived-store derive-state event))
+
+(defn initialize-derived-state! [people-cards]
+  (prn "Initializing derived state...")
+  (dispatch! {:type :derive-state :people-cards people-cards}))
