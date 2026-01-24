@@ -1,8 +1,5 @@
-(ns icare.state
-  (:require ["package:uuid/uuid.dart" :refer [Uuid]]
-            [icare.storage
-             :refer [dispatch!]
-             :rename {dispatch! storage-dispatch!}]))
+(ns icare.resources.state
+  (:require ["package:uuid/uuid.dart" :refer [Uuid]]))
 
 (def uuid-generator (.-v4 (Uuid)))
 (def use-persistent-storage? false)
@@ -303,11 +300,7 @@
 (defn dispatch! [event]
   (if-not @initialized?
     (throw (Exception. "State store not initialized yet! Call initialize-state! from core first."))
-    (swap! store (fn [state]
-                  (let [new-state (apply-state-event state event)] ;;TODO this is messy, this is why we want a central dispatch manager
-                    (storage-dispatch! {:type :state-change-event
-                                        :new-state new-state})
-                    new-state)))))
+    (swap! store apply-state-event event)))
 
 (defn update-user-pub-key! [pub-key]
   (swap! store update :reorderable-items

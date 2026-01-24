@@ -2,7 +2,7 @@
   (:require ["package:flutter/material.dart" :as m]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             [cljd.flutter :as f]
-            [icare.state :refer [get-pub-to-name-map]]
+            [icare.resources.state :refer [get-pub-to-name-map]]
             [cljd.string :as str]))
 
 (defn render-reorderable-list [ui]
@@ -11,32 +11,45 @@
       (m/ReorderableListView
        .padding (m/EdgeInsets.symmetric .horizontal 20)
        .onReorder on-reorder
+       .buildDefaultDragHandles false
        .proxyDecorator (fn [child index animation] child)
        .children (mapv ast->widget items)))))
 
 (defn render-task-card [ui]
-  (let [{:keys [initially-expanded title on-rename-title key title tasks]} ui]
+  (let [{:keys [expanded? on-expand idx title on-rename-title key title tasks]} ui]
     (f/widget
      :key key
      :padding {:vertical 6}
-     :let [expanded? (atom initially-expanded)] ;;TODO there is a bug with this approach where expanded? resets on reorder. To solve this we should add an expanded field to the store...
+     ;; :managed [controller (m/ExpansibleController)]
+     ;; :let [_ (.addPostFrameCallback m/WidgetsBinding.instance ;;TODO this is a hack essentially, we need to add a derived/utils state resource that builds from the state changes
+     ;;           (fn [_]
+     ;;             (try
+     ;;               (if expanded?
+     ;;                 (.expand controller)
+     ;;                 (.collapse controller))
+     ;;               (catch Exception e nil))))]
      (m/Material
       .elevation 4
       .borderRadius (m/BorderRadius.circular 12))
      (m/ExpansionTile
-      .onExpansionChanged #(reset! expanded? %)
+      ;; .controller controller
+      .onExpansionChanged on-expand
       .childrenPadding (m/EdgeInsets.only .bottom 20)
-      .initiallyExpanded initially-expanded
+      .initiallyExpanded expanded?
       .expandedCrossAxisAlignment m.CrossAxisAlignment/start
       .expandedAlignment m.Alignment/topLeft
       .shape (m/RoundedRectangleBorder
               .borderRadius (m/BorderRadius.circular 12))
       .collapsedShape (m/RoundedRectangleBorder
                        .borderRadius (m/BorderRadius.circular 12))
+      .leading (if expanded?
+                 (m/Icon m.Icons/drag_handle .color m.Colors/transparent)
+                 (m/ReorderableDragStartListener
+                  .index idx
+                  .child (m/Icon m.Icons/drag_handle)))
       .title (f/widget
               (m/Align .alignment m/Alignment.centerLeft)
               (m/SizedBox .width 150)
-              :watch [expanded? expanded?]
               (m/TextField
                .style (m/TextStyle
                         .fontSize 16

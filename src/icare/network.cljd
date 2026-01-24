@@ -71,10 +71,10 @@
     (prn "Unhandled action type in network manager:" (:type event))))
 
 (defn dispatch! [event]
-  (if (and send-events @web-socket @initialized?)
+  (if-not (and send-events @web-socket @initialized?)
+    (prn "WebSocket not initialized while trying to send event:" (create-message event))
     (do (.add ^WebSocket @web-socket (create-message event))
-        (prn "Sent event to relay:" (create-message event)))
-    (prn "WebSocket not initialized while trying to send event:" (create-message event))))
+        (prn "Sent event to relay:" (create-message event)))))
 
 (defn handle-event [data]
   (try

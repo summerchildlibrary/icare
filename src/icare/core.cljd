@@ -5,15 +5,11 @@
             [cljd.flutter :as f]
             [icare.ui.ast :refer [state->ast]]
             [icare.ui.build :refer [ast->widget]]
-            [icare.state :refer [initialize-state! gather-pub-keys-and-uuids get-user-pub-key]]
-            [icare.network :refer [initialize-network!]]
-            [icare.storage :refer [initialize-storage!]]))
+            [icare.resources.state :refer [initialize-state! gather-pub-keys-and-uuids get-user-pub-key]]
+            [icare.resources.network :refer [initialize-network!]]
+            [icare.network-events :refer [start-listening!]]
+            [icare.resources.storage :refer [initialize-storage!]]))
 
-;;TODO we really want some sort of global dispatch manager
-;;that can route events to storage, network, and state modules
-;;This way, we can avoid circular dependencies between modules
-;;and avoid having watchers on the atoms and instead look
-;;at the actual dispatched events
 (defn main []
   (f/run
     (m/MaterialApp
@@ -33,20 +29,22 @@
     (m/SafeArea)
     (m/FutureBuilder
      .future (initialize-storage!)
-     .initialData nil
-     .builder (fn [_ ^m/AsyncSnapshot snapshot]
-                (cond
-                  (= m/ConnectionState.done (.-connectionState snapshot))
-                  (let [[private-key public-key persisted-state] (.-data snapshot)
-                        store (initialize-state! public-key persisted-state)
-                        {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids)
-                        user-pub-key (get-user-pub-key)]
-                    (initialize-network! private-key user-task-uuids friend-pub-keys user-pub-key)
-                    (f/widget
-                     :watch [state store]
-                     (-> state                   ;;state is the end-user representation of the app
-                         state->ast              ;;ui is the programmers representation of the app
-                         ast->widget)))          ;;widgets are the machine representation of the app
+     .initialData nil)
+    .builder
+    (fn [_ ^m/AsyncSnapshot snapshot]
+      (cond
+        (= m/ConnectionState.done (.-connectionState snapshot))
+        (let [[private-key public-key persisted-state] (.-data snapshot)
+              store (initialize-state! public-key persisted-state)
+              {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids)
+              user-pub-key (get-user-pub-key)]
+          (.then (initialize-network! private-key)
+                 (fn [ws] (start-listening! ws user-task-uuids friend-pub-keys user-pub-key)))
+          (f/widget
+           :watch [state store]
+           (-> state                   ;;state is the end-user representation of the app
+               state->ast              ;;ui is the programmers representation of the app
+               ast->widget)))          ;;widgets are the machine representation of the app
 
-                  :else
-                  (m/Text "Loading..."))))))
+        :else
+        (m/Text "Loading...")))))
