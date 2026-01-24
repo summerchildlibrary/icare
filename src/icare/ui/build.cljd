@@ -25,10 +25,6 @@
      :key key
      :padding {:vertical 6}
      :let [controller ^m/ExpansibleController ((get-pub-key-to-card-controller-map) key)
-           _ (do (if expanded?
-                   (.expand controller)
-                   (.collapse controller))
-                 nil)
            expanded?-atom (atom (.isExpanded controller))] ;;track expansion locally to rebuild expansion tile properly
      (m/Material
       .elevation 4
