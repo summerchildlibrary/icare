@@ -56,7 +56,13 @@
                         .fontWeight m/FontWeight.bold
                         .color (if expanded? m/Colors.grey m/Colors.black))
                .onSubmitted on-rename-title
-               .decoration nil
+               .decoration (m/InputDecoration
+                             .contentPadding (m/EdgeInsets.only .bottom 0)
+                             .border m/InputBorder.none)
+               .strutStyle (m/StrutStyle
+                             .fontSize 16
+                             .height 1.9
+                             .forceStrutHeight true)
                .controller (m/TextEditingController. .text title)))
       .children (mapv ast->widget tasks)))))
 
@@ -92,7 +98,8 @@
                                          m.TextDecoration/lineThrough
                                          m.TextDecoration/none))
            .onSubmitted on-edit-task-title
-           .decoration nil
+           .decoration (m/InputDecoration
+                         .border m/InputBorder.none)
            .controller (m/TextEditingController. .text title)))])
       (f/widget
        :padding {:top 4}
@@ -218,7 +225,7 @@
      :padding {:left 15 :bottom 15}
      (m/Row
       .children [(f/widget
-                  :padding {:right 20 :top 2}
+                  :padding {:right 20 :top 4}
                   (m/Icon m.Icons/person_add
                           .size 22
                           .color m.Colors/black))
@@ -235,7 +242,12 @@
                                  .hintStyle (m/TextStyle
                                               .fontSize 22
                                               .fontWeight m.FontWeight/normal
-                                              .color m.Colors/grey))
+                                              .color m.Colors/grey)
+                                 .contentPadding (m/EdgeInsets.only .bottom 0))
+                   .strutStyle (m/StrutStyle
+                                 .fontSize 22
+                                 .height 1.9
+                                 .forceStrutHeight true)
                    .controller text-controller
                    .style (m/TextStyle
                             .fontSize 22
@@ -247,7 +259,9 @@
     (f/widget
      :padding {:left 20}
      (m/Row
+      .crossAxisAlignment m.CrossAxisAlignment/center
       .children [(f/widget
+                  :padding {:top 8}
                   (m/IconButton
                    .icon (m/Icon m/Icons.add
                                  .size 26
@@ -266,7 +280,12 @@
                                  .hintStyle (m/TextStyle
                                               .fontSize 22
                                               .fontWeight m.FontWeight/normal
-                                              .color m.Colors/grey))
+                                              .color m.Colors/grey)
+                                 .contentPadding (m/EdgeInsets.only .bottom 0))
+                   .strutStyle (m/StrutStyle
+                                 .fontSize 22
+                                 .height 1.9
+                                 .forceStrutHeight true)
                    .controller text-controller
                    .style (m/TextStyle
                             .fontSize 22
