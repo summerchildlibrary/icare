@@ -24,17 +24,13 @@
     (f/widget
      :key key
      :padding {:vertical 6}
-     :let [controller ^m/ExpansibleController ((get-pub-key-to-card-controller-map) key)
-           expanded?-atom (atom (.isExpanded controller))] ;;track expansion locally to rebuild expansion tile properly
+     :let [controller ^m/ExpansibleController ((get-pub-key-to-card-controller-map) key)]
      (m/Material
       .elevation 4
       .borderRadius (m/BorderRadius.circular 12))
-     :watch [expanded? expanded?-atom]
      (m/ExpansionTile
       .controller controller
-      .onExpansionChanged (fn [expanded?]
-                            (reset! expanded?-atom expanded?)
-                            (on-expand expanded?))
+      .onExpansionChanged on-expand
       .childrenPadding (m/EdgeInsets.only .bottom 20)
       .expandedCrossAxisAlignment m.CrossAxisAlignment/start
       .expandedAlignment m.Alignment/topLeft

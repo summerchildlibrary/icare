@@ -268,13 +268,14 @@
 
 (defn handle-card-expansion [state event]
   (let [{:keys [card-idx expanded?]} event
-        state (update state :reorderable-items
-                      #(mapv (fn [item] (if (contains? item :expanded?)
-                                          (assoc item :expanded? false)
-                                          item))
-                             %))
-        state (assoc-in state [:reorderable-items card-idx :expanded?] expanded?)]
-    state))
+        state (if expanded?
+                (update state :reorderable-items
+                        #(mapv (fn [item] (if (contains? item :expanded?)
+                                            (assoc item :expanded? false)
+                                            item))
+                               %))
+                state)]
+    (assoc-in state [:reorderable-items card-idx :expanded?] expanded?)))
 
 (defn handle-transform-magic-button [state event]
   (let [{:keys [to-form]} event]
