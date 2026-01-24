@@ -36,7 +36,7 @@
                 discard-pub-keys)
         (assoc :active-pub-keys #{}))))
 
-(defn update-derived-state [derived-state pub-key name expanded?]
+(defn update-derived-state [derived-state pub-key name]
   (letfn [(add-missing-keys [derived-state]
             (let [{:keys [pub-key-to-name pub-key-to-card-controller]} derived-state
                   missing-pub-key? (or (not (contains? pub-key-to-name pub-key))
@@ -53,53 +53,26 @@
                                       (get pub-key-to-name pub-key))]
               (if name-changed?
                 (assoc-in derived-state [:pub-key-to-name pub-key] name)
-                derived-state)))
-          (handle-expansion-changes [derived-state]
-            (let [{:keys [pub-key-to-card-controller]} derived-state
-                  controller ^m/ExpansibleController (pub-key-to-card-controller pub-key)
-                  changed-expanded? (not= expanded?
-                                          (.-isExpanded controller))]
-              (when changed-expanded?
-                (if expanded?
-                  (.expand controller)
-                  (.collapse controller))
-                nil)
-              derived-state))]
+                derived-state)))]
     (-> derived-state
         add-missing-keys
-        handle-name-changes
-        handle-expansion-changes)))
+        handle-name-changes)))
 
 (defn derive-state [derived-state event]
   (condp = (:type event)
     :derive-state
     (let [{:keys [people-cards]} event]
       (-> (reduce (fn [acc card]
-                    (let [{:keys [pub-key name expanded?]} card
+                    (let [{:keys [pub-key name]} card
                           user? (= (:type card) :user)]
                       (cond
                         user? (-> acc
                                   (conj [:user-pub-key pub-key])
-                                  (update-derived-state pub-key name expanded?))
-                        :else (update-derived-state acc pub-key name expanded?))))
+                                  (update-derived-state pub-key name))
+                        :else (update-derived-state acc pub-key name))))
                   derived-state
                   people-cards)
           remove-deleted-pub-keys))
-
-    :update-expansions ;;this is also implicitely handled by derive-state
-    (let [{:keys [people-cards]} event
-          {:keys [pub-key-to-card-controller]} derived-state]
-      (doall (for [card people-cards]
-               (let [{:keys [pub-key expanded?]} card
-                     controller ^m/ExpansibleController (pub-key-to-card-controller pub-key)
-                     changed-expanded? (not= expanded?
-                                             (.-isExpanded controller))]
-                 (when changed-expanded?
-                   (if expanded?
-                     (.expand controller)
-                     (.collapse controller))
-                   nil))))
-      derived-state)
 
     (throw (Exception (str "derive-state received unknown event type: " event)))))
 

@@ -93,12 +93,8 @@
            (derived-state-dispatch! {:type :derive-state
                                      :people-cards people-cards}))
 
-         :card-expansion
-         (let [people-cards (get-people-cards new-state)]
-           (derived-state-dispatch! {:type :update-expansions
-                                     :people-cards people-cards}))
-
          ;;These events don't require any more dispatch calls
+         :card-expansion nil
          :reorder-items nil
          :transform-magic-button nil
 
