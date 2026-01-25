@@ -68,10 +68,11 @@
                                   :new-task new-task}))))})
 
 (defn person->ast [reorderable-item-idx person]
-  (let [{:keys [user? name tasks pub-key expanded?]} person
+  (let [{:keys [user? name tasks pub-key expanded? notify?]} person
         tasks (mapv #(conj % {:reorderable-item-idx reorderable-item-idx :creator-pub-key pub-key}) tasks)]
     {:ui-type :task-card
      :expanded? expanded?
+     :has-alert? notify?
      :key pub-key
      :idx reorderable-item-idx
      :title name

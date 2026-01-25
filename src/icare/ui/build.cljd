@@ -16,7 +16,7 @@
        .children (mapv ast->widget items)))))
 
 (defn render-task-card [ui]
-  (let [{:keys [expanded? on-expand idx title on-rename-title key title tasks]} ui
+  (let [{:keys [expanded? on-expand idx title has-alert? on-rename-title key title tasks]} ui
         controller ^m/ExpansibleController ((get-pub-key-to-card-controller-map) key)]
     (if expanded?
       (.expand controller)
@@ -35,31 +35,52 @@
       .expandedCrossAxisAlignment m.CrossAxisAlignment/start
       .expandedAlignment m.Alignment/topLeft
       .shape (m/RoundedRectangleBorder
+              .side (m/BorderSide
+                     .color (m/Colors.green.withOpacity 1))
               .borderRadius (m/BorderRadius.circular 12))
       .collapsedShape (m/RoundedRectangleBorder
+                       .side (m/BorderSide
+                              .color (m/Colors.orange.withOpacity (if has-alert? 1 0)))
                        .borderRadius (m/BorderRadius.circular 12))
       .leading (if expanded?
-                 (m/Icon m.Icons/drag_handle .color m.Colors/transparent)
+                 (m/Icon m.Icons/drag_handle .color (m/Colors.black.withOpacity 0.2))
                  (m/ReorderableDragStartListener
                   .index idx
                   .child (m/Icon m.Icons/drag_handle)))
       .title (f/widget
               (m/Align .alignment m/Alignment.centerLeft)
-              (m/SizedBox .width 150)
-              (m/TextField
-               .style (m/TextStyle
-                        .fontSize 16
-                        .fontWeight m/FontWeight.bold
-                        .color (if expanded? m/Colors.grey m/Colors.black))
-               .onSubmitted on-rename-title
-               .decoration (m/InputDecoration
-                             .contentPadding (m/EdgeInsets.only .bottom 0)
-                             .border m/InputBorder.none)
-               .strutStyle (m/StrutStyle
-                             .fontSize 16
-                             .height 1.9
-                             .forceStrutHeight true)
-               .controller (m/TextEditingController. .text title)))
+              (m/Row)
+              .children
+              [
+               (f/widget
+                (m/SizedBox .width 150)
+                (m/TextField
+                 .style (m/TextStyle
+                          .fontSize 16
+                          .fontWeight m/FontWeight.bold
+                          .color m/Colors.black)
+                 .onSubmitted on-rename-title
+                 .decoration (m/InputDecoration
+                               .contentPadding (m/EdgeInsets.only .bottom 0)
+                               .border m/InputBorder.none)
+                 .strutStyle (m/StrutStyle
+                               .fontSize 16
+                               .height 1.9
+                               .forceStrutHeight true)
+                 .controller (m/TextEditingController. .text (str title))))])
+               ;; (m/Spacer .flex 1)
+               ;; (f/widget
+               ;;  (m/DecoratedBox
+               ;;   .decoration (m/BoxDecoration
+               ;;                 .color (m/Colors.green.withOpacity (if expanded? 0.2 1))
+               ;;                 .borderRadius (m/BorderRadius.circular 12)))
+               ;;  :padding {:left 8 :right 8 :top 4 :bottom 6}
+               ;;  (m/Text (str "*")
+               ;;          .style (m/TextStyle
+               ;;                   .fontSize 14
+               ;;                   .fontWeight m/FontWeight.bold
+               ;;                   .color m/Colors.white)))])
+
       .children (mapv ast->widget tasks)))))
 
 (defn render-editable-task [ui]

@@ -10,6 +10,7 @@
 
 (defonce store (atom {:reorderable-items [{:type :user
                                            :name "Me"
+                                           :notify? false
                                            :expanded? true
                                            :pub-key nil
                                            :tasks [{:title "wake up"
@@ -24,7 +25,8 @@
                                                     :subitems [{:type :time :value "2026-01-06 09:18:04Z"}]}]}
                                                                ;; {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
                                           {:type :friend
-                                           :name "Example"
+                                           :name "Example 🎸🎸"
+                                           :notify? true
                                            :expanded? false
                                            :pub-key "b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"
                                            :tasks [{:title "Defeated bear"
@@ -93,6 +95,10 @@
                   first
                   :pub-key))))
 
+(defn get-reorderable-item-by-idx
+  ([reorderable-item-idx] (get-reorderable-item-by-idx @store reorderable-item-idx))
+  ([state reorderable-item-idx] (get-in state [:reorderable-items reorderable-item-idx])))
+
 (defn get-reorderable-item-idx-by-predicate [reorderable-items predicate]
   (->> reorderable-items
        (map vector (range))
@@ -113,29 +119,40 @@
    reorderable-items
    #(= (:type %) :user)))
 
+;;this is a helper function to update the notify? status of a card.
+;;It's meant to be called when we receive network events that modify a closed card
+(defn notify-card [state card-idx]
+  (let [expanded? (:expanded? (get-reorderable-item-by-idx state card-idx))]
+    (if expanded?
+      state
+      (assoc-in state [:reorderable-items card-idx :notify?] true))))
 
 ;;
 ;;DISPATCH HANDLERS
 ;;
 ;;
 
-;;TODO we need to something about events coming through the network
-;;so that we can batch them. Not neccessary now.
 ;;network event handler
 (defn handle-liked-event [state event]
   (let [{:keys [liked task-uuid creator-pub-key]} event
-        user-card-idx (get-user-reorderable-item-idx (:reorderable-items state))
-        task-idx (uuid->task-idx
-                  (get-in state [:reorderable-items user-card-idx :tasks])
-                  task-uuid)]
-    (if liked
-      (update-in state
-                [:reorderable-items user-card-idx :tasks task-idx :liked-by]
-                conj creator-pub-key)
-      (update-in state
-                [:reorderable-items user-card-idx :tasks task-idx :liked-by]
-                disj creator-pub-key))))
+        user-pub-key (get-user-pub-key state)
+        user-card-idx (pub-key->reorderable-item-idx
+                        (:reorderable-items state)
+                        user-pub-key)
+        task-idx (when-not (nil? user-card-idx)
+                  (uuid->task-idx
+                   (get-in state [:reorderable-items user-card-idx :tasks])
+                   task-uuid))
+        like-or-dislike-fn (if liked conj disj)]
+    (if (or (nil? user-card-idx) (nil? task-idx))
+      state
+      (-> state
+          (notify-card user-card-idx)
+          (update-in [:reorderable-items user-card-idx :tasks task-idx :liked-by]
+                     like-or-dislike-fn
+                     creator-pub-key)))))
 
+;;TODO we shouldn't notify if we send a task and delete before the user has expanded their card. I'll  have to think about how to do this
 ;;network event handler
 (defn handle-update-task-event [state event]
   (let [{:keys [task creator-pub-key]} event
@@ -148,31 +165,31 @@
                   (uuid->task-idx
                    (get-in state [:reorderable-items card-idx :tasks])
                    task-uuid))
-        user-pub-key (get-user-pub-key)
+        user-pub-key (get-user-pub-key state)
         liked-by-user? (contains? (:liked-by task) user-pub-key)
         task (if liked-by-user?
                (conj task [:liked true])
                (conj task [:liked false]))]
-    (cond
-      ;;delete existing task
-      (and card-idx task-idx deleted?)
-      (update-in state
-                 [:reorderable-items card-idx :tasks]
-                 (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
-                                          (subvec tasks (inc task-idx))))))
-      ;;this is an error state, we get sent a delete message for an item we don't have
-      (and (or (nil? card-idx) (nil? task-idx)) deleted?)
-      state
-      ;;another error state, we get sent an item by someone we don't have
-      (nil? card-idx) state
-      ;;first time we see this task
-      (nil? task-idx) (update-in state ;;new task
-                                [:reorderable-items card-idx :tasks]
-                                conj task)
-      ;;update existing task
-      :else (assoc-in state
-                      [:reorderable-items card-idx :tasks task-idx]
-                      task))))
+    (letfn [(handle-task-deletion [state]
+              (when (and card-idx task-idx deleted?)
+                (update-in state
+                           [:reorderable-items card-idx :tasks]
+                           (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
+                                                    (subvec tasks (inc task-idx))))))))
+            (handle-new-task [state]
+              (when (and card-idx (nil? task-idx) (not deleted?))
+                (-> state
+                    (notify-card card-idx)
+                    (update-in [:reorderable-items card-idx :tasks] conj task))))
+            (handle-existing-task [state]
+              (when (and card-idx task-idx)
+                (-> state
+                    ;;TODO maybe we want notify about particular events like task completions but not others like renaming a task
+                    (assoc-in [:reorderable-items card-idx :tasks task-idx] task))))]
+      (or (handle-task-deletion state)
+          (handle-new-task state)
+          (handle-existing-task state)
+          state)))) ;;this is the default case in case we receive a nonsensical event... TODO we should add logging here for sanity
 
 (defn handle-complete-user-task[state event]
   (let [{:keys [user-card-idx task-idx completed creator-pub-key]} event]
@@ -267,15 +284,26 @@
                     :y (+ y dy)})))))
 
 (defn handle-card-expansion [state event]
-  (let [{:keys [card-idx expanded?]} event
-        state (if expanded?
-                (update state :reorderable-items
-                        #(mapv (fn [item] (if (contains? item :expanded?)
-                                            (assoc item :expanded? false)
-                                            item))
-                               %))
-                state)]
-    (assoc-in state [:reorderable-items card-idx :expanded?] expanded?)))
+  (let [{:keys [card-idx expanded?]} event]
+    (letfn [(handle-opening [state]
+              (if-not expanded?
+                state
+                (-> state
+                    (update :reorderable-items  ;;collapse all cards
+                         #(mapv (fn [item] (if (contains? item :expanded?)
+                                             (assoc item :expanded? false)
+                                             item))
+                                %))
+                    (assoc-in [:reorderable-items card-idx :notify?] false)))) ;;indicate that there's nothing to notify about this card
+
+            (handle-closing [state] state) ;;No special handling when closing a card
+
+            (update-expansion [state]
+              (assoc-in state [:reorderable-items card-idx :expanded?] expanded?))]
+      (-> state
+          handle-opening
+          handle-closing
+          update-expansion))))
 
 (defn handle-transform-magic-button [state event]
   (let [{:keys [to-form]} event]
@@ -328,14 +356,3 @@
     (reset! initialized? true)
     (update-user-pub-key! pub-key))
   store)
-
-;;TODO derived state caching?
-;;things like pub-key->name list of friend pub keys ...
-;;although let's worry about the derived state performance issue when I actually start to get
-;;performance issues
-;;we should implement this by creating another resource
-;;called derived-state that is also an atom, this atom
-;;has some initialize_derived-state! function that is called from
-;;core and sets up watches on the main store to update.
-;;Since we plan on making a central dispatch manager, we can
-;;also update derived state from there instead of using watches
