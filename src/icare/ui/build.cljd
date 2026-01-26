@@ -24,7 +24,6 @@
     (f/widget
      :key key
      :padding {:vertical 6}
-     :let [controller ^m/ExpansibleController ((get-pub-key-to-card-controller-map) key)]
      (m/Material
       .elevation 4
       .borderRadius (m/BorderRadius.circular 12))
@@ -112,7 +111,7 @@
 (defn render-ronly-task [ui]
   (let [{:keys [title completed subitems liked on-liked notify? on-notifies]} ui
         animation-duration 2000]
-    (f/widget
+    (f/widget  ;;TODO this needs to be its own ast element or a helper function
      :padding {:left 20 :bottom 30 :right 20}
      :vsync clock
      :managed [controller (m/AnimationController
@@ -336,14 +335,16 @@
     (f/widget
      :key key
      :padding {:top 5 :bottom 100}
-     :let [width  (condp = form :button 70 :card 350)
-           height (condp = form :button 70 :card 100)]
+     :let [[width height] (condp = form
+                             :button [100 70]
+                             :card   [350 100]
+                             [70 70])]
      m/Center
      (m/GestureDetector
       .onTap on-press)
      .child
      (m/AnimatedContainer
-      .duration (Duration .milliseconds 500)
+      .duration (Duration .milliseconds 700)
       .curve m/Curves.bounceOut
       .width  width
       .height height
@@ -359,7 +360,7 @@
                                   .offset (m/Offset 0 4))]))
      .child
      :padding {:left 0 :right 0 :top 0 :bottom 0}
-     (m/Icon m.Icons/add
+     (m/Icon m.Icons/person_add
              .size 32
              .color m.Colors/white))))
 
