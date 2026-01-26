@@ -77,23 +77,20 @@
       (prn "WebSocket not initialized while trying to send event:" message))))
 
 (defn start-listening! [ws user-task-uuids friend-pub-keys user-pub-key]
-  (when-not (= @web-socket ws)
-    (prn "Started listening to web socket events...")
-    (reset! web-socket ws)
-    (.listen ^WebSocket ws
-             handle-network-data!
-             .onError (fn [error] ;;TODO reconnection logic
-                        (prn "WebSocket error:" error)
-                        (reset! web-socket nil))
-             .onDone (fn [] ;;TODO reconnection logic
-                       (prn "WebSocket closed")
-                       (reset! web-socket nil)))
-    (dispatch! {:type :tasks-request
-                :friend-pub-keys friend-pub-keys})
-    (dispatch! {:type :reactions-request
-                :user-pub-key user-pub-key
-                :user-task-uuids user-task-uuids
-                :friend-pub-keys friend-pub-keys})))
+  (.listen ^WebSocket ws
+           handle-network-data!
+           .onError (fn [error] ;;TODO reconnection logic
+                      (prn "WebSocket error:" error)
+                      (reset! web-socket nil))
+           .onDone (fn [] ;;TODO reconnection logic
+                     (prn "WebSocket closed")
+                     (reset! web-socket nil)))
+  (dispatch! {:type :tasks-request
+              :friend-pub-keys friend-pub-keys})
+  (dispatch! {:type :reactions-request
+              :user-pub-key user-pub-key
+              :user-task-uuids user-task-uuids
+              :friend-pub-keys friend-pub-keys}))
 
 (defn ^Future initialize-network! [new-private-key user-task-uuids friend-pub-keys user-pub-key]
   (when-not @initialized?
