@@ -1,7 +1,7 @@
 (ns icare.ui.ast
   (:require ["package:flutter/material.dart" :as m]
             ["package:uuid/uuid.dart" :refer [Uuid]]
-            [icare.resources.dispatch :refer [dispatch!]]))
+            [icare.ui-events :refer [handle-ui-event!]]))
 
 (def uuid-generator (.-v4 (Uuid)))
 ;;Build an AST from our state
@@ -20,20 +20,20 @@
      :title title
      :notify? notify?
      :on-complete (fn []
-                    (dispatch! {:type :complete-user-task
-                                :user-card-idx reorderable-item-idx
-                                :task-idx task-idx
-                                :completed (not completed)}))
+                    (handle-ui-event! {:type :complete-user-task
+                                       :user-card-idx reorderable-item-idx
+                                       :task-idx task-idx
+                                       :completed (not completed)}))
      :on-edit-task-title (fn [title]
                            (if (empty? title)
-                             (dispatch! {:type :delete-user-task
-                                         :user-card-idx reorderable-item-idx
-                                         :task-idx task-idx
-                                         :task task})
-                             (dispatch! {:type :rename-user-task
-                                         :user-card-idx reorderable-item-idx
-                                         :task-idx task-idx
-                                         :title title})))
+                             (handle-ui-event! {:type :delete-user-task
+                                                :user-card-idx reorderable-item-idx
+                                                :task-idx task-idx
+                                                :task task})
+                             (handle-ui-event! {:type :rename-user-task
+                                                :user-card-idx reorderable-item-idx
+                                                :task-idx task-idx
+                                                :title title})))
      :completed completed
      :subitems (mapv task-subitems->ast
                      (if (seq liked-by)
@@ -47,15 +47,15 @@
      :completed completed
      :notify? (and notify? card-expanded?)
      :on-notifies (fn [_]
-                     (dispatch! {:type :clear-card-notifies
-                                 :card-idx reorderable-item-idx}))
+                     (handle-ui-event! {:type :task-notification-finishes
+                                        :card-idx reorderable-item-idx}))
      :on-liked (fn []
-                 (dispatch! {:type :like-friend-task
-                             :friend-card-idx reorderable-item-idx
-                             :task-idx task-idx
-                             :liked (not liked)
-                             :creator-pub-key creator-pub-key
-                             :task-uuid uuid}))
+                 (handle-ui-event! {:type :like-friend-task
+                                    :friend-card-idx reorderable-item-idx
+                                    :task-idx task-idx
+                                    :liked (not liked)
+                                    :creator-pub-key creator-pub-key
+                                    :task-uuid uuid}))
      :liked liked
      :subitems (mapv task-subitems->ast subitems)}))
 
@@ -68,9 +68,9 @@
                                     :liked-by #{}
                                     :completed false
                                     :subitems []}]
-                      (dispatch! {:type :add-user-task
-                                  :user-card-idx reorderable-item-idx
-                                  :new-task new-task}))))})
+                      (handle-ui-event! {:type :add-user-task
+                                         :user-card-idx reorderable-item-idx
+                                         :new-task new-task}))))})
 
 (defn person->ast [reorderable-item-idx person]
   (let [{:keys [user? name tasks pub-key expanded? notify?]} person
@@ -82,18 +82,18 @@
      :idx reorderable-item-idx
      :title name
      :on-expand (fn [expanded?]
-                  (dispatch! {:type :card-expansion
-                              :expanded? expanded?
-                              :card-idx reorderable-item-idx
-                              :pub-key pub-key}))
+                  (handle-ui-event! {:type :card-expansion
+                                     :expanded? expanded?
+                                     :card-idx reorderable-item-idx
+                                     :pub-key pub-key}))
 
      :on-rename-title (fn [value]
                         (if (empty? value)
-                          (dispatch! {:type :delete-card
-                                      :card-idx reorderable-item-idx})
-                          (dispatch! {:type :rename-card
-                                      :card-idx reorderable-item-idx
-                                      :name value})))
+                          (handle-ui-event! {:type :delete-card
+                                             :card-idx reorderable-item-idx})
+                          (handle-ui-event! {:type :rename-card
+                                             :card-idx reorderable-item-idx
+                                             :name value})))
      :tasks (if user?
               (conj (mapv user-task->ast (range) tasks) (add-tasks->ast reorderable-item-idx))
               (mapv friend-task->ast (range) tasks))}))
@@ -104,8 +104,8 @@
 (defn friend-search->ast []
   {:ui-type :friend-search-area
    :on-search (fn [value]
-                (dispatch! {:type :add-friend
-                            :pub-key value}))})
+                (handle-ui-event! {:type :add-friend
+                                   :pub-key value}))})
 
 (defn magic-add-button->ast [magic-add-button]
   (let [{:keys [form]} magic-add-button
@@ -113,13 +113,13 @@
     (condp = form
       :button {:ui-type :magic-add-button
                :form :button
-               :on-press (fn [] (dispatch! {:type :transform-magic-button
-                                            :to-form :card}))
+               :on-press (fn [] (handle-ui-event! {:type :transform-magic-button
+                                                   :to-form :card}))
                :key key}
       :card {:ui-type :magic-add-button
              :form :card
-             :on-press (fn [] (dispatch! {:type :transform-magic-button
-                                            :to-form :button}))
+             :on-press (fn [] (handle-ui-event! {:type :transform-magic-button
+                                                   :to-form :button}))
              :key key}
       (throw (Exception (str "magic-add-button->ast was given a button with unknown form: " form))))))
 
@@ -138,9 +138,9 @@
                  (let [[from-index to-index] (if (< from-index to-index)
                                                [from-index (dec to-index)]
                                                [from-index to-index])]
-                   (dispatch! {:type :reorder-items
-                               :from-index from-index
-                               :to-index to-index})))
+                   (handle-ui-event! {:type :reorder-items
+                                      :from-index from-index
+                                      :to-index to-index})))
    :items (mapv list-item->ast (range) reorderable-items)})
 
 (defn state->ast [state]

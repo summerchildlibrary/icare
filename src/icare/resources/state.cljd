@@ -259,11 +259,9 @@
                                   :name pub-key ;;obviously this is wrong TODO
                                   :expanded? false
                                   :tasks []}]
-                  (if (friend-search-at-bottom? items)
-                    (vec (concat (subvec items 0 (dec (count items)))
-                                 [new-friend]
-                                 (subvec items (dec (count items)))))
-                    (conj items new-friend)))))
+                  (vec (concat (subvec items 0 (- (count items) 2)) ;;TODO this isn't right, but we have to rewrite the whole how to add friends anyways so...
+                               [new-friend]
+                               (subvec items (- (count items) 2)))))))
       state)))
 
 (defn handle-reorder-items [state event]
@@ -319,7 +317,7 @@
             (fn [items]
               (assoc-in items [(dec (count items)) :form] to-form)))))
 
-(defn handle-clear-card-notifies [state event]
+(defn handle-task-notification-finishes [state event]
   (let [{:keys [card-idx]} event]
     (-> state
         (update-in [:reorderable-items card-idx :tasks]
@@ -345,7 +343,7 @@
     :move-undo-redo (handle-move-undo-redo state event)
     :card-expansion (handle-card-expansion state event)
     :transform-magic-button (handle-transform-magic-button state event)
-    :clear-card-notifies (handle-clear-card-notifies state event)
+    :task-notifaction-finishes (handle-task-notification-finishes state event)
     (throw (Exception (str "No dispatch function found for event: " event)))))
 
 ;;TODO

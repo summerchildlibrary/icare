@@ -1,0 +1,11 @@
+(ns icare.resources.utils
+  (:require [icare.resources.state :refer [dispatch!] :rename {dispatch! state-dispatch!}]
+            [icare.resources.storage :refer [dispatch!] :rename {dispatch! storage-dispatch!}]))
+
+;;Shared helper for coordinating state updates with storage persistence.
+;;Used by both ui-events and network-events.
+
+(defn update-state-and-persist! [event]
+  (let [new-state (state-dispatch! event)]
+    (storage-dispatch! {:type :state-change-event :new-state new-state})
+    new-state))

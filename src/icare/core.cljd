@@ -8,7 +8,6 @@
             [icare.resources.state :refer [initialize-state! gather-pub-keys-and-uuids get-user-pub-key get-people-cards]]
             [icare.resources.derived-state :refer [initialize-derived-state!]]
             [icare.resources.network :refer [initialize-network!]]
-            [icare.network-events :refer [start-listening!]]
             [icare.resources.storage :refer [initialize-storage!]]))
 
 (defn main []
@@ -42,8 +41,7 @@
               {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids state)
               user-pub-key (get-user-pub-key state)]
           (initialize-derived-state! people-cards)
-          (.then (initialize-network! private-key)
-                 (fn [ws] (start-listening! ws user-task-uuids friend-pub-keys user-pub-key)))
+          (initialize-network! private-key user-task-uuids friend-pub-keys public-key)
           (f/widget
            :watch [state store]
            (-> state                   ;;state is the end-user representation of the app

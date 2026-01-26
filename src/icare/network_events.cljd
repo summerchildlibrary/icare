@@ -1,17 +1,20 @@
 (ns icare.network-events
   (:require ["package:nostr/nostr.dart" :refer [Event]]
             ["dart:convert" :refer [jsonDecode]]
-            ["dart:io" :refer [WebSocket]]
             [cljd.edn :refer [read-string]]
-            [icare.resources.network :refer [liked-event-kind update-task-event-kind]]
-            [icare.resources.dispatch :refer [dispatch!]]))
+            [icare.resources.utils :refer [update-state-and-persist!]]))
+;;If you require icare.resources.network here you will cause a cyclic dependancy. Therefore, incoming network events can't
+;;be resolved by sending out another network event. If you think an incoming network event should be resolved by an outbound network event
+;;consider another solution before refactoring. BTW, the simplest way to refactor this to make that issue
+;;work is by deleting this file and moving the contents to network.cljd
+
+(def liked-event-kind 39506)
+(def update-task-event-kind 39505)
 
 ;;This module handles incoming websocket events.
-;;It listens to the websocket and dispatches events to the central dispatcher.
+;;It parses incoming messages and updates state + storage directly.
 
-(defonce web-socket (atom nil))
-
-(defn handle-event [data]
+(defn handle-event! [data]
   (try
     (let [subscription-id (get data 1)
           event-json (get data 2)
@@ -22,16 +25,16 @@
               task-uuid (:task-uuid content)
               liked (:liked content)
               creator-pub-key (.-pubkey event)]
-          (dispatch! {:type :liked-event :liked liked
-                      :task-uuid task-uuid :creator-pub-key creator-pub-key})
+          (update-state-and-persist! {:type :liked-event :liked liked
+                                      :task-uuid task-uuid :creator-pub-key creator-pub-key})
           (prn "Received liked event:" (.-content event) "with tags:" (.-tags event)))
 
         update-task-event-kind
         (let [task-data (read-string (.-content event))
               creator-pub-key (.-pubkey event)]
           (when-not (nil? task-data)
-            (dispatch! {:type :update-task-event :task task-data
-                        :creator-pub-key creator-pub-key})
+            (update-state-and-persist! {:type :update-task-event :task task-data
+                                        :creator-pub-key creator-pub-key})
             (prn "Received update task event:" task-data "with tags:" (.-tags event))))
 
         (prn "Unhandled event kind:" (.-kind event) "with content:" (.-content event))))
@@ -51,36 +54,14 @@
     (catch Exception e
       (prn "Ok message from server does not comply to NIP01:" e))))
 
-;;TODO we need to handle websocket disconnections, this is not so clear how to do
-;;we connect to the websocket from network.cljd, then, somehow we need to synchronize the websocket
-;;in network.cljd to the websocket here. I guess that would be a good motive to unite these files
-;;hmmm.... I'll keep thinking
-;;so we could just call a network function that sets the websocket there and returns it
-(defn start-listening! [ws user-task-uuids friend-pub-keys user-pub-key]
-  (when-not (= @web-socket ws)
-    (prn "Started listening to web socket events...")
-    (reset! web-socket ws)
-    (.listen ^WebSocket ws
-             (fn [message]
-               (try
-                 (let [data (jsonDecode message)]
-                   (condp = (get data 0)
-                     "OK" (handle-ok data)
-                     "EVENT" (handle-event data)
-                     "EOSE" nil
-                     "NOTICE" nil
-                     (prn "Unhandled WebSocket message:" data)))
-                 (catch Exception e
-                   (prn "Websocket message is not a json object" e))))
-             .onError (fn [error]
-                        (prn "WebSocket error:" error)
-                        (reset! web-socket nil))
-             .onDone (fn []
-                       (prn "WebSocket closed")
-                       (reset! web-socket nil)))
-    (dispatch! {:type :tasks-request
-                :friend-pub-keys friend-pub-keys})
-    (dispatch! {:type :reactions-request
-                :user-pub-key user-pub-key
-                :user-task-uuids user-task-uuids
-                :friend-pub-keys friend-pub-keys})))
+(defn handle-network-data! [data]
+  (try
+    (let [data (jsonDecode data)]
+      (condp = (get data 0)
+        "OK" (handle-ok data)
+        "EVENT" (handle-event! data)
+        "EOSE" nil
+        "NOTICE" nil
+        (prn "Unhandled WebSocket message:" data)))
+    (catch Exception e
+      (prn "Websocket message is not a json object" e))))
