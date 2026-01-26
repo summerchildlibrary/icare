@@ -68,19 +68,6 @@
                                .height 1.9
                                .forceStrutHeight true)
                  .controller (m/TextEditingController. .text (str title))))])
-               ;; (m/Spacer .flex 1)
-               ;; (f/widget
-               ;;  (m/DecoratedBox
-               ;;   .decoration (m/BoxDecoration
-               ;;                 .color (m/Colors.green.withOpacity (if expanded? 0.2 1))
-               ;;                 .borderRadius (m/BorderRadius.circular 12)))
-               ;;  :padding {:left 8 :right 8 :top 4 :bottom 6}
-               ;;  (m/Text (str "*")
-               ;;          .style (m/TextStyle
-               ;;                   .fontSize 14
-               ;;                   .fontWeight m/FontWeight.bold
-               ;;                   .color m/Colors.white)))])
-
       .children (mapv ast->widget tasks)))))
 
 (defn render-editable-task [ui]
@@ -123,46 +110,81 @@
        (m/Column .children (mapv ast->widget subitems)))])))
 
 (defn render-ronly-task [ui]
-  (let [{:keys [title completed subitems liked on-liked]} ui]
+  (let [{:keys [title completed subitems liked on-liked notify? on-notifies]} ui
+        animation-duration 2000]
     (f/widget
-     :padding {:left 20 :bottom 30}
-     (m/Column)
-     .children
-     [(m/Row
-       .crossAxisAlignment m.CrossAxisAlignment/center
-       .children
-        [(f/widget
-          (m/IconButton
-           .icon (m/Icon (if completed
-                           m/Icons.check_box
-                           m/Icons.check_box_outline_blank)
-                         .size 26
-                         .color m/Colors.grey)
-           .onPressed nil))
-         (f/widget
-          (m/SizedBox .width 160)
-          (m/Text title
-                  .maxLines nil
-                  .style (m/TextStyle
-                           .fontSize 22
-                           .fontWeight m/FontWeight.normal
-                           .color m/Colors.black
-                           .decoration (if completed
-                                         m/TextDecoration.lineThrough
-                                         m/TextDecoration.none))))
-         (m/Spacer .flex 1)
-         (f/widget
-          (m/IconButton
-           .icon (m/Icon (if liked
-                           m/Icons.favorite
-                           m/Icons.favorite_border)
-                         .size 26
-                         .color m/Colors.red)
-           .onPressed on-liked))
-         (m/Spacer .flex 1)])
-      (m/Transform.translate
-       .offset (m/Offset 0 -2)
-       .child (m/Column .children (mapv ast->widget subitems)))])))
+     :padding {:left 20 :bottom 30 :right 20}
+     :vsync clock
+     :managed [controller (m/AnimationController
+                           .vsync clock
+                           .duration (Duration .milliseconds animation-duration))]
+     :let [color-tween (m/TweenSequence
+                          [(m/TweenSequenceItem
+                             .weight 30
+                             .tween (m/ColorTween
+                                      .begin (m/Colors.orange.withOpacity 0)
+                                      .end (m/Colors.orange.withOpacity 0)))
+                           (m/TweenSequenceItem
+                             .weight 20
+                             .tween (m/ColorTween
+                                      .begin (m/Colors.orange.withOpacity 0)
+                                      .end (m/Colors.orange.withOpacity 0.3)))
+                           (m/TweenSequenceItem
+                             .weight 50
+                             .tween (m/ColorTween
+                                     .begin (m/Colors.orange.withOpacity 0.3)
+                                     .end (m/Colors.orange.withOpacity 0)))])
+           animation (.drive controller color-tween)]
+     (do
+       (when notify?
+         (.reset controller)
+         (.then (.forward controller) on-notifies))
+       (m/AnimatedBuilder
+        .animation animation
+        .builder
+        (fn [ctx child]
+          (f/widget
+           (m/Container
+            .decoration (m/BoxDecoration
+                         .color (.-value animation)
+                         .borderRadius (m/BorderRadius.circular 16)))
+           (m/Column)
+           .children
+           [(m/Row
+             .crossAxisAlignment m.CrossAxisAlignment/center
+             .children
+              [(f/widget
+                (m/IconButton
+                 .icon (m/Icon (if completed
+                                 m/Icons.check_box
+                                 m/Icons.check_box_outline_blank)
+                               .size 26
+                               .color m/Colors.grey)
+                 .onPressed nil))
+               (f/widget
+                (m/SizedBox .width 160)
+                (m/Text title
+                        .maxLines nil
+                        .style (m/TextStyle
+                                 .fontSize 22
+                                 .fontWeight m/FontWeight.normal
+                                 .color m/Colors.black
+                                 .decoration (if completed
+                                               m/TextDecoration.lineThrough
+                                               m/TextDecoration.none))))
+               (m/Spacer .flex 2)
+               (f/widget
+                (m/IconButton
+                 .icon (m/Icon (if liked
+                                 m/Icons.favorite
+                                 m/Icons.favorite_border)
+                               .size 26
+                               .color m/Colors.red)
+                 .onPressed on-liked))
+               (m/Spacer .flex 1)])
+            (m/Transform.translate
+             .offset (m/Offset 0 -2)
+             .child (m/Column .children (mapv ast->widget subitems)))])))))))
 
 (defn render-subitem-liked-list [ui]
   (let [{:keys [liked-by]} ui]

@@ -94,6 +94,7 @@
                                      :people-cards people-cards}))
 
          ;;These events don't require any more dispatch calls
+         :clear-card-notifies nil
          :card-expansion nil
          :reorder-items nil
          :transform-magic-button nil

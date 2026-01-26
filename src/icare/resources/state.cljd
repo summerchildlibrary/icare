@@ -10,38 +10,41 @@
 
 (defonce store (atom {:reorderable-items [{:type :user
                                            :name "Me"
-                                           :notify? false
                                            :expanded? true
                                            :pub-key nil
                                            :tasks [{:title "wake up"
                                                     :uuid (uuid-generator)
                                                     :completed false
+                                                    :notify? false
                                                     :liked-by #{"b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"}
                                                     :subitems []}
                                                    {:title "go to monkey bars"
                                                     :uuid (uuid-generator)
                                                     :completed true
+                                                    :notify? false
                                                     :liked-by #{}
                                                     :subitems [{:type :time :value "2026-01-06 09:18:04Z"}]}]}
                                                                ;; {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
                                           {:type :friend
                                            :name "Example 🎸🎸"
-                                           :notify? true
                                            :expanded? false
                                            :pub-key "b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"
                                            :tasks [{:title "Defeated bear"
                                                     :uuid (uuid-generator)
                                                     :liked false
+                                                    :notify? false
                                                     :completed false
                                                     :subitems []}
                                                    {:title "go to sleep"
                                                     :uuid (uuid-generator)
                                                     :liked false
+                                                    :notify? true
                                                     :completed true
                                                     :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
                                                    {:title "went for walk"
                                                     :uuid (uuid-generator)
                                                     :liked false
+                                                    :notify? false
                                                     :completed true
                                                     :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
                                                                {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
@@ -119,13 +122,16 @@
    reorderable-items
    #(= (:type %) :user)))
 
-;;this is a helper function to update the notify? status of a card.
-;;It's meant to be called when we receive network events that modify a closed card
-(defn notify-card [state card-idx]
+;;this is a helper function to update the notify? status of a task
+;;It's meant to be called when we receive network events that modify a task in a meaningful way
+;;Be careful notifying a task. A task with notify? true is meant to be resolved by dispatching the :clear-card-notifies event
+;;This is done so that notify? controlls the notification flash animation.
+;;Therefore, for notify-task to work, we have to make sure that we've also implemented the notify? animation on the appropriate ui element
+(defn notify-task [state card-idx task-idx]
   (let [expanded? (:expanded? (get-reorderable-item-by-idx state card-idx))]
     (if expanded?
       state
-      (assoc-in state [:reorderable-items card-idx :notify?] true))))
+      (assoc-in state [:reorderable-items card-idx :tasks task-idx :notify?] true))))
 
 ;;
 ;;DISPATCH HANDLERS
@@ -147,7 +153,7 @@
     (if (or (nil? user-card-idx) (nil? task-idx))
       state
       (-> state
-          (notify-card user-card-idx)
+          ;; (notify-task user-card-idx task-idx)
           (update-in [:reorderable-items user-card-idx :tasks task-idx :liked-by]
                      like-or-dislike-fn
                      creator-pub-key)))))
@@ -179,13 +185,13 @@
             (handle-new-task [state]
               (when (and card-idx (nil? task-idx) (not deleted?))
                 (-> state
-                    (notify-card card-idx)
-                    (update-in [:reorderable-items card-idx :tasks] conj task))))
+                    (update-in [:reorderable-items card-idx :tasks] conj (conj task [:notify? true]))))) ;;always notify about a new task, even if the card is expanded
             (handle-existing-task [state]
               (when (and card-idx task-idx)
                 (-> state
-                    ;;TODO maybe we want notify about particular events like task completions but not others like renaming a task
-                    (assoc-in [:reorderable-items card-idx :tasks task-idx] task))))]
+                    ;;TODO maybe we want to notify about particular events like task completions but not others like renaming a task
+                    (assoc-in [:reorderable-items card-idx :tasks task-idx] task)
+                    (notify-task card-idx task-idx))))]
       (or (handle-task-deletion state)
           (handle-new-task state)
           (handle-existing-task state)
@@ -293,8 +299,7 @@
                          #(mapv (fn [item] (if (contains? item :expanded?)
                                              (assoc item :expanded? false)
                                              item))
-                                %))
-                    (assoc-in [:reorderable-items card-idx :notify?] false)))) ;;indicate that there's nothing to notify about this card
+                                %)))))
 
             (handle-closing [state] state) ;;No special handling when closing a card
 
@@ -305,11 +310,24 @@
           handle-closing
           update-expansion))))
 
+;;TODO this only works if the magic button is the last of the reorderable items
+;;we don't want this button to be reorderable, so we should move it out of the list
+;;and use the leading tag in the ReorderableList widget
 (defn handle-transform-magic-button [state event]
   (let [{:keys [to-form]} event]
     (update state :reorderable-items
             (fn [items]
               (assoc-in items [(dec (count items)) :form] to-form)))))
+
+(defn handle-clear-card-notifies [state event]
+  (let [{:keys [card-idx]} event]
+    (-> state
+        (update-in [:reorderable-items card-idx :tasks]
+                   #(mapv (fn [task]
+                            (if (contains? task :notify?)
+                              (conj task [:notify? false])
+                              task))
+                          %)))))
 
 (defn apply-state-event [state event]
   (condp = (:type event)
@@ -327,6 +345,7 @@
     :move-undo-redo (handle-move-undo-redo state event)
     :card-expansion (handle-card-expansion state event)
     :transform-magic-button (handle-transform-magic-button state event)
+    :clear-card-notifies (handle-clear-card-notifies state event)
     (throw (Exception (str "No dispatch function found for event: " event)))))
 
 ;;TODO

@@ -6,7 +6,7 @@
 ;;It creates and sends Nostr events to the relay.
 ;;Incoming events are handled by network-events.cljd
 
-(defonce send-events false)
+(defonce send-events true)
 (defonce initialized? (atom false))
 (defonce private-key (atom nil))
 (defonce web-socket (atom nil))
