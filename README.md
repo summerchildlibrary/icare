@@ -16,4 +16,5 @@ To compile and run after installing:
 
 More documentation for running a clojuredart project can be found in the clojuredart github repo [here.](https://github.com/Tensegritics/ClojureDart)
 
-The code for this project lives in src/icare. I think the code makes the most sense when you start reading it from core.cljd. Here's a highish level diagram of the code's architecture.<img width="1704" height="1454" alt="icare_architecture" src="https://github.com/user-attachments/assets/7733d01d-68ff-4fdc-8265-60f059b6c86e" />
+The code for this project lives in src/icare. I think the code makes the most sense when you start reading it from core.cljd. Here's a highish level diagram of the code's architecture.
+<img width="1412" height="776" alt="Screenshot 2026-01-26 at 17 57 44" src="https://github.com/user-attachments/assets/7272a2a9-45c1-4023-8106-bb0a6a2a96c9" />
