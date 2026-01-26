@@ -127,6 +127,8 @@
 ;;Be careful notifying a task. A task with notify? true is meant to be resolved by dispatching the :clear-card-notifies event
 ;;This is done so that notify? controlls the notification flash animation.
 ;;Therefore, for notify-task to work, we have to make sure that we've also implemented the notify? animation on the appropriate ui element
+;;We might want to make a universal notification system so that we can flash particular elements like the new person who liked your task or the
+;;particular subitem that's been added and not the entire task. To do this, we might want to add a new AST element: notifiable.
 (defn notify-task [state card-idx task-idx]
   (let [expanded? (:expanded? (get-reorderable-item-by-idx state card-idx))]
     (if expanded?
@@ -343,7 +345,7 @@
     :move-undo-redo (handle-move-undo-redo state event)
     :card-expansion (handle-card-expansion state event)
     :transform-magic-button (handle-transform-magic-button state event)
-    :task-notifaction-finishes (handle-task-notification-finishes state event)
+    :task-notification-finishes (handle-task-notification-finishes state event)
     (throw (Exception (str "No dispatch function found for event: " event)))))
 
 ;;TODO
