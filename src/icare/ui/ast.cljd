@@ -98,6 +98,27 @@
               (conj (mapv user-task->ast (range) tasks) (add-tasks->ast reorderable-item-idx))
               (mapv friend-task->ast (range) tasks))}))
 
+(defn uninitialized-person->ast [reorderable-item-idx item]
+  (let [{:keys [name uuid]} item]
+    {:ui-type :uninitialized-person-card
+     :key uuid
+     :idx reorderable-item-idx
+     :on-rename-title (fn [value]
+                        (if (empty? value)
+                          ;;this is lazy, just create a delete-uninitialized-person event and wire it to the delete-card handler in state
+                          (handle-ui-event! {:type :delete-uninitialized-person
+                                             :card-idx reorderable-item-idx})
+                          (handle-ui-event! {:type :rename-uninitialized-person
+                                             :card-idx reorderable-item-idx
+                                             :name value})))
+     :on-show-qr (fn []
+                   (handle-ui-event! {:type :toggle-qr}))
+     :on-paste-public-key (fn [value]
+                            (handle-ui-event! {:type :initialize-friend
+                                               :card-idx reorderable-item-idx
+                                               :public-key value}))
+     :title name}))
+
 ;;TODO we probably don't want a friend search, easier to
 ;;have local discovery and adding friends via sharing links
 ;;either way this is just for demo purposes
@@ -105,13 +126,14 @@
   {:ui-type :friend-search-area
    :on-search (fn [value]
                 (handle-ui-event! {:type :add-friend
-                                   :pub-key value}))})
+                                   :name value}))})
 
 (defn list-item->ast [reorderable-item-idx item]
   (let [{:keys [type]} item]
     (condp = type
       :user (person->ast reorderable-item-idx (conj item {:user? true}))
       :friend (person->ast reorderable-item-idx (conj item {:user? false}))
+      :uninitialized-person (uninitialized-person->ast reorderable-item-idx item)
       :friend-search (friend-search->ast)
       (throw (Exception (str "list-item->ast was given a list item with unknown type: " type))))))
 
@@ -127,6 +149,10 @@
    :items (mapv list-item->ast (range) reorderable-items)})
 
 (defn state->ast [state]
-  (let [{:keys [reorderable-items]} state]
-    {:ui-type :screen-base
-     :reorderable-list (reorderable-list->ast reorderable-items)}))
+  (let [{:keys [reorderable-items show-qr?]} state]
+    (cond
+      show-qr? {:ui-type :qr-screen
+                :on-close (fn []
+                            (handle-ui-event! {:type :toggle-qr}))}
+      :else {:ui-type :screen-base
+             :reorderable-list (reorderable-list->ast reorderable-items)})))

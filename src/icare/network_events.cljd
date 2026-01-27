@@ -3,10 +3,8 @@
             ["dart:convert" :refer [jsonDecode]]
             [cljd.edn :refer [read-string]]
             [icare.resources.utils :refer [update-state-and-persist!]]))
-;;If you require icare.resources.network here you will cause a cyclic dependancy. Therefore, incoming network events can't
-;;be resolved by sending out another network event. If you think an incoming network event should be resolved by an outbound network event
-;;consider another solution before refactoring. BTW, the simplest way to refactor this to make that issue
-;;work is by deleting this file and moving the contents to network.cljd
+;;If you require icare.resources.network here you will cause a cyclic dependancy. The way I recommend to avoid this
+;;is by taking in the dispatcher function as an argument to handle-network-data! check the comment in the network.cljd file.
 
 (def liked-event-kind 39506)
 (def update-task-event-kind 39505)
@@ -18,7 +16,7 @@
   (try
     (let [subscription-id (get data 1)
           event-json (get data 2)
-          event ^Event (.fromJson Event event-json)]
+          event ^Event (.fromJson Event event-json)] ;;this will automatically verify the event signature, if invalid it will throw
       (condp = (.-kind event)
         liked-event-kind
         (let [content (read-string (.-content event))

@@ -40,6 +40,7 @@ dependencies:
   nostr: ^1.5.0
   path_provider: ^2.1.5
   google_fonts: ^7.1.0
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:

@@ -13,6 +13,7 @@
 (defonce web-socket (atom nil))
 
 (def relay-url "ws://localhost:8080")
+;; (def relay-url "wss://relay.damus.io")
 
 ;;we want to support offline first workflows
 ;;that means that the first time we connect to the websocket
@@ -78,7 +79,7 @@
 
 (defn start-listening! [ws user-task-uuids friend-pub-keys user-pub-key]
   (.listen ^WebSocket ws
-           handle-network-data!
+           handle-network-data! ;;TODO, we should send the dispatch function here so that we can access it in network-events.cljd
            .onError (fn [error] ;;TODO reconnection logic
                       (prn "WebSocket error:" error)
                       (reset! web-socket nil))

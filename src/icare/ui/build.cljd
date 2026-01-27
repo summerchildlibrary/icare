@@ -1,8 +1,9 @@
 (ns icare.ui.build
   (:require ["package:flutter/material.dart" :as m]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
+            ["package:qr_flutter/qr_flutter.dart" :as qr]
             [cljd.flutter :as f]
-            [icare.resources.derived-state :refer [get-pub-key-to-name-map get-pub-key-to-card-controller-map]]
+            [icare.resources.derived-state :refer [get-pub-key-to-name-map get-pub-key-to-card-controller-map get-user-pub-key]]
             [cljd.string :as str]))
 
 (defn render-reorderable-list [ui]
@@ -45,7 +46,7 @@
                               ;; (m/Colors.orange.withOpacity (if has-alert? 1 0)))
                        .borderRadius (m/BorderRadius.circular 12))
       .leading (if expanded?
-                 (m/Icon m.Icons/drag_handle .color (m/Colors.black.withOpacity 0.2))
+                 (m/Icon m/Icons.drag_handle .color (m/Colors.black.withOpacity 0.2))
                  (m/ReorderableDragStartListener
                   .index idx
                   .child (m/Icon m.Icons/drag_handle)))
@@ -71,6 +72,67 @@
                                .forceStrutHeight true)
                  .controller (m/TextEditingController. .text (str title))))])
       .children (mapv ast->widget tasks)))))
+
+(defn render-uninitialized-person-card [ui]
+  (let [{:keys [title key idx on-rename-title on-show-qr on-paste-public-key]} ui]
+    (f/widget
+     :key key
+     :padding {:vertical 6}
+     (m/Material
+      .elevation 0
+      .borderRadius (m/BorderRadius.circular 12))
+     (m/ReorderableDragStartListener
+      .index idx)
+     (m/ListTile
+      .shape (m/RoundedRectangleBorder
+              .side (m/BorderSide
+                     .color (m/Colors.black.withOpacity 0.3))
+              .borderRadius (m/BorderRadius.circular 12))
+      .title (f/widget
+              (m/Align .alignment m/Alignment.centerLeft)
+              (m/Row)
+              .children
+              [
+               (f/widget
+                (m/SizedBox .width 150)
+                (m/TextField
+                 .textInputAction m.TextInputAction/done
+                 .style (m/TextStyle
+                          .fontSize 16
+                          .fontWeight m/FontWeight.bold
+                          .color m/Colors.grey)
+                 .onSubmitted on-rename-title
+                 .decoration (m/InputDecoration
+                               .contentPadding (m/EdgeInsets.only .bottom 0)
+                               .border m/InputBorder.none)
+                 .strutStyle (m/StrutStyle
+                               .fontSize 16
+                               .height 1.9
+                               .forceStrutHeight true)
+                 .controller (m/TextEditingController. .text (str title))))
+               (m/Spacer .flex 8)
+               (m/IconButton
+                .iconSize 30
+                .icon (m/Icon m/Icons.qr_code_2 .color m/Colors.black)
+                .onPressed on-show-qr)
+               (m/Spacer .flex 1)])
+      .subtitle (f/widget
+                 :let [text-controller (m/TextEditingController)]
+                 (m/TextField
+                  .textInputAction m.TextInputAction/done
+                  .style (m/TextStyle
+                          .fontSize 16
+                          .fontWeight m/FontWeight.bold
+                          .color m/Colors.grey)
+                  .onSubmitted on-paste-public-key
+                  .decoration (m/InputDecoration
+                                .hintText "paste public key..."
+                                .hintStyle (m/TextStyle
+                                             .fontSize 16
+                                             .fontWeight m.FontWeight/normal
+                                             .color m.Colors/grey)
+                                .contentPadding (m/EdgeInsets.only .bottom 0))
+                  .controller text-controller))))))
 
 (defn render-editable-task [ui]
   (let [{:keys [title on-complete on-edit-task-title completed subitems]} ui]
@@ -342,6 +404,47 @@
      .children
      [(ast->widget reorderable-list)])))
 
+(defn render-qr-screen [ui]
+  (let [{:keys [on-close]} ui
+        user-pub-key (get-user-pub-key)]
+    (f/widget
+     (m/Center)
+     (m/Column
+      .mainAxisAlignment m/MainAxisAlignment.center
+      .children [(f/widget
+                  :padding {:bottom 20}
+                  (m/TextButton
+                   .style (m/TextButton.styleFrom
+                            .backgroundColor m/Colors.orange
+                            .padding (m/EdgeInsets.symmetric
+                                      .vertical 12
+                                      .horizontal 24)
+                            .shape (m/RoundedRectangleBorder
+                                    .side (m/BorderSide
+                                           .color m/Colors.black
+                                           .width 2)
+                                    .borderRadius (m/BorderRadius.circular 8)))
+                   .onPressed on-close)
+                  (m/Text
+                   "Close this screen!"
+                   .style (m/TextStyle
+                            .fontSize 24
+                            .fontWeight m/FontWeight.bold
+                            .color m/Colors.black)))
+                 (f/widget
+                  (qr/QrImageView
+                   .data user-pub-key
+                   .version qr/QrVersions.auto
+                   .size 300))
+                 (f/widget
+                  :padding {:top 20 :horizontal 40}
+                  (m/Text "Let other people scan and paste this public key to add you as a friend."
+                          .textAlign m/TextAlign.center
+                          .style (m/TextStyle
+                                   .fontSize 16
+                                   .fontWeight m/FontWeight.normal
+                                   .color m/Colors.black)))]))))
+
 (defn ast->widget [ui]
   (let [{:keys [ui-type]} ui]
    (condp = ui-type
@@ -355,4 +458,6 @@
      :subitem-image                  (render-subitem-image ui)
      :friend-search-area             (render-friend-search-area ui)
      :add-task-area                  (render-add-task-area ui)
+     :uninitialized-person-card      (render-uninitialized-person-card ui)
+     :qr-screen                      (render-qr-screen ui)
      (throw (Exception. (str "ast->widget tried to render an unknonw ui element: " ui))))))

@@ -70,6 +70,9 @@
                            :friend-pub-keys friend-pub-keys}))
 
      :add-friend
+     (update-state-and-persist! event)
+
+     :initialize-friend
      (let [new-state (update-state-and-persist! event)
            {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids new-state)
            user-pub-key (get-user-pub-key new-state)
@@ -82,6 +85,12 @@
                            :user-pub-key user-pub-key
                            :user-task-uuids user-task-uuids
                            :friend-pub-keys friend-pub-keys}))
+
+     :delete-uninitialized-person
+     (update-state-and-persist! event)
+
+     :rename-uninitialized-person
+     (update-state-and-persist! event)
 
      :rename-card
      (let [new-state (update-state-and-persist! event)
@@ -97,5 +106,8 @@
 
      :reorder-items
      (update-state-and-persist! event)
+
+     :toggle-qr ;;just showing a qr code, no need to persist state
+     (state-dispatch! event)
 
      (throw (Exception (str "Unknown event type in ui-events dispatch: " event))))))

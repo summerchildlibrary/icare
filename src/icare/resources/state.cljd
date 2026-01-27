@@ -2,7 +2,7 @@
   (:require ["package:uuid/uuid.dart" :refer [Uuid]]))
 
 (def uuid-generator (.-v4 (Uuid)))
-(def use-persistent-storage? false)
+(def use-persistent-storage? true)
 
 ;;This namespace defines all side effects on our store
 ;;
@@ -48,7 +48,11 @@
                                                     :completed true
                                                     :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
                                                                {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
-                                          {:type :friend-search}]}))
+                                          ;; {:type :uninitialized-person
+                                          ;;  :name "Jun before jun"
+                                          ;;  :uuid (uuid-generator)}
+                                          {:type :friend-search}]
+                      :show-qr? false}))
 
 ;;Helper functions. Read only operations.
 
@@ -250,18 +254,27 @@
               name)))
 
 (defn handle-add-friend [state event]
-  (let [{:keys [pub-key]} event]
-    (if-not (empty? pub-key)
+  (let [{:keys [name]} event]
+    (if-not (empty? name)
       (update state :reorderable-items
               (fn [items]
-                (let [new-friend {:type :friend
-                                  :pub-key pub-key
-                                  :name pub-key ;;obviously this is wrong TODO
-                                  :expanded? false
-                                  :tasks []}]
-                  (vec (concat (subvec items 0 (- (count items) 2)) ;;TODO this isn't right, but we have to rewrite the whole how to add friends anyways so...
+                (let [new-friend {:type :uninitialized-person
+                                  :uuid (uuid-generator)
+                                  :name name}] ;;obviously this is wrong TODO
+                  (vec (concat (subvec items 0 (- (count items) 1)) ;;TODO this isn't right, new friends should either be unmovable or add friend should always add after new friend, probably the first
                                [new-friend]
-                               (subvec items (- (count items) 2)))))))
+                               (subvec items (- (count items) 1)))))))
+      state)))
+
+(defn handle-initialize-friend [state event]
+  (let [{:keys [card-idx public-key]} event]
+    (prn event)
+    (if-not (empty? public-key)
+      (update-in state [:reorderable-items card-idx]
+                 conj {:pub-key public-key
+                       :type :friend
+                       :expanded? false
+                       :tasks []})
       state)))
 
 (defn handle-reorder-items [state event]
@@ -318,6 +331,9 @@
                               task))
                           %)))))
 
+(defn handle-toggle-qr [state event]
+  (update state :show-qr? not))
+
 (defn apply-state-event [state event]
   (condp = (:type event)
     :liked-event (handle-liked-event state event)
@@ -334,6 +350,10 @@
     :move-undo-redo (handle-move-undo-redo state event)
     :card-expansion (handle-card-expansion state event)
     :task-notification-finishes (handle-task-notification-finishes state event)
+    :toggle-qr (handle-toggle-qr state event)
+    :initialize-friend (handle-initialize-friend state event)
+    :delete-uninitialized-person (handle-delete-card state event)
+    :rename-uninitialized-person (handle-rename-card state event)
     (throw (Exception (str "No dispatch function found for event: " event)))))
 
 ;;TODO
