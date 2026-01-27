@@ -107,29 +107,12 @@
                 (handle-ui-event! {:type :add-friend
                                    :pub-key value}))})
 
-(defn magic-add-button->ast [magic-add-button]
-  (let [{:keys [form]} magic-add-button
-        key "magic-add-button"]
-    (condp = form
-      :button {:ui-type :magic-add-button
-               :form :button
-               :on-press (fn [] (handle-ui-event! {:type :transform-magic-button
-                                                   :to-form :card}))
-               :key key}
-      :card {:ui-type :magic-add-button
-             :form :card
-             :on-press (fn [] (handle-ui-event! {:type :transform-magic-button
-                                                   :to-form :button}))
-             :key key}
-      (throw (Exception (str "magic-add-button->ast was given a button with unknown form: " form))))))
-
 (defn list-item->ast [reorderable-item-idx item]
   (let [{:keys [type]} item]
     (condp = type
       :user (person->ast reorderable-item-idx (conj item {:user? true}))
       :friend (person->ast reorderable-item-idx (conj item {:user? false}))
       :friend-search (friend-search->ast)
-      :magic-add-button (magic-add-button->ast item)
       (throw (Exception (str "list-item->ast was given a list item with unknown type: " type))))))
 
 (defn reorderable-list->ast [reorderable-items]

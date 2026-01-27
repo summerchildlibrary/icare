@@ -25,7 +25,7 @@
      :key key
      :padding {:vertical 6}
      (m/Material
-      .elevation 4
+      .elevation 0
       .borderRadius (m/BorderRadius.circular 12))
      (m/ExpansionTile
       .controller controller
@@ -39,7 +39,10 @@
               .borderRadius (m/BorderRadius.circular 12))
       .collapsedShape (m/RoundedRectangleBorder
                        .side (m/BorderSide
-                              .color (m/Colors.orange.withOpacity (if has-alert? 1 0)))
+                              .color (if has-alert?
+                                       (m/Colors.orange.withOpacity 1)
+                                       (m/Colors.black.withOpacity 0.3)))
+                              ;; (m/Colors.orange.withOpacity (if has-alert? 1 0)))
                        .borderRadius (m/BorderRadius.circular 12))
       .leading (if expanded?
                  (m/Icon m.Icons/drag_handle .color (m/Colors.black.withOpacity 0.2))
@@ -272,11 +275,12 @@
                   (m/SizedBox .width 180)
                   (m/TextField
                    .textInputAction m.TextInputAction/done
+                   .cursorHeight 38
                    .onSubmitted (fn [& args]
                                   (.clear text-controller)
                                   (apply on-search args))
                    .decoration (m/InputDecoration
-                                 .hintText "Find Friend"
+                                 .hintText "new friend..."
                                  .hintStyle (m/TextStyle
                                               .fontSize 22
                                               .fontWeight m.FontWeight/normal
@@ -310,6 +314,7 @@
                   (m/SizedBox .width 180)
                   (m/TextField
                    .textInputAction m.TextInputAction/done
+                   .cursorHeight 38
                    .onSubmitted (fn [& args]
                                    (.clear text-controller)
                                    (apply on-add-task args))
@@ -330,40 +335,6 @@
                             .fontWeight m.FontWeight/normal
                             .color m.Colors/black)))]))))
 
-(defn render-magic-add-button [ui]
-  (let [{:keys [on-press key form]} ui]
-    (f/widget
-     :key key
-     :padding {:top 5 :bottom 100}
-     :let [[width height] (condp = form
-                             :button [100 70]
-                             :card   [350 100]
-                             [70 70])]
-     m/Center
-     (m/GestureDetector
-      .onTap on-press)
-     .child
-     (m/AnimatedContainer
-      .duration (Duration .milliseconds 700)
-      .curve m/Curves.bounceOut
-      .width  width
-      .height height
-      .decoration (m/BoxDecoration
-                    .border (m/Border.all
-                              .color (m/Colors.grey.withOpacity 0.5)
-                              .width 2)
-                    .color m/Colors.green
-                    .borderRadius (m/BorderRadius.circular 35)
-                    .boxShadow [(m/BoxShadow
-                                  .color (m/Colors.black.withOpacity 0.2)
-                                  .blurRadius 8
-                                  .offset (m/Offset 0 4))]))
-     .child
-     :padding {:left 0 :right 0 :top 0 :bottom 0}
-     (m/Icon m.Icons/person_add
-             .size 32
-             .color m.Colors/white))))
-
 (defn render-screen-base [ui]
   (let [{:keys [reorderable-list]} ui]
     (f/widget
@@ -382,7 +353,6 @@
      :subitem-liked-list             (render-subitem-liked-list ui)
      :subitem-time                   (render-subitem-time ui)
      :subitem-image                  (render-subitem-image ui)
-     :magic-add-button               (render-magic-add-button ui)
      :friend-search-area             (render-friend-search-area ui)
      :add-task-area                  (render-add-task-area ui)
      (throw (Exception. (str "ast->widget tried to render an unknonw ui element: " ui))))))
