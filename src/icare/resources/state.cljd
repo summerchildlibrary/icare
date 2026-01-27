@@ -308,15 +308,6 @@
           handle-closing
           update-expansion))))
 
-;;TODO this only works if the magic button is the last of the reorderable items
-;;we don't want this button to be reorderable, so we should move it out of the list
-;;and use the leading tag in the ReorderableList widget
-(defn handle-transform-magic-button [state event]
-  (let [{:keys [to-form]} event]
-    (update state :reorderable-items
-            (fn [items]
-              (assoc-in items [(dec (count items)) :form] to-form)))))
-
 (defn handle-task-notification-finishes [state event]
   (let [{:keys [card-idx]} event]
     (-> state
@@ -342,7 +333,6 @@
     :reorder-items (handle-reorder-items state event)
     :move-undo-redo (handle-move-undo-redo state event)
     :card-expansion (handle-card-expansion state event)
-    :transform-magic-button (handle-transform-magic-button state event)
     :task-notification-finishes (handle-task-notification-finishes state event)
     (throw (Exception (str "No dispatch function found for event: " event)))))
 

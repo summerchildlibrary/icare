@@ -98,7 +98,4 @@
      :reorder-items
      (update-state-and-persist! event)
 
-     :transform-magic-button
-     (update-state-and-persist! event)
-
      (throw (Exception (str "Unknown event type in ui-events dispatch: " event))))))
