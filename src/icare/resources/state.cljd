@@ -138,223 +138,172 @@
       (assoc-in state [:reorderable-items card-idx :tasks task-idx :notify?] true))))
 
 ;;
-;;DISPATCH HANDLERS
+;;APPLY STATE EVENT - All state transformations in one place
 ;;
-;;
-
-;;network event handler
-(defn handle-liked-event [state event]
-  (let [{:keys [liked task-uuid creator-pub-key]} event
-        user-pub-key (get-user-pub-key state)
-        user-card-idx (pub-key->reorderable-item-idx
-                        (:reorderable-items state)
-                        user-pub-key)
-        task-idx (when-not (nil? user-card-idx)
-                  (uuid->task-idx
-                   (get-in state [:reorderable-items user-card-idx :tasks])
-                   task-uuid))
-        like-or-dislike-fn (if liked conj disj)]
-    (if (or (nil? user-card-idx) (nil? task-idx))
-      state
-      (-> state
-          ;; (notify-task user-card-idx task-idx)
-          (update-in [:reorderable-items user-card-idx :tasks task-idx :liked-by]
-                     like-or-dislike-fn
-                     creator-pub-key)))))
-
-;;TODO we shouldn't notify if we send a task and delete before the user has expanded their card. I'll  have to think about how to do this
-;;network event handler
-(defn handle-update-task-event [state event]
-  (let [{:keys [task creator-pub-key]} event
-        task-uuid (:uuid task)
-        deleted? (:deleted task)
-        card-idx (pub-key->reorderable-item-idx
-                   (:reorderable-items state)
-                   creator-pub-key)
-        task-idx (when-not (nil? card-idx)
-                  (uuid->task-idx
-                   (get-in state [:reorderable-items card-idx :tasks])
-                   task-uuid))
-        user-pub-key (get-user-pub-key state)
-        liked-by-user? (contains? (:liked-by task) user-pub-key)
-        task (if liked-by-user?
-               (conj task [:liked true])
-               (conj task [:liked false]))]
-    (letfn [(handle-task-deletion [state]
-              (when (and card-idx task-idx deleted?)
-                (update-in state
-                           [:reorderable-items card-idx :tasks]
-                           (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
-                                                    (subvec tasks (inc task-idx))))))))
-            (handle-new-task [state]
-              (when (and card-idx (nil? task-idx) (not deleted?))
-                (-> state
-                    (update-in [:reorderable-items card-idx :tasks] conj (conj task [:notify? true]))))) ;;always notify about a new task, even if the card is expanded
-            (handle-existing-task [state]
-              (when (and card-idx task-idx)
-                (-> state
-                    ;;TODO maybe we want to notify about particular events like task completions but not others like renaming a task
-                    (assoc-in [:reorderable-items card-idx :tasks task-idx] task)
-                    (notify-task card-idx task-idx))))]
-      (or (handle-task-deletion state)
-          (handle-new-task state)
-          (handle-existing-task state)
-          state)))) ;;this is the default case in case we receive a nonsensical event... TODO we should add logging here for sanity
-
-(defn handle-complete-user-task[state event]
-  (let [{:keys [user-card-idx task-idx completed creator-pub-key]} event]
-    (update-in state [:reorderable-items user-card-idx :tasks task-idx]
-           (fn [task]
-             (let [new-task (assoc task :completed completed)]
-               (cond (and (not completed)
-                          (seq (:subitems new-task))
-                          (-> (:subitems new-task) first :type (= :time)))
-                     (update new-task
-                             :subitems subvec 1)
-                     completed
-                     (update new-task
-                             :subitems #(apply vector {:type :time
-                                                       :value (.toIso8601String (DateTime/now))} %))
-                     :else new-task))))))
-
-(defn handle-delete-user-task [state event]
-  (let [{:keys [user-card-idx task-idx]} event]
-    (update-in state [:reorderable-items user-card-idx :tasks]
-               (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
-                                        (subvec tasks (inc task-idx))))))))
-
-(defn handle-rename-user-task [state event]
-  (let [{:keys [user-card-idx task-idx title]} event]
-    (assoc-in state
-              [:reorderable-items user-card-idx :tasks task-idx :title]
-              title)))
-
-(defn handle-like-friend-task [state event]
-  (let [{:keys [friend-card-idx task-idx liked]} event]
-    (assoc-in state
-              [:reorderable-items friend-card-idx :tasks task-idx :liked]
-              liked)))
-
-(defn handle-add-user-task [state event]
-  (let [{:keys [user-card-idx new-task]} event]
-    (update-in state
-               [:reorderable-items user-card-idx :tasks]
-               conj new-task)))
-
-(defn handle-delete-card [state event]
-  (let [{:keys [card-idx]} event]
-    (update state :reorderable-items
-            (fn [items]
-              (vec (concat (subvec items 0 card-idx)
-                           (subvec items (inc card-idx))))))))
-(defn handle-rename-card [state event]
-  (let [{:keys [card-idx name]} event]
-    (assoc-in state
-              [:reorderable-items card-idx :name]
-              name)))
-
-(defn handle-add-friend [state event]
-  (let [{:keys [name]} event]
-    (if-not (empty? name)
-      (update state :reorderable-items
-              (fn [items]
-                (let [new-friend {:type :uninitialized-person
-                                  :uuid (uuid-generator)
-                                  :name name}] ;;obviously this is wrong TODO
-                  (vec (concat (subvec items 0 (- (count items) 1)) ;;TODO this isn't right, new friends should either be unmovable or add friend should always add after new friend, probably the first
-                               [new-friend]
-                               (subvec items (- (count items) 1)))))))
-      state)))
-
-(defn handle-initialize-friend [state event]
-  (let [{:keys [card-idx public-key]} event]
-    (prn event)
-    (if-not (empty? public-key)
-      (update-in state [:reorderable-items card-idx]
-                 conj {:pub-key public-key
-                       :type :friend
-                       :expanded? false
-                       :tasks []})
-      state)))
-
-(defn handle-reorder-items [state event]
-  (let [{:keys [from-index to-index]} event]
-    (update state :reorderable-items
-            (fn [items]
-              (vec
-                (if (< from-index to-index)
-                  (concat (subvec items 0 from-index)
-                          (subvec items (inc from-index) (inc to-index))
-                          [(nth items from-index)]
-                          (subvec items (inc to-index)))
-                  (concat (subvec items 0 to-index)
-                          [(nth items from-index)]
-                          (subvec items to-index from-index)
-                          (subvec items (inc from-index)))))))))
-
-(defn handle-move-undo-redo [state event]
-  (let [{:keys [dx dy]} event]
-    (update-in state [:undo-redo]
-               (fn [undo-redo]
-                 (let [{:keys [x y]} undo-redo]
-                   {:x (+ x dx)
-                    :y (+ y dy)})))))
-
-(defn handle-card-expansion [state event]
-  (let [{:keys [card-idx expanded?]} event]
-    (letfn [(handle-opening [state]
-              (if-not expanded?
-                state
-                (-> state
-                    (update :reorderable-items  ;;collapse all cards
-                         #(mapv (fn [item] (if (contains? item :expanded?)
-                                             (assoc item :expanded? false)
-                                             item))
-                                %)))))
-
-            (handle-closing [state] state) ;;No special handling when closing a card
-
-            (update-expansion [state]
-              (assoc-in state [:reorderable-items card-idx :expanded?] expanded?))]
-      (-> state
-          handle-opening
-          handle-closing
-          update-expansion))))
-
-(defn handle-task-notification-finishes [state event]
-  (let [{:keys [card-idx]} event]
-    (-> state
-        (update-in [:reorderable-items card-idx :tasks]
-                   #(mapv (fn [task]
-                            (if (contains? task :notify?)
-                              (conj task [:notify? false])
-                              task))
-                          %)))))
-
-(defn handle-toggle-qr [state event]
-  (update state :show-qr? not))
 
 (defn apply-state-event [state event]
   (condp = (:type event)
-    :liked-event (handle-liked-event state event)
-    :update-task-event (handle-update-task-event state event)
-    :complete-user-task (handle-complete-user-task state event)
-    :delete-user-task (handle-delete-user-task state event)
-    :rename-user-task (handle-rename-user-task state event)
-    :like-friend-task (handle-like-friend-task state event)
-    :add-user-task (handle-add-user-task state event)
-    :delete-card (handle-delete-card state event)
-    :rename-card (handle-rename-card state event)
-    :add-friend (handle-add-friend state event)
-    :reorder-items (handle-reorder-items state event)
-    :move-undo-redo (handle-move-undo-redo state event)
-    :card-expansion (handle-card-expansion state event)
-    :task-notification-finishes (handle-task-notification-finishes state event)
-    :toggle-qr (handle-toggle-qr state event)
-    :initialize-friend (handle-initialize-friend state event)
-    :delete-uninitialized-person (handle-delete-card state event)
-    :rename-uninitialized-person (handle-rename-card state event)
-    (throw (Exception (str "No dispatch function found for event: " event)))))
+
+    ;;--- Network events ---
+
+    :liked-event
+    (let [{:keys [liked task-uuid creator-pub-key]} event
+          user-pub-key (get-user-pub-key state)
+          user-card-idx (pub-key->reorderable-item-idx (:reorderable-items state) user-pub-key)
+          task-idx (when user-card-idx
+                     (uuid->task-idx (get-in state [:reorderable-items user-card-idx :tasks]) task-uuid))]
+      (if (or (nil? user-card-idx) (nil? task-idx))
+        state
+        (update-in state [:reorderable-items user-card-idx :tasks task-idx :liked-by]
+                   (if liked conj disj)
+                   creator-pub-key)))
+
+    :update-task-event
+    (let [{:keys [task creator-pub-key]} event
+          task-uuid (:uuid task)
+          deleted? (:deleted task)
+          card-idx (pub-key->reorderable-item-idx (:reorderable-items state) creator-pub-key)
+          task-idx (when card-idx
+                     (uuid->task-idx (get-in state [:reorderable-items card-idx :tasks]) task-uuid))
+          user-pub-key (get-user-pub-key state)
+          task (conj task [:liked (contains? (:liked-by task) user-pub-key)])]
+      (or
+       ;; Delete existing task
+       (when (and card-idx task-idx deleted?)
+         (update-in state [:reorderable-items card-idx :tasks]
+                    (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
+                                             (subvec tasks (inc task-idx)))))))
+       ;; Add new task
+       (when (and card-idx (nil? task-idx) (not deleted?))
+         (update-in state [:reorderable-items card-idx :tasks]
+                    conj (conj task [:notify? true])))
+       ;; Update existing task
+       (when (and card-idx task-idx)
+         (-> state
+             (assoc-in [:reorderable-items card-idx :tasks task-idx] task)
+             (notify-task card-idx task-idx)))
+       ;; Default: ignore nonsensical events
+       state))
+
+    ;;--- UI events ---
+
+    :complete-user-task
+    (let [{:keys [user-card-idx task-idx completed]} event]
+      (update-in state [:reorderable-items user-card-idx :tasks task-idx]
+                 (fn [task]
+                   (let [new-task (assoc task :completed completed)]
+                     (cond
+                       (and (not completed)
+                            (seq (:subitems new-task))
+                            (= :time (-> new-task :subitems first :type)))
+                       (update new-task :subitems subvec 1)
+
+                       completed
+                       (update new-task :subitems
+                               #(apply vector {:type :time :value (.toIso8601String (DateTime/now))} %))
+
+                       :else new-task)))))
+
+    :delete-user-task
+    (let [{:keys [user-card-idx task-idx]} event]
+      (update-in state [:reorderable-items user-card-idx :tasks]
+                 (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
+                                          (subvec tasks (inc task-idx)))))))
+
+    :rename-user-task
+    (let [{:keys [user-card-idx task-idx title]} event]
+      (assoc-in state [:reorderable-items user-card-idx :tasks task-idx :title] title))
+
+    :like-friend-task
+    (let [{:keys [friend-card-idx task-idx liked]} event]
+      (assoc-in state [:reorderable-items friend-card-idx :tasks task-idx :liked] liked))
+
+    :add-user-task
+    (let [{:keys [user-card-idx new-task]} event]
+      (update-in state [:reorderable-items user-card-idx :tasks] conj new-task))
+
+    :delete-card
+    (let [{:keys [card-idx]} event]
+      (update state :reorderable-items
+              (fn [items] (vec (concat (subvec items 0 card-idx)
+                                       (subvec items (inc card-idx)))))))
+
+    :rename-card
+    (let [{:keys [card-idx name]} event]
+      (assoc-in state [:reorderable-items card-idx :name] name))
+
+    :add-friend
+    (let [{:keys [name]} event]
+      (if (empty? name)
+        state
+        (update state :reorderable-items
+                (fn [items]
+                  (let [new-friend {:type :uninitialized-person
+                                    :uuid (uuid-generator)
+                                    :name name}]
+                    (vec (concat (subvec items 0 (dec (count items)))
+                                 [new-friend]
+                                 (subvec items (dec (count items))))))))))
+
+    :initialize-friend
+    (let [{:keys [card-idx public-key]} event]
+      (if (empty? public-key)
+        state
+        (update-in state [:reorderable-items card-idx]
+                   conj {:pub-key public-key
+                         :type :friend
+                         :expanded? false
+                         :tasks []})))
+
+    :reorder-items
+    (let [{:keys [from-index to-index]} event]
+      (update state :reorderable-items
+              (fn [items]
+                (vec (if (< from-index to-index)
+                       (concat (subvec items 0 from-index)
+                               (subvec items (inc from-index) (inc to-index))
+                               [(nth items from-index)]
+                               (subvec items (inc to-index)))
+                       (concat (subvec items 0 to-index)
+                               [(nth items from-index)]
+                               (subvec items to-index from-index)
+                               (subvec items (inc from-index))))))))
+
+    :card-expansion
+    (let [{:keys [card-idx expanded?]} event]
+      (-> state
+          (cond-> expanded?
+            (update :reorderable-items
+                    #(mapv (fn [item]
+                             (if (contains? item :expanded?)
+                               (assoc item :expanded? false)
+                               item))
+                           %)))
+          (assoc-in [:reorderable-items card-idx :expanded?] expanded?)))
+
+    :task-notification-finishes
+    (let [{:keys [card-idx]} event]
+      (update-in state [:reorderable-items card-idx :tasks]
+                 #(mapv (fn [task]
+                          (if (contains? task :notify?)
+                            (assoc task :notify? false)
+                            task))
+                        %)))
+
+    :toggle-qr
+    (update state :show-qr? not)
+
+    :delete-uninitialized-person
+    (let [{:keys [card-idx]} event]
+      (update state :reorderable-items
+              (fn [items] (vec (concat (subvec items 0 card-idx)
+                                       (subvec items (inc card-idx)))))))
+
+    :rename-uninitialized-person
+    (let [{:keys [card-idx name]} event]
+      (assoc-in state [:reorderable-items card-idx :name] name))
+
+    (throw (Exception (str "No state handling function found for event: " event)))))
 
 ;;TODO
 ;;at some point I'll have to implement event batching
