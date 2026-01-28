@@ -12,8 +12,8 @@
 (defonce private-key (atom nil))
 (defonce web-socket (atom nil))
 
-(def relay-url "ws://localhost:8080")
-;; (def relay-url "wss://relay.damus.io")
+;; (def relay-url "ws://localhost:8080")
+(def relay-url "wss://relay.damus.io")
 
 ;;we want to support offline first workflows
 ;;that means that the first time we connect to the websocket
@@ -21,53 +21,50 @@
 ;;if we can't connect, don't even try to queue just don't send anything because we can't
 ;;the next time we connect we will resend everything
 
-(defn generate-liked-event [event]
-  (let [{:keys [liked creator-pub-key task-uuid]} event]
-    (-> (.from Event
-               .kind liked-event-kind
-               .content (prn-str {:liked liked :task-uuid task-uuid})
-               .tags [(.from #/(List String) ["a" (str update-task-event-kind ":" creator-pub-key ":" task-uuid)])]
-               .privkey @private-key)
-        .serialize)))
-
-(defn generate-update-task-event [event]
-  (let [{:keys [task deleted]} event
-        task-uuid (:uuid task)
-        task (conj task [:deleted deleted])]
-    (-> (.from Event
-               .kind update-task-event-kind
-               .content (prn-str task)
-               .tags [(.from #/(List String) ["d" task-uuid])]
-               .privkey @private-key)
-        .serialize)))
-
-(defn generate-reactions-request [event]
-  (let [{:keys [user-pub-key user-task-uuids friend-pub-keys]} event
-        a-tags (or (mapv (fn [task-uuid]
-                           (str update-task-event-kind ":" user-pub-key ":" task-uuid))
-                        user-task-uuids)
-                   [])]
-    (-> (Request "reactions"
-                 [(Filter
-                   .authors friend-pub-keys
-                   .kinds [liked-event-kind]
-                   .a a-tags)])
-        .serialize)))
-
-(defn generate-tasks-request [event]
-  (let [{:keys [friend-pub-keys]} event]
-    (-> (Request "tasks"
-                 [(Filter
-                   .authors friend-pub-keys
-                   .kinds [update-task-event-kind])])
-        .serialize)))
-
 (defn create-message [event]
   (condp = (:type event)
-    :liked-event (generate-liked-event event)
-    :update-task-event (generate-update-task-event event)
-    :reactions-request (generate-reactions-request event)
-    :tasks-request (generate-tasks-request event)
+
+    :liked-event
+    (let [{:keys [liked creator-pub-key task-uuid]} event]
+      (-> (.from Event
+                 .kind liked-event-kind
+                 .content (prn-str {:liked liked :task-uuid task-uuid})
+                 .tags [(.from #/(List String) ["a" (str update-task-event-kind ":" creator-pub-key ":" task-uuid)])]
+                 .privkey @private-key)
+          .serialize))
+
+    :update-task-event
+    (let [{:keys [task deleted]} event
+          task-uuid (:uuid task)
+          task (conj task [:deleted deleted])]
+      (-> (.from Event
+                 .kind update-task-event-kind
+                 .content (prn-str task)
+                 .tags [(.from #/(List String) ["d" task-uuid])]
+                 .privkey @private-key)
+          .serialize))
+
+    :reactions-request
+    (let [{:keys [user-pub-key user-task-uuids friend-pub-keys]} event
+          a-tags (or (mapv (fn [task-uuid]
+                             (str update-task-event-kind ":" user-pub-key ":" task-uuid))
+                           user-task-uuids)
+                     [])]
+      (-> (Request "reactions"
+                   [(Filter
+                     .authors friend-pub-keys
+                     .kinds [liked-event-kind]
+                     .a a-tags)])
+          .serialize))
+
+    :tasks-request
+    (let [{:keys [friend-pub-keys]} event]
+      (-> (Request "tasks"
+                   [(Filter
+                     .authors friend-pub-keys
+                     .kinds [update-task-event-kind])])
+          .serialize))
+
     (prn "Unhandled action type in network manager:" (:type event))))
 
 (defn dispatch! [event]
