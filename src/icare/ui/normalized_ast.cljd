@@ -1,4 +1,5 @@
-(ns icare.ui.normalized-ast)
+(ns icare.ui.normalized-ast
+    (:require [icare.benchmarks :refer [dart-time]]))
 
 ;; Storage: {id -> atom containing node}
 (defonce ast-store (atom {}))
@@ -46,12 +47,10 @@
               (let [nested-nodes (->> node
                                       (filter (fn [[_ value]] (or (ast-node? value)
                                                                   (ast-node-collection? value))))
-
-                                      (mapv second)
+                                      (map second)
                                       flatten)
                     denested-node (denest-ast-node node)]
-                (concat [denested-node]
-                        (flatten-ast nested-nodes)))
+                (cons (list (:id denested-node) denested-node) (flatten-ast nested-nodes)))
 
               (throw (Exception (str "flatten ast encountered an element which wasn't an ast node: " node)))))
           ast))
@@ -62,7 +61,7 @@
   [flat-ast]
   (swap! ast-store
          (fn [ast-atoms]
-           (reduce (fn [new-atoms {:keys [id] :as node}]
+           (reduce (fn [new-atoms [id node]]
                      (cond
                        (contains? new-atoms id)
                        (do (reset! (new-atoms id) node)
@@ -76,6 +75,6 @@
 (defn ast->ast-store [ast]
   (-> ast
       vector
-      flatten-ast
-      sync-ast-store!)
+      ((dart-time "flatten-ast" flatten-ast))
+      ((dart-time "sync-ast-store" sync-ast-store!)))
   ast-store)
