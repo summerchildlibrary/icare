@@ -3,7 +3,6 @@
 
 ;;TODO it would be useful to store a set of friend-pub-keys and user-task-uuids
 (defonce derived-store (atom {:pub-key-to-name {}
-                              :pub-key-to-card-controller {}
                               :active-pub-keys #{} ;;this is a helper value of the derived-store, it should always be empty after deriving the state. Its purpose is to make it easy to delete pubkeys that get removed from the actual state
                               :user-pub-key nil}))
 
@@ -17,10 +16,6 @@
   ([] (get-pub-key-to-name-map @derived-store))
   ([derived-state] (:pub-key-to-name derived-state)))
 
-(defn get-pub-key-to-card-controller-map
-  ([] (get-pub-key-to-card-controller-map @derived-store))
-  ([derived-state] (:pub-key-to-card-controller derived-state)))
-
 ;;Dispatch functions to modify the derived-store
 
 (defn remove-deleted-pub-keys [derived-state]
@@ -28,10 +23,8 @@
         active-pub-keys (:active-pub-keys derived-state)
         discard-pub-keys (filter (complement active-pub-keys) old-pub-keys)]
     (-> (reduce (fn [acc discard-pub-key]
-                  (.dispose ^m/ExpansibleController (get-in acc [:pub-key-to-card-controller discard-pub-key])) ;;clean up card controller resources before dissocing
                   (-> acc
-                      (update :pub-key-to-name dissoc discard-pub-key)
-                      (update :pub-key-to-card-controller dissoc discard-pub-key)))
+                      (update :pub-key-to-name dissoc discard-pub-key)))
                 derived-state
                 discard-pub-keys)
         (assoc :active-pub-keys #{}))))
@@ -44,8 +37,7 @@
                   derived-state (update derived-state :active-pub-keys conj pub-key)]
               (if missing-pub-key?
                 (-> derived-state
-                    (assoc-in [:pub-key-to-name pub-key] name)
-                    (assoc-in [:pub-key-to-card-controller pub-key] (m/ExpansibleController)))
+                    (assoc-in [:pub-key-to-name pub-key] name))
                 derived-state)))
           (handle-name-changes [derived-state]
             (let [{:keys [pub-key-to-name]} derived-state

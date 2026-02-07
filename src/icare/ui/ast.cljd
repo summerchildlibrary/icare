@@ -1,7 +1,7 @@
 (ns icare.ui.ast
   (:require ["package:flutter/material.dart" :as m]
             ["package:uuid/uuid.dart" :refer [Uuid]]
-            [icare.resources.derived-state :refer [get-pub-key-to-name-map get-pub-key-to-card-controller-map get-user-pub-key]]))
+            [icare.resources.derived-state :refer [get-pub-key-to-name-map get-user-pub-key]]))
 
 (def uuid-generator (.-v4 (Uuid)))
 ;;Build an AST from our state
@@ -87,7 +87,6 @@
     {:id id
      :ui-type :task-card
      :expanded? expanded?
-     :expansion-controller ((get-pub-key-to-card-controller-map) pub-key)
      :has-alert? (some :notify? tasks)
      :key pub-key
      :idx reorderable-item-idx
@@ -181,8 +180,7 @@
    (reset! handle-ui-event! ui-event-handler)
    (state->ast state))
   ([state]
-   (when (nil? @handle-ui-event!)
-     (throw (Exception. "state->ast was called before a ui-event-handler was set. Please call state->ast with both state and ui-event-handler at least once before calling it with just state.")))
+   (assert @handle-ui-event! "state->ast was called without a ui-event-handler. Please call state->ast with both state and ui-event-handler at least once before calling it with just state.")
    {:id "root"
     :ui-type :root
     :screen (top-level-screen->ast state)}))
