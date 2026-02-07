@@ -5,17 +5,23 @@
             [icare.resources.state
              :refer [dispatch! get-people-cards get-task-by-indexes gather-pub-keys-and-uuids get-user-pub-key]
              :rename {dispatch! state-dispatch!}]
-            [icare.resources.utils :refer [update-state-and-persist!]]))
+            [icare.resources.glue :refer [update-state-and-persist!]]
+            [icare.ui.glue :refer [render-ui!]]))
 
 ;;UI event handler for events triggered by user interactions.
 ;;Coordinates state updates, storage persistence, and outbound network messages.
 ;;UI event callbacks are defined in ast.cljd and passed to widgets in build.cljd.
+;;
+(defn update-state-render-and-persist! [event]
+  (let [new-state (update-state-and-persist! event)]
+    (render-ui! new-state)
+    new-state))
 
 (defn handle-ui-event! [event]
   (let [{:keys [type]} event]
     (condp = type
       :complete-user-task
-     (let [new-state (update-state-and-persist! event)
+     (let [new-state (update-state-render-and-persist! event)
            updated-task (get-task-by-indexes new-state (:user-card-idx event) (:task-idx event))]
        (network-dispatch! {:type :update-task-event
                            :deleted false
@@ -23,13 +29,13 @@
 
      :delete-user-task
      (do
-       (update-state-and-persist! event)
+       (update-state-render-and-persist! event)
        (network-dispatch! {:type :update-task-event
                            :deleted true
                            :task (:task event)}))
 
      :rename-user-task
-     (let [new-state (update-state-and-persist! event)
+     (let [new-state (update-state-render-and-persist! event)
            updated-task (get-task-by-indexes new-state (:user-card-idx event) (:task-idx event))]
        (network-dispatch! {:type :update-task-event
                            :deleted false
@@ -37,14 +43,15 @@
 
      :like-friend-task
      (do
-       (update-state-and-persist! event)
+       (prn event)
+       (update-state-render-and-persist! event)
        (network-dispatch! {:type :liked-event
                            :liked (:liked event)
                            :creator-pub-key (:creator-pub-key event)
                            :task-uuid (:task-uuid event)}))
 
      :add-user-task
-     (let [new-state (update-state-and-persist! event)
+     (let [new-state (update-state-render-and-persist! event)
            {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids new-state)
            user-pub-key (get-user-pub-key new-state)]
        (network-dispatch! {:type :update-task-event
@@ -56,7 +63,7 @@
                            :friend-pub-keys friend-pub-keys}))
 
      :delete-card
-     (let [new-state (update-state-and-persist! event)
+     (let [new-state (update-state-render-and-persist! event)
            {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids new-state)
            user-pub-key (get-user-pub-key new-state)
            people-cards (get-people-cards new-state)]
@@ -70,10 +77,10 @@
                            :friend-pub-keys friend-pub-keys}))
 
      :add-friend
-     (update-state-and-persist! event)
+     (update-state-render-and-persist! event)
 
      :initialize-friend
-     (let [new-state (update-state-and-persist! event)
+     (let [new-state (update-state-render-and-persist! event)
            {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids new-state)
            user-pub-key (get-user-pub-key new-state)
            people-cards (get-people-cards new-state)]
@@ -87,27 +94,28 @@
                            :friend-pub-keys friend-pub-keys}))
 
      :delete-uninitialized-person
-     (update-state-and-persist! event)
+     (update-state-render-and-persist! event)
 
      :rename-uninitialized-person
-     (update-state-and-persist! event)
+     (update-state-render-and-persist! event)
 
      :rename-card
-     (let [new-state (update-state-and-persist! event)
+     (let [new-state (update-state-render-and-persist! event)
            people-cards (get-people-cards new-state)]
        (derived-state-dispatch! {:type :derive-state
                                  :people-cards people-cards}))
 
      :task-notification-finishes
-     (update-state-and-persist! event)
+     (update-state-render-and-persist! event)
 
      :card-expansion
-     (update-state-and-persist! event)
+     (update-state-render-and-persist! event)
 
      :reorder-items
-     (update-state-and-persist! event)
+     (update-state-render-and-persist! event)
 
      :toggle-qr ;;just showing a qr code, no need to persist state
-     (state-dispatch! event)
+     (-> (state-dispatch! event)
+         (render-ui!))
 
      (throw (Exception (str "Unknown event type in ui-events dispatch: " event))))))

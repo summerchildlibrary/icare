@@ -178,7 +178,7 @@
          (update-in state [:reorderable-items card-idx :tasks]
                     conj (conj task [:notify? true])))
        ;; Update existing task
-       (when (and card-idx task-idx)
+       (when (and card-idx task-idx (not deleted?))
          (-> state
              (assoc-in [:reorderable-items card-idx :tasks task-idx] task)
              (notify-task card-idx task-idx)))

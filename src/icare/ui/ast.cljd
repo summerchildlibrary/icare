@@ -1,66 +1,74 @@
 (ns icare.ui.ast
   (:require ["package:flutter/material.dart" :as m]
             ["package:uuid/uuid.dart" :refer [Uuid]]
-            [icare.ui-events :refer [handle-ui-event!]]))
+            [icare.resources.derived-state :refer [get-pub-key-to-name-map get-pub-key-to-card-controller-map get-user-pub-key]]))
 
 (def uuid-generator (.-v4 (Uuid)))
 ;;Build an AST from our state
 
-(defn task-subitems->ast [subitem]
-  (let [{:keys [type value]} subitem]
+(defn task-subitems->ast [subitem-idx subitem]
+  (let [{:keys [type value task-uuid]} subitem
+        id (str "subitem-" task-uuid "-" subitem-idx)]
     (cond
-      (= type :liked-list) {:ui-type :subitem-liked-list :liked-by value}
-      (= type :time) {:ui-type :subitem-time :time value}
-      (= type :image) {:ui-type :subitem-image :url value}
+      (= type :liked-list) {:id id :ui-type :subitem-liked-list :liked-by value}
+      (= type :time) {:id id :ui-type :subitem-time :time value}
+      (= type :image) {:id id :ui-type :subitem-image :url value}
       :else (throw (Exception. (str "task-subitems->ast was given a task subitem with unknown type: " type))))))
 
 (defn user-task->ast [task-idx task]
-  (let [{:keys [title completed subitems reorderable-item-idx liked-by notify?]} task]
-    {:ui-type :editable-task
+  (let [{:keys [uuid title completed subitems reorderable-item-idx liked-by notify?]} task
+        id (str "task-" uuid)
+        subitems-with-uuid (mapv #(conj % [:task-uuid uuid])
+                                 (if (seq liked-by)
+                                   (concat [{:type :liked-list :value liked-by}] subitems)
+                                   subitems))]
+    {:id id
+     :ui-type :editable-task
      :title title
      :notify? notify?
      :on-complete (fn []
-                    (handle-ui-event! {:type :complete-user-task
-                                       :user-card-idx reorderable-item-idx
-                                       :task-idx task-idx
-                                       :completed (not completed)}))
+                    (@handle-ui-event! {:type :complete-user-task
+                                        :user-card-idx reorderable-item-idx
+                                        :task-idx task-idx
+                                        :completed (not completed)}))
      :on-edit-task-title (fn [title]
                            (if (empty? title)
-                             (handle-ui-event! {:type :delete-user-task
-                                                :user-card-idx reorderable-item-idx
-                                                :task-idx task-idx
-                                                :task task})
-                             (handle-ui-event! {:type :rename-user-task
-                                                :user-card-idx reorderable-item-idx
-                                                :task-idx task-idx
-                                                :title title})))
+                             (@handle-ui-event! {:type :delete-user-task
+                                                 :user-card-idx reorderable-item-idx
+                                                 :task-idx task-idx
+                                                 :task task})
+                             (@handle-ui-event! {:type :rename-user-task
+                                                 :user-card-idx reorderable-item-idx
+                                                 :task-idx task-idx
+                                                 :title title})))
      :completed completed
-     :subitems (mapv task-subitems->ast
-                     (if (seq liked-by)
-                       (concat [{:type :liked-list :value liked-by}] subitems)
-                       subitems))}))
+     :subitems (mapv task-subitems->ast (range) subitems-with-uuid)}))
 
 (defn friend-task->ast [task-idx task]
-  (let [{:keys [title completed liked subitems reorderable-item-idx creator-pub-key uuid notify? card-expanded?]} task]
-    {:ui-type :ronly-task
+  (let [{:keys [title completed liked subitems reorderable-item-idx creator-pub-key uuid notify? card-expanded?]} task
+        id (str "task-" uuid)
+        subitems-with-uuid (mapv #(conj % [:task-uuid uuid]) subitems)]
+    {:id id
+     :ui-type :ronly-task
      :title title
      :completed completed
      :notify? (and notify? card-expanded?)
      :on-notifies (fn [_]
-                     (handle-ui-event! {:type :task-notification-finishes
-                                        :card-idx reorderable-item-idx}))
+                     (@handle-ui-event! {:type :task-notification-finishes
+                                         :card-idx reorderable-item-idx}))
      :on-liked (fn []
-                 (handle-ui-event! {:type :like-friend-task
-                                    :friend-card-idx reorderable-item-idx
-                                    :task-idx task-idx
-                                    :liked (not liked)
-                                    :creator-pub-key creator-pub-key
-                                    :task-uuid uuid}))
+                 (@handle-ui-event! {:type :like-friend-task
+                                     :friend-card-idx reorderable-item-idx
+                                     :task-idx task-idx
+                                     :liked (not liked)
+                                     :creator-pub-key creator-pub-key
+                                     :task-uuid uuid}))
      :liked liked
-     :subitems (mapv task-subitems->ast subitems)}))
+     :subitems (mapv task-subitems->ast (range) subitems-with-uuid)}))
 
-(defn add-tasks->ast [reorderable-item-idx]
-  {:ui-type :add-task-area
+(defn add-tasks->ast [reorderable-item-idx pub-key]
+  {:id (str "add-task-" pub-key)
+   :ui-type :add-task-area
    :on-add-task (fn [value]
                   (when (not (empty? value))
                     (let [new-task {:title value
@@ -68,65 +76,71 @@
                                     :liked-by #{}
                                     :completed false
                                     :subitems []}]
-                      (handle-ui-event! {:type :add-user-task
-                                         :user-card-idx reorderable-item-idx
-                                         :new-task new-task}))))})
+                      (@handle-ui-event! {:type :add-user-task
+                                          :user-card-idx reorderable-item-idx
+                                          :new-task new-task}))))})
 
 (defn person->ast [reorderable-item-idx person]
   (let [{:keys [user? name tasks pub-key expanded? notify?]} person
+        id (str "card-" pub-key)
         tasks (mapv #(conj % {:reorderable-item-idx reorderable-item-idx :creator-pub-key pub-key :card-expanded? expanded?}) tasks)]
-    {:ui-type :task-card
+    {:id id
+     :ui-type :task-card
      :expanded? expanded?
+     :expansion-controller ((get-pub-key-to-card-controller-map) pub-key)
      :has-alert? (some :notify? tasks)
      :key pub-key
      :idx reorderable-item-idx
      :title name
      :on-expand (fn [expanded?]
-                  (handle-ui-event! {:type :card-expansion
-                                     :expanded? expanded?
-                                     :card-idx reorderable-item-idx
-                                     :pub-key pub-key}))
+                  (@handle-ui-event! {:type :card-expansion
+                                      :expanded? expanded?
+                                      :card-idx reorderable-item-idx
+                                      :pub-key pub-key}))
 
      :on-rename-title (fn [value]
                         (if (empty? value)
-                          (handle-ui-event! {:type :delete-card
-                                             :card-idx reorderable-item-idx})
-                          (handle-ui-event! {:type :rename-card
-                                             :card-idx reorderable-item-idx
-                                             :name value})))
+                          (@handle-ui-event! {:type :delete-card
+                                              :card-idx reorderable-item-idx})
+                          (@handle-ui-event! {:type :rename-card
+                                              :card-idx reorderable-item-idx
+                                              :name value})))
      :tasks (if user?
-              (conj (mapv user-task->ast (range) tasks) (add-tasks->ast reorderable-item-idx))
+              (conj (mapv user-task->ast (range) tasks) (add-tasks->ast reorderable-item-idx pub-key))
               (mapv friend-task->ast (range) tasks))}))
 
 (defn uninitialized-person->ast [reorderable-item-idx item]
-  (let [{:keys [name uuid]} item]
-    {:ui-type :uninitialized-person-card
+  (let [{:keys [name uuid]} item
+        id (str "uninit-" uuid)]
+    {:id id
+     :ui-type :uninitialized-person-card
      :key uuid
      :idx reorderable-item-idx
      :on-rename-title (fn [value]
                         (if (empty? value)
                           ;;this is lazy, just create a delete-uninitialized-person event and wire it to the delete-card handler in state
-                          (handle-ui-event! {:type :delete-uninitialized-person
-                                             :card-idx reorderable-item-idx})
-                          (handle-ui-event! {:type :rename-uninitialized-person
-                                             :card-idx reorderable-item-idx
-                                             :name value})))
+                          (@handle-ui-event! {:type :delete-uninitialized-person
+                                              :card-idx reorderable-item-idx})
+                          (@handle-ui-event! {:type :rename-uninitialized-person
+                                              :card-idx reorderable-item-idx
+                                              :name value})))
      :on-show-qr (fn []
-                   (handle-ui-event! {:type :toggle-qr}))
+                   (@handle-ui-event! {:type :toggle-qr}))
      :on-paste-public-key (fn [value]
-                            (handle-ui-event! {:type :initialize-friend
-                                               :card-idx reorderable-item-idx
-                                               :public-key value}))
+                            (@handle-ui-event! {:type :initialize-friend
+                                                :card-idx reorderable-item-idx
+                                                :public-key value}))
      :title name}))
 
 ;;TODO we probably don't want a friend search, easier to
 ;;have local discovery and adding friends via sharing links
 ;;either way this is just for demo purposes
 (defn friend-search->ast []
-  {:ui-type :friend-search-area
+  {:id "friend-search"
+   :ui-type :friend-search-area
    :on-search (fn [value]
-                (handle-ui-event! {:type :add-friend
-                                   :name value}))})
+                (@handle-ui-event! {:type :add-friend
+                                    :name value}))})
 
 (defn list-item->ast [reorderable-item-idx item]
   (let [{:keys [type]} item]
@@ -138,21 +152,37 @@
       (throw (Exception (str "list-item->ast was given a list item with unknown type: " type))))))
 
 (defn reorderable-list->ast [reorderable-items]
-  {:ui-type :reorderable-list
+  {:id "reorderable-list"
+   :ui-type :reorderable-list
    :on-reorder (fn [from-index to-index]
                  (let [[from-index to-index] (if (< from-index to-index)
                                                [from-index (dec to-index)]
                                                [from-index to-index])]
-                   (handle-ui-event! {:type :reorder-items
-                                      :from-index from-index
-                                      :to-index to-index})))
+                   (@handle-ui-event! {:type :reorder-items
+                                       :from-index from-index
+                                       :to-index to-index})))
    :items (mapv list-item->ast (range) reorderable-items)})
 
-(defn state->ast [state]
+(defn top-level-screen->ast [state]
   (let [{:keys [reorderable-items show-qr?]} state]
     (cond
-      show-qr? {:ui-type :qr-screen
+      show-qr? {:id "qr-screen"
+                :ui-type :qr-screen
                 :on-close (fn []
-                            (handle-ui-event! {:type :toggle-qr}))}
-      :else {:ui-type :screen-base
+                            (@handle-ui-event! {:type :toggle-qr}))}
+      :else {:id "screen-base"
+             :ui-type :screen-base
              :reorderable-list (reorderable-list->ast reorderable-items)})))
+
+(defonce handle-ui-event! (atom nil)) ;;this is a hack to avoid circular dependencies, we would like to import this function directly, but instead we will set it at runtime when state->ast is called with both arguments for the first time, and then we can use it in all subsequent calls to state->ast without needing to import it here
+
+(defn state->ast
+  ([state ui-event-handler]
+   (reset! handle-ui-event! ui-event-handler)
+   (state->ast state))
+  ([state]
+   (when (nil? @handle-ui-event!)
+     (throw (Exception. "state->ast was called before a ui-event-handler was set. Please call state->ast with both state and ui-event-handler at least once before calling it with just state.")))
+   {:id "root"
+    :ui-type :root
+    :screen (top-level-screen->ast state)}))

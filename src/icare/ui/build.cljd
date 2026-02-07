@@ -3,444 +3,465 @@
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["package:qr_flutter/qr_flutter.dart" :as qr]
             [cljd.flutter :as f]
-            [icare.resources.derived-state :refer [get-pub-key-to-name-map get-pub-key-to-card-controller-map get-user-pub-key]]
+            [icare.resources.derived-state :refer [get-pub-key-to-name-map get-user-pub-key]]
             [cljd.string :as str]))
 
 ;;TODO extract common styles to constants
-(defn ast->widget [{:keys [ui-type] :as ui}]
-  (condp = ui-type
-    :screen-base
-    (let [{:keys [reorderable-list]} ui]
-      (f/widget
-       m/Stack
-       .children
-       [(ast->widget reorderable-list)]))
+(defn ast-store->widget
+  ([ast-store] (ast-store->widget ast-store @(get @ast-store "root")))
+  ([ast-store {:keys [ui-type id] :as ui}]
+   (let [recursive-call (fn [ast-id]
+                          ;; (prn "ast-store->widget called with ast-id: " ast-id)
+                          (ast-store->widget ast-store @(get @ast-store ast-id)))
+         get-ast-atom (fn [] (get @ast-store id))
+         {:keys [key]} @(get-ast-atom)]
+     (condp = ui-type
+       :root
+       (f/widget
+        :watch [{:keys [screen]} (get-ast-atom)]
+        (recursive-call screen))
 
-    :reorderable-list
-    (let [{:keys [on-reorder items]} ui]
-      (f/widget
-       (m/ReorderableListView
-        .padding (m/EdgeInsets.symmetric .horizontal 20)
-        .onReorder on-reorder
-        .buildDefaultDragHandles false
-        .proxyDecorator (fn [child index animation] child)
-        .children (mapv ast->widget items))))
+       :screen-base
+       (f/widget
+        :watch [{:keys [reorderable-list]} (get-ast-atom)]
+        (m/Stack
+         .children
+         [(recursive-call reorderable-list)]))
 
-    :task-card
-    (let [{:keys [expanded? on-expand idx title has-alert? on-rename-title key title tasks]} ui
-          controller ^m/ExpansibleController ((get-pub-key-to-card-controller-map) key)]
-      (if expanded?
-        (.expand controller)
-        (.collapse controller))
-      (f/widget
-       :key key
-       :padding {:vertical 6}
-       (m/Material
-        .elevation 0
-        .borderRadius (m/BorderRadius.circular 12))
-       (m/ExpansionTile
-        .controller controller
-        .onExpansionChanged on-expand
-        .childrenPadding (m/EdgeInsets.only .bottom 20)
-        .expandedCrossAxisAlignment m/CrossAxisAlignment.start
-        .expandedAlignment m/Alignment.topLeft
-        .shape (m/RoundedRectangleBorder
-                .side (m/BorderSide
-                       .color (m/Colors.green.withOpacity 1))
-                .borderRadius (m/BorderRadius.circular 12))
-        .collapsedShape (m/RoundedRectangleBorder
-                         .side (m/BorderSide
-                                .color (if has-alert?
-                                         (m/Colors.orange.withOpacity 1)
-                                         (m/Colors.black.withOpacity 0.3)))
-                         .borderRadius (m/BorderRadius.circular 12))
-        .leading (if expanded?
-                   (m/Icon m/Icons.drag_handle .color (m/Colors.black.withOpacity 0.2))
-                   (m/ReorderableDragStartListener
-                    .index idx
-                    .child (m/Icon m.Icons/drag_handle)))
-        .title (f/widget
-                (m/Align .alignment m/Alignment.centerLeft)
-                (m/Row)
-                .children
-                [(f/widget
-                  (m/SizedBox .width 150)
-                  (m/TextField
-                   .style (m/TextStyle
-                           .fontSize 16
-                           .fontWeight m/FontWeight.bold
-                           .color m/Colors.black)
-                   .onSubmitted on-rename-title
-                   .decoration (m/InputDecoration
-                                .contentPadding (m/EdgeInsets.only .bottom 0)
-                                .border m/InputBorder.none)
-                   .strutStyle (m/StrutStyle
-                                .fontSize 16
-                                .height 1.9
-                                .forceStrutHeight true)
-                   .controller (m/TextEditingController. .text (str title))))])
-        .children (mapv ast->widget tasks))))
+       :reorderable-list
+       (f/widget
+        :watch [{:keys [items]} (get-ast-atom)]
+        :let [{:keys [on-reorder]} @(get-ast-atom)]
+        (m/ReorderableListView
+         .padding (m/EdgeInsets.symmetric .horizontal 20)
+         .onReorder on-reorder
+         .buildDefaultDragHandles false
+         .proxyDecorator (fn [child index animation] child)
+         .children (mapv recursive-call items)))
 
-    :uninitialized-person-card
-    (let [{:keys [title key idx on-rename-title on-show-qr on-paste-public-key]} ui]
-      (f/widget
-       :key key
-       :padding {:vertical 6}
-       (m/Material
-        .elevation 0
-        .borderRadius (m/BorderRadius.circular 12))
-       (m/ReorderableDragStartListener
-        .index idx)
-       (m/ListTile
-        .shape (m/RoundedRectangleBorder
-                .side (m/BorderSide
-                       .color (m/Colors.black.withOpacity 0.3))
-                .borderRadius (m/BorderRadius.circular 12))
-        .title (f/widget
-                (m/Align .alignment m/Alignment.centerLeft)
-                (m/Row)
-                .children
-                [(f/widget
-                  (m/SizedBox .width 150)
-                  (m/TextField
-                   .textInputAction m.TextInputAction/done
-                   .style (m/TextStyle
-                           .fontSize 16
-                           .fontWeight m/FontWeight.bold
-                           .color m/Colors.grey)
-                   .onSubmitted on-rename-title
-                   .decoration (m/InputDecoration
-                                .contentPadding (m/EdgeInsets.only .bottom 0)
-                                .border m/InputBorder.none)
-                   .strutStyle (m/StrutStyle
-                                .fontSize 16
-                                .height 1.9
-                                .forceStrutHeight true)
-                   .controller (m/TextEditingController. .text (str title))))
-                 (m/Spacer .flex 8)
-                 (m/IconButton
-                  .iconSize 30
-                  .icon (m/Icon m/Icons.qr_code_2 .color m/Colors.black)
-                  .onPressed on-show-qr)
-                 (m/Spacer .flex 1)])
-        .subtitle (f/widget
-                   :let [text-controller (m/TextEditingController)]
+       :task-card
+       (f/widget
+        :key key
+        :managed [expansion-controller (m/ExpansibleController)]
+        :watch [{:keys [expanded? idx title has-alert? title tasks]} (get-ast-atom)]
+        :let [{:keys [on-expand on-rename-title]} @(get-ast-atom)
+              _ (do (if expanded?
+                      (.expand expansion-controller)
+                      (.collapse expansion-controller))
+                    nil)]
+        :padding {:vertical 6}
+        (m/Material
+         .elevation 0
+         .borderRadius (m/BorderRadius.circular 12))
+        (m/ExpansionTile
+         .controller expansion-controller
+         .onExpansionChanged on-expand
+         .childrenPadding (m/EdgeInsets.only .bottom 20)
+         .expandedCrossAxisAlignment m/CrossAxisAlignment.start
+         .expandedAlignment m/Alignment.topLeft
+         .shape (m/RoundedRectangleBorder
+                 .side (m/BorderSide
+                        .color (m/Colors.green.withOpacity 1))
+                 .borderRadius (m/BorderRadius.circular 12))
+         .collapsedShape (m/RoundedRectangleBorder
+                          .side (m/BorderSide
+                                 .color (if has-alert?
+                                          (m/Colors.orange.withOpacity 1)
+                                          (m/Colors.black.withOpacity 0.3)))
+                          .borderRadius (m/BorderRadius.circular 12))
+         .leading (if expanded?
+                    (m/Icon m/Icons.drag_handle .color (m/Colors.black.withOpacity 0.2))
+                    (m/ReorderableDragStartListener
+                     .index idx
+                     .child (m/Icon m.Icons/drag_handle)))
+         .title (f/widget
+                 (m/Align .alignment m/Alignment.centerLeft)
+                 (m/Row)
+                 .children
+                 [(f/widget
+                   (m/SizedBox .width 150)
+                   (m/TextField
+                    .style (m/TextStyle
+                            .fontSize 16
+                            .fontWeight m/FontWeight.bold
+                            .color m/Colors.black)
+                    .onSubmitted on-rename-title
+                    .decoration (m/InputDecoration
+                                 .contentPadding (m/EdgeInsets.only .bottom 0)
+                                 .border m/InputBorder.none)
+                    .strutStyle (m/StrutStyle
+                                 .fontSize 16
+                                 .height 1.9
+                                 .forceStrutHeight true)
+                    .controller (m/TextEditingController. .text (str title))))])
+         .children (mapv recursive-call tasks)))
+
+       :uninitialized-person-card
+       (f/widget
+        :key key
+        :watch [{:keys [idx title]} (get-ast-atom)]
+        :let [{:keys [on-rename-title on-show-qr on-paste-public-key]} @(get-ast-atom)]
+        :padding {:vertical 6}
+        (m/Material
+         .elevation 0
+         .borderRadius (m/BorderRadius.circular 12))
+        (m/ReorderableDragStartListener
+         .index idx)
+        (m/ListTile
+         .shape (m/RoundedRectangleBorder
+                 .side (m/BorderSide
+                        .color (m/Colors.black.withOpacity 0.3))
+                 .borderRadius (m/BorderRadius.circular 12))
+         .title (f/widget
+                 (m/Align .alignment m/Alignment.centerLeft)
+                 (m/Row)
+                 .children
+                 [(f/widget
+                   (m/SizedBox .width 150)
                    (m/TextField
                     .textInputAction m.TextInputAction/done
                     .style (m/TextStyle
                             .fontSize 16
                             .fontWeight m/FontWeight.bold
                             .color m/Colors.grey)
-                    .onSubmitted on-paste-public-key
+                    .onSubmitted on-rename-title
                     .decoration (m/InputDecoration
-                                 .hintText "paste public key..."
-                                 .hintStyle (m/TextStyle
-                                             .fontSize 16
-                                             .fontWeight m.FontWeight/normal
-                                             .color m.Colors/grey)
-                                 .contentPadding (m/EdgeInsets.only .bottom 0))
-                    .controller text-controller)))))
-
-    :editable-task
-    (let [{:keys [title on-complete on-edit-task-title completed subitems]} ui]
-      (f/widget
-       :padding {:left 20 :bottom 30}
-       (m/Column)
-       .children
-       [(m/Row
-         .crossAxisAlignment m.CrossAxisAlignment/center
-         .children
-         [(f/widget
-           (m/IconButton
-            .icon (m/Icon (if completed
-                            m/Icons.check_box
-                            m/Icons.check_box_outline_blank)
-                          .size 26
-                          .color m.Colors/red)
-            .onPressed on-complete))
-          (f/widget
-           (m/SizedBox .width 160)
-           (m/TextField
-            .keyboardType m/TextInputType.text
-            .autocorrect false
-            .maxLines nil
-            .style (m/TextStyle
-                    .fontSize 22
-                    .fontWeight m.FontWeight/normal
-                    .color m.Colors/black
-                    .decoration (if completed
-                                  m.TextDecoration/lineThrough
-                                  m.TextDecoration/none))
-            .onSubmitted on-edit-task-title
-            .decoration (m/InputDecoration
-                         .border m/InputBorder.none)
-            .controller (m/TextEditingController. .text title)))])
-        (f/widget
-         :padding {:top 4}
-         (m/Column .children (mapv ast->widget subitems)))]))
-
-    :ronly-task
-    (let [{:keys [title completed subitems liked on-liked notify? on-notifies]} ui
-          animation-duration 2000]
-      (f/widget
-       :padding {:left 20 :bottom 30 :right 20}
-       :vsync clock
-       :managed [controller (m/AnimationController
-                             .vsync clock
-                             .duration (Duration .milliseconds animation-duration))]
-       :let [color-tween (m/TweenSequence
-                          [(m/TweenSequenceItem
-                            .weight 30
-                            .tween (m/ColorTween
-                                    .begin (m/Colors.orange.withOpacity 0)
-                                    .end (m/Colors.orange.withOpacity 0)))
-                           (m/TweenSequenceItem
-                            .weight 20
-                            .tween (m/ColorTween
-                                    .begin (m/Colors.orange.withOpacity 0)
-                                    .end (m/Colors.orange.withOpacity 0.3)))
-                           (m/TweenSequenceItem
-                            .weight 50
-                            .tween (m/ColorTween
-                                    .begin (m/Colors.orange.withOpacity 0.3)
-                                    .end (m/Colors.orange.withOpacity 0)))])
-             animation (.drive controller color-tween)]
-       (do
-         (when notify?
-           (.reset controller)
-           (.then (.forward controller) on-notifies))
-         (m/AnimatedBuilder
-          .animation animation
-          .builder
-          (fn [ctx child]
-            (f/widget
-             (m/Container
-              .decoration (m/BoxDecoration
-                           .color (.-value animation)
-                           .borderRadius (m/BorderRadius.circular 16)))
-             (m/Column)
-             .children
-             [(m/Row
-               .crossAxisAlignment m.CrossAxisAlignment/center
-               .children
-               [(f/widget
-                 (m/IconButton
-                  .icon (m/Icon (if completed
-                                  m/Icons.check_box
-                                  m/Icons.check_box_outline_blank)
-                                .size 26
-                                .color m/Colors.grey)
-                  .onPressed nil))
-                (f/widget
-                 (m/SizedBox .width 160)
-                 (m/Text title
-                         .maxLines nil
-                         .style (m/TextStyle
-                                 .fontSize 22
-                                 .fontWeight m/FontWeight.normal
-                                 .color m/Colors.black
-                                 .decoration (if completed
-                                               m/TextDecoration.lineThrough
-                                               m/TextDecoration.none))))
-                (m/Spacer .flex 2)
-                (f/widget
-                 (m/IconButton
-                  .icon (m/Icon (if liked
-                                  m/Icons.favorite
-                                  m/Icons.favorite_border)
-                                .size 26
-                                .color m/Colors.red)
-                  .onPressed on-liked))
-                (m/Spacer .flex 1)])
-              (m/Transform.translate
-               .offset (m/Offset 0 -2)
-               .child (m/Column .children (mapv ast->widget subitems)))]))))))
-
-    :subitem-liked-list
-    (let [{:keys [liked-by]} ui]
-      (f/widget
-       :padding {:left 15 :bottom 4}
-       :let [liked-by (mapv (get-pub-key-to-name-map) liked-by)]
-       (m/Row
-        .children [(svg/SvgPicture.asset
-                    "assets/icons/ph--arrow-bend-down-right-duotone.svg"
-                    .colorFilter (m/ColorFilter.mode m/Colors.red m/BlendMode.srcIn)
-                    .width 16
-                    .height 16)
-                   (m/SizedBox .width 4)
-                   (m/Text (cond
-                             (= 1 (count liked-by))
-                             (str "Loved by " (first liked-by))
-
-                             (= 2 (count liked-by))
-                             (str "Loved by " (str/join " and " liked-by))
-
-                             :else (str "Loved by " (str/join ", " (butlast liked-by))
-                                        ", and " (last liked-by)))
-                           .style (m/TextStyle
-                                   .fontSize 14
-                                   .fontWeight m.FontWeight/normal
-                                   .color m.Colors/red))])))
-
-    :subitem-time
-    (let [{:keys [time]} ui
-          time (.parse DateTime time)]
-      (f/widget
-       :padding {:left 15 :bottom 4}
-       (m/Row
-        .children [(f/widget
-                    :padding {:bottom 2}
-                    (svg/SvgPicture.asset
-                     "assets/icons/ph--arrow-bend-down-right-duotone.svg"
-                     .colorFilter (m/ColorFilter.mode m/Colors.pink m/BlendMode.srcIn)
-                     .width 16
-                     .height 16))
-                   (m/SizedBox .width 4)
-                   (m/Text (str "Completed at " (.-hour time) ":" (.-minute time))
-                           .style (m/TextStyle
-                                   .fontSize 14
-                                   .fontWeight m.FontWeight/normal
-                                   .color m.Colors/pink))])))
-
-    :subitem-image
-    (let [{:keys [url]} ui]
-      (f/widget
-       :padding {:left 15 :bottom 4}
-       (m/Row
-        .crossAxisAlignment m.CrossAxisAlignment/start
-        .children [(svg/SvgPicture.asset
-                    "assets/icons/ph--arrow-bend-down-right-duotone.svg"
-                    .colorFilter (m/ColorFilter.mode m/Colors.orange m/BlendMode.srcIn)
-                    .width 16
-                    .height 16)
-                   (m/SizedBox .width 4)
-                   (m/Container
-                    .width 200
-                    .height 120
-                    .decoration (m/BoxDecoration
-                                 .border (m/Border.all
-                                          .color m.Colors/orange
-                                          .width 2)
-                                 .borderRadius (m/BorderRadius.circular 8)
-                                 .image (m/DecorationImage
-                                         .fit m.BoxFit/cover
-                                         .image (m/NetworkImage url))))])))
-
-    :friend-search-area
-    (let [{:keys [on-search]} ui]
-      (f/widget
-       :key "friend-search-area"
-       :padding {:left 15 :bottom 15}
-       (m/Row
-        .children [(f/widget
-                    :padding {:right 20 :top 4}
-                    (m/Icon m.Icons/person_add
-                            .size 22
-                            .color m.Colors/black))
-                   (f/widget
-                    :let [text-controller (m/TextEditingController.)]
-                    (m/SizedBox .width 180)
+                                 .contentPadding (m/EdgeInsets.only .bottom 0)
+                                 .border m/InputBorder.none)
+                    .strutStyle (m/StrutStyle
+                                 .fontSize 16
+                                 .height 1.9
+                                 .forceStrutHeight true)
+                    .controller (m/TextEditingController. .text (str title))))
+                  (m/Spacer .flex 8)
+                  (m/IconButton
+                   .iconSize 30
+                   .icon (m/Icon m/Icons.qr_code_2 .color m/Colors.black)
+                   .onPressed on-show-qr)
+                  (m/Spacer .flex 1)])
+         .subtitle (f/widget
+                    :let [text-controller (m/TextEditingController)]
                     (m/TextField
                      .textInputAction m.TextInputAction/done
-                     .cursorHeight 38
-                     .onSubmitted (fn [& args]
-                                    (.clear text-controller)
-                                    (apply on-search args))
-                     .decoration (m/InputDecoration
-                                  .hintText "new friend..."
-                                  .hintStyle (m/TextStyle
-                                              .fontSize 22
-                                              .fontWeight m.FontWeight/normal
-                                              .color m.Colors/grey)
-                                  .contentPadding (m/EdgeInsets.only .bottom 0))
-                     .strutStyle (m/StrutStyle
-                                  .fontSize 22
-                                  .height 1.9
-                                  .forceStrutHeight true)
-                     .controller text-controller
                      .style (m/TextStyle
-                             .fontSize 22
-                             .fontWeight m.FontWeight/normal
-                             .color m.Colors/black)))])))
-
-    :add-task-area
-    (let [{:keys [on-add-task]} ui]
-      (f/widget
-       :padding {:left 20}
-       (m/Row
-        .crossAxisAlignment m.CrossAxisAlignment/center
-        .children [(f/widget
-                    :padding {:top 8}
-                    (m/IconButton
-                     .icon (m/Icon m/Icons.add
-                                   .size 26
-                                   .color m.Colors/red)
-                     .onPressed nil))
-                   (f/widget
-                    :let [text-controller (m/TextEditingController.)]
-                    (m/SizedBox .width 180)
-                    (m/TextField
-                     .textInputAction m.TextInputAction/done
-                     .cursorHeight 38
-                     .onSubmitted (fn [& args]
-                                    (.clear text-controller)
-                                    (apply on-add-task args))
-                     .decoration (m/InputDecoration
-                                  .hintText "new task..."
-                                  .hintStyle (m/TextStyle
-                                              .fontSize 22
-                                              .fontWeight m.FontWeight/normal
-                                              .color m.Colors/grey)
-                                  .contentPadding (m/EdgeInsets.only .bottom 0))
-                     .strutStyle (m/StrutStyle
-                                  .fontSize 22
-                                  .height 1.9
-                                  .forceStrutHeight true)
-                     .controller text-controller
-                     .style (m/TextStyle
-                             .fontSize 22
-                             .fontWeight m.FontWeight/normal
-                             .color m.Colors/black)))])))
-
-    :qr-screen
-    (let [{:keys [on-close]} ui
-          user-pub-key (get-user-pub-key)]
-      (f/widget
-       (m/Center)
-       (m/Column
-        .mainAxisAlignment m/MainAxisAlignment.center
-        .children [(f/widget
-                    :padding {:bottom 20}
-                    (m/TextButton
-                     .style (m/TextButton.styleFrom
-                             .backgroundColor m/Colors.orange
-                             .padding (m/EdgeInsets.symmetric
-                                       .vertical 12
-                                       .horizontal 24)
-                             .shape (m/RoundedRectangleBorder
-                                     .side (m/BorderSide
-                                            .color m/Colors.black
-                                            .width 2)
-                                     .borderRadius (m/BorderRadius.circular 8)))
-                     .onPressed on-close)
-                    (m/Text
-                     "Close this screen!"
-                     .style (m/TextStyle
-                             .fontSize 24
+                             .fontSize 16
                              .fontWeight m/FontWeight.bold
-                             .color m/Colors.black)))
-                   (f/widget
-                    (qr/QrImageView
-                     .data user-pub-key
-                     .version qr/QrVersions.auto
-                     .size 300))
-                   (f/widget
-                    :padding {:top 20 :horizontal 40}
-                    (m/Text "Let other people scan and paste this public key to add you as a friend."
-                            .textAlign m/TextAlign.center
-                            .style (m/TextStyle
-                                    .fontSize 16
-                                    .fontWeight m/FontWeight.normal
-                                    .color m/Colors.black)))])))
+                             .color m/Colors.grey)
+                     .onSubmitted on-paste-public-key
+                     .decoration (m/InputDecoration
+                                  .hintText "paste public key..."
+                                  .hintStyle (m/TextStyle
+                                              .fontSize 16
+                                              .fontWeight m.FontWeight/normal
+                                              .color m.Colors/grey)
+                                  .contentPadding (m/EdgeInsets.only .bottom 0))
+                     .controller text-controller))))
 
-    (throw (Exception. (str "ast->widget tried to render an unknown ui element: " ui)))))
+       :editable-task
+       (f/widget
+        :watch [{:keys [title completed subitems]} (get-ast-atom)]
+        :let [{:keys [on-complete on-edit-task-title]} @(get-ast-atom)]
+        :padding {:left 20 :bottom 30}
+        (m/Column)
+        .children
+        [(m/Row
+          .crossAxisAlignment m.CrossAxisAlignment/center
+          .children
+          [(f/widget
+            (m/IconButton
+             .icon (m/Icon (if completed
+                             m/Icons.check_box
+                             m/Icons.check_box_outline_blank)
+                           .size 26
+                           .color m.Colors/red)
+             .onPressed on-complete))
+           (f/widget
+            (m/SizedBox .width 160)
+            (m/TextField
+             .keyboardType m/TextInputType.text
+             .autocorrect false
+             .maxLines nil
+             .style (m/TextStyle
+                     .fontSize 22
+                     .fontWeight m.FontWeight/normal
+                     .color m.Colors/black
+                     .decoration (if completed
+                                   m.TextDecoration/lineThrough
+                                   m.TextDecoration/none))
+             .onSubmitted on-edit-task-title
+             .decoration (m/InputDecoration
+                          .border m/InputBorder.none)
+             .controller (m/TextEditingController. .text title)))])
+         (f/widget
+          :padding {:top 4}
+          (m/Column .children (mapv recursive-call subitems)))])
+
+       :add-task-area
+       (f/widget
+        :let [{:keys [on-add-task]} @(get-ast-atom)]
+        :padding {:left 20}
+        (m/Row
+         .crossAxisAlignment m.CrossAxisAlignment/center
+         .children [(f/widget
+                     :padding {:top 8}
+                     (m/IconButton
+                      .icon (m/Icon m/Icons.add
+                                    .size 26
+                                    .color m.Colors/red)
+                      .onPressed nil))
+                    (f/widget
+                     :let [text-controller (m/TextEditingController.)]
+                     (m/SizedBox .width 180)
+                     (m/TextField
+                      .textInputAction m.TextInputAction/done
+                      .cursorHeight 38
+                      .onSubmitted (fn [& args]
+                                     (.clear text-controller)
+                                     (apply on-add-task args))
+                      .decoration (m/InputDecoration
+                                   .hintText "new task..."
+                                   .hintStyle (m/TextStyle
+                                               .fontSize 22
+                                               .fontWeight m.FontWeight/normal
+                                               .color m.Colors/grey)
+                                   .contentPadding (m/EdgeInsets.only .bottom 0))
+                      .strutStyle (m/StrutStyle
+                                   .fontSize 22
+                                   .height 1.9
+                                   .forceStrutHeight true)
+                      .controller text-controller
+                      .style (m/TextStyle
+                              .fontSize 22
+                              .fontWeight m.FontWeight/normal
+                              .color m.Colors/black)))]))
+
+       :ronly-task
+       (f/widget
+        :watch [{:keys [title completed subitems liked notify?]} (get-ast-atom)]
+        :let [{:keys [on-liked on-notifies]} @(get-ast-atom)
+              animation-duration 2000]
+        :padding {:left 20 :bottom 30 :right 20}
+        :vsync clock
+        :managed [controller (m/AnimationController
+                              .vsync clock
+                              .duration (Duration .milliseconds animation-duration))]
+        :let [color-tween (m/TweenSequence
+                           [(m/TweenSequenceItem
+                             .weight 30
+                             .tween (m/ColorTween
+                                     .begin (m/Colors.orange.withOpacity 0)
+                                     .end (m/Colors.orange.withOpacity 0)))
+                            (m/TweenSequenceItem
+                             .weight 20
+                             .tween (m/ColorTween
+                                     .begin (m/Colors.orange.withOpacity 0)
+                                     .end (m/Colors.orange.withOpacity 0.3)))
+                            (m/TweenSequenceItem
+                             .weight 50
+                             .tween (m/ColorTween
+                                     .begin (m/Colors.orange.withOpacity 0.3)
+                                     .end (m/Colors.orange.withOpacity 0)))])
+              animation (.drive controller color-tween)]
+        (do
+          (when notify?
+            (.reset controller)
+            (.then (.forward controller) on-notifies))
+          (m/AnimatedBuilder
+           .animation animation
+           .builder
+           (fn [ctx child]
+             (f/widget
+              (m/Container
+               .decoration (m/BoxDecoration
+                            .color (.-value animation)
+                            .borderRadius (m/BorderRadius.circular 16)))
+              (m/Column)
+              .children
+              [(m/Row
+                .crossAxisAlignment m.CrossAxisAlignment/center
+                .children
+                [(f/widget
+                  (m/IconButton
+                   .icon (m/Icon (if completed
+                                   m/Icons.check_box
+                                   m/Icons.check_box_outline_blank)
+                                 .size 26
+                                 .color m/Colors.grey)
+                   .onPressed nil))
+                 (f/widget
+                  (m/SizedBox .width 160)
+                  (m/Text title
+                          .maxLines nil
+                          .style (m/TextStyle
+                                  .fontSize 22
+                                  .fontWeight m/FontWeight.normal
+                                  .color m/Colors.black
+                                  .decoration (if completed
+                                                m/TextDecoration.lineThrough
+                                                m/TextDecoration.none))))
+                 (m/Spacer .flex 2)
+                 (f/widget
+                  (m/IconButton
+                   .icon (m/Icon (if liked
+                                   m/Icons.favorite
+                                   m/Icons.favorite_border)
+                                 .size 26
+                                 .color m/Colors.red)
+                   .onPressed on-liked))
+                 (m/Spacer .flex 1)])
+               (m/Transform.translate
+                .offset (m/Offset 0 -2)
+                .child (m/Column .children (mapv recursive-call subitems)))])))))
+
+       :subitem-liked-list ;;todo, we have to move the name lookup to the ast so that to provide proper updates
+       (f/widget
+        :watch [{:keys [liked-by]} (get-ast-atom)]
+        :padding {:left 15 :bottom 4}
+        :let [liked-by (mapv (get-pub-key-to-name-map) liked-by)]
+        (m/Row
+         .children [(svg/SvgPicture.asset
+                     "assets/icons/ph--arrow-bend-down-right-duotone.svg"
+                     .colorFilter (m/ColorFilter.mode m/Colors.red m/BlendMode.srcIn)
+                     .width 16
+                     .height 16)
+                    (m/SizedBox .width 4)
+                    (m/Text (cond
+                              (= 1 (count liked-by))
+                              (str "Loved by " (first liked-by))
+
+                              (= 2 (count liked-by))
+                              (str "Loved by " (str/join " and " liked-by))
+
+                              :else (str "Loved by " (str/join ", " (butlast liked-by))
+                                         ", and " (last liked-by)))
+                            .style (m/TextStyle
+                                    .fontSize 14
+                                    .fontWeight m.FontWeight/normal
+                                    .color m.Colors/red))]))
+
+       :subitem-time
+       (f/widget
+        :watch [{:keys [time]} (get-ast-atom)]
+        :let [time (.parse DateTime time)]
+        :padding {:left 15 :bottom 4}
+        (m/Row
+         .children [(f/widget
+                     :padding {:bottom 2}
+                     (svg/SvgPicture.asset
+                      "assets/icons/ph--arrow-bend-down-right-duotone.svg"
+                      .colorFilter (m/ColorFilter.mode m/Colors.pink m/BlendMode.srcIn)
+                      .width 16
+                      .height 16))
+                    (m/SizedBox .width 4)
+                    (m/Text (str "Completed at " (.-hour time) ":" (.-minute time))
+                            .style (m/TextStyle
+                                    .fontSize 14
+                                    .fontWeight m.FontWeight/normal
+                                    .color m.Colors/pink))]))
+
+       :subitem-image
+       (f/widget
+        :watch [{:keys [url]} (get-ast-atom)]
+        :padding {:left 15 :bottom 4}
+        (m/Row
+         .crossAxisAlignment m.CrossAxisAlignment/start
+         .children [(svg/SvgPicture.asset
+                     "assets/icons/ph--arrow-bend-down-right-duotone.svg"
+                     .colorFilter (m/ColorFilter.mode m/Colors.orange m/BlendMode.srcIn)
+                     .width 16
+                     .height 16)
+                    (m/SizedBox .width 4)
+                    (m/Container
+                     .width 200
+                     .height 120
+                     .decoration (m/BoxDecoration
+                                  .border (m/Border.all
+                                           .color m.Colors/orange
+                                           .width 2)
+                                  .borderRadius (m/BorderRadius.circular 8)
+                                  .image (m/DecorationImage
+                                          .fit m.BoxFit/cover
+                                          .image (m/NetworkImage url))))]))
+
+       :friend-search-area
+       (f/widget
+        :key "friend-search-area"
+        :let [{:keys [on-search]} @(get-ast-atom)]
+        :padding {:left 15 :bottom 15}
+        (m/Material)
+        (m/Row
+         .children [(f/widget
+                     :padding {:right 20 :top 4}
+                     (m/Icon m.Icons/person_add
+                             .size 22
+                             .color m.Colors/black))
+                    (f/widget
+                     :let [text-controller (m/TextEditingController.)]
+                     (m/SizedBox .width 180)
+                     (m/TextField
+                      .textInputAction m.TextInputAction/done
+                      .cursorHeight 38
+                      .onSubmitted (fn [& args]
+                                     (.clear text-controller)
+                                     (apply on-search args))
+                      .decoration (m/InputDecoration
+                                   .hintText "add friend..."
+                                   .hintStyle (m/TextStyle
+                                               .fontSize 22
+                                               .fontWeight m.FontWeight/normal
+                                               .color m.Colors/grey)
+                                   .contentPadding (m/EdgeInsets.only .bottom 0))
+                      .strutStyle (m/StrutStyle
+                                   .fontSize 22
+                                   .height 1.9
+                                   .forceStrutHeight true)
+                      .controller text-controller
+                      .style (m/TextStyle
+                              .fontSize 22
+                              .fontWeight m.FontWeight/normal
+                              .color m.Colors/black)))]))
+
+
+       :qr-screen
+       (f/widget
+        ;; :watch [{:keys [user-pub-key]} (get-ast-atom)]
+        :let [{:keys [on-close]} @(get-ast-atom)
+              user-pub-key (get-user-pub-key)] ;;TODO we need to move this to the ast so that we can watch it, not that this will change
+        (m/Center)
+        (m/Column
+         .mainAxisAlignment m/MainAxisAlignment.center
+         .children [(f/widget
+                     (qr/QrImageView
+                      .data user-pub-key
+                      .version qr/QrVersions.auto
+                      .size 300))
+                    (f/widget
+                     :padding {:top 20 :horizontal 40}
+                     (m/Text "Let other people scan and paste this public key to add you as a friend."
+                             .textAlign m/TextAlign.center
+                             .style (m/TextStyle
+                                     .fontSize 16
+                                     .fontWeight m/FontWeight.normal
+                                     .color m/Colors.black)))
+                    (f/widget
+                     :padding {:top 20}
+                     (m/TextButton
+                      .style (m/TextButton.styleFrom
+                              .backgroundColor m/Colors.orange
+                              .padding (m/EdgeInsets.symmetric
+                                        .vertical 12
+                                        .horizontal 24)
+                              .shape (m/RoundedRectangleBorder
+                                      .side (m/BorderSide
+                                             .color m/Colors.black
+                                             .width 2)
+                                      .borderRadius (m/BorderRadius.circular 8)))
+                      .onPressed on-close)
+                     (m/Text
+                      "Close this screen!"
+                      .style (m/TextStyle
+                              .fontSize 24
+                              .fontWeight m/FontWeight.bold
+                              .color m/Colors.black)))]))
+
+      (throw (Exception. (str "ast-store->widget tried to render an unknown ui element: " ui)))))))

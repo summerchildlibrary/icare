@@ -51,8 +51,7 @@
 (defn create-string [event]
   (condp = (:type event)
     :state-change-event (pr-str (:new-state event))
-    (throw (Exception
-            (str "tried to modify storage with an unknown event" event)))))
+    (throw (Exception (str "tried to modify storage with an unknown event" event)))))
 
 (defn dispatch! [event]
   (if-not @initialized?

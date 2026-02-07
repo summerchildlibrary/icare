@@ -1,19 +1,21 @@
 (ns icare.resources.network
   (:require ["package:nostr/nostr.dart" :refer [Event Request Filter]]
-            ["dart:io" :refer [WebSocket]]
-            [icare.network-events :refer [handle-network-data! liked-event-kind update-task-event-kind]]))
+            ["dart:io" :refer [WebSocket]]))
 
 ;;This module handles outbound network messages.
 ;;It creates and sends Nostr events to the relay.
 ;;Incoming events are handled by network-events.cljd
 
-(defonce send-events true)
+(defonce send-events false)
 (defonce initialized? (atom false))
 (defonce private-key (atom nil))
 (defonce web-socket (atom nil))
 
-;; (def relay-url "ws://localhost:8080")
-(def relay-url "wss://relay.damus.io")
+(def update-task-event-kind 39505)
+(def liked-event-kind 39506)
+
+(def relay-url "ws://localhost:8080")
+;; (def relay-url "wss://relay.damus.io")
 
 ;;we want to support offline first workflows
 ;;that means that the first time we connect to the websocket
@@ -65,16 +67,16 @@
                      .kinds [update-task-event-kind])])
           .serialize))
 
-    (prn "Unhandled action type in network manager:" (:type event))))
+    (throw (Exception (str "Create message received an unknown event type:" event)))))
 
 (defn dispatch! [event]
   (let [message (create-message event)]
     (if (and send-events @web-socket @initialized?)
       (do (.add ^WebSocket @web-socket message)
           (prn "Sent event to relay:" message))
-      (prn "WebSocket not initialized while trying to send event:" message))))
+      (prn "WebSocket not initialized while trying to send event"))))
 
-(defn start-listening! [ws user-task-uuids friend-pub-keys user-pub-key]
+(defn start-listening! [ws user-task-uuids friend-pub-keys user-pub-key handle-network-data!]
   (.listen ^WebSocket ws
            handle-network-data! ;;TODO, we should send the dispatch function here so that we can access it in network-events.cljd
            .onError (fn [error] ;;TODO reconnection logic
@@ -90,12 +92,12 @@
               :user-task-uuids user-task-uuids
               :friend-pub-keys friend-pub-keys}))
 
-(defn ^Future initialize-network! [new-private-key user-task-uuids friend-pub-keys user-pub-key]
+(defn ^Future initialize-network! [new-private-key user-task-uuids friend-pub-keys user-pub-key handle-network-data!]
   (when-not @initialized?
     (prn "Initializing network...")
     (reset! initialized? true)
     (reset! private-key new-private-key)
-    (let [ws (await (.connect WebSocket relay-url))]
+    (let [ws (await (.connect WebSocket relay-url))] ;;TODO this can throw an exception, we need to handle reconnection logic here
       (reset! web-socket ws)
-      (start-listening! ws user-task-uuids friend-pub-keys user-pub-key)))
+      (start-listening! ws user-task-uuids friend-pub-keys user-pub-key handle-network-data!)))
   @web-socket)

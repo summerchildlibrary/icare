@@ -3,50 +3,35 @@
             ["package:google_fonts/google_fonts.dart" :as gf]
             ["package:flutter/services.dart" :as services]
             [cljd.flutter :as f]
-            [icare.ui.ast :refer [state->ast]]
-            [icare.ui.build :refer [ast->widget]]
-            [icare.resources.state :refer [initialize-state! gather-pub-keys-and-uuids get-user-pub-key get-people-cards]]
-            [icare.resources.derived-state :refer [initialize-derived-state!]]
-            [icare.resources.network :refer [initialize-network!]]
+            [icare.ui.glue :refer [build-widgets!]]
+            [icare.resources.glue :refer [initialize-resources-from-storage!]]
+            [icare.network-events :refer [handle-network-data!]]
+            [icare.ui-events :refer [handle-ui-event!]]
             [icare.resources.storage :refer [initialize-storage!]]))
 
 (defn main []
   (f/run
     (m/MaterialApp
-      .title "iCare"
-      .theme (m/ThemeData
+     .title "iCare"
+     .theme (m/ThemeData
                .primarySwatch m/Colors.blue
                .textTheme (gf/GoogleFonts.getTextTheme "Playwrite GB J")))
     .home
     (m/Scaffold)
     .body
-    ;; (m/AnnotatedRegion
-    ;;  .value (services/SystemUiOverlayStyle
-    ;;          .systemNavigationBarColor (m/Color 0xFF0a3a07)
-    ;;          .systemNavigationBarIconBrightness services/Brightness.light
-    ;;          .statusBarColor (m/Color 0xFF0a3a07)
-    ;;          .statusBarIconBrightness services/Brightness.light))
+        ;; (m/AnnotatedRegion
+        ;;  .value (services/SystemUiOverlayStyle
+        ;;          .systemNavigationBarColor (m/Color 0xFF0a3a07)
+        ;;          .systemNavigationBarIconBrightness services/Brightness.light
+        ;;          .statusBarColor (m/Color 0xFF0a3a07)
+        ;;          .statusBarIconBrightness services/Brightness.light))
     (m/SafeArea)
-    (m/FutureBuilder
-     .future (initialize-storage!)
-     .initialData nil)
-    .builder
-    (fn [_ ^m/AsyncSnapshot snapshot]
-      (cond
-        (= m/ConnectionState.done (.-connectionState snapshot))
-        (let [[private-key public-key persisted-state] (.-data snapshot)
-              store (initialize-state! public-key persisted-state)
-              state @store
-              people-cards (get-people-cards state)
-              {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids state)
-              user-pub-key (get-user-pub-key state)]
-          (initialize-derived-state! people-cards)
-          (initialize-network! private-key user-task-uuids friend-pub-keys public-key)
-          (f/widget
-           :watch [state store]
-           (-> state                   ;;state is the end-user representation of the app
-               state->ast              ;;ui is the programmers representation of the app
-               ast->widget)))          ;;widgets are the machine representation of the app
-
-        :else
-        (m/Text "Loading...")))))
+    :watch [storage (initialize-storage!)] ;;storage is a future
+    :bypass (when-not storage
+              (m/Text "Loading..."))
+    :let [[private-key public-key persisted-state] storage
+          state (initialize-resources-from-storage! private-key
+                                                    public-key
+                                                    persisted-state
+                                                    handle-network-data!)] ;;i don't like passing handle-network-data! here but it needs to be passed to initialize-network! which is called in initialize-resources! it should probably be passed separately for expliciteness but this is fine for now
+    (build-widgets! state handle-ui-event!)))
