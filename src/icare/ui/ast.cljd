@@ -1,21 +1,21 @@
 (ns icare.ui.ast
   (:require ["package:flutter/material.dart" :as m]
-            ["package:uuid/uuid.dart" :refer [Uuid]]
-            [icare.resources.derived-state :refer [get-pub-key-to-name-map get-user-pub-key]]))
+            ["package:uuid/uuid.dart" :refer [Uuid]]))
 
 (def uuid-generator (.-v4 (Uuid)))
 ;;Build an AST from our state
 
-(defn task-subitems->ast [subitem-idx subitem]
+(defn task-subitems->ast [derived-state subitem-idx subitem]
   (let [{:keys [type value task-uuid]} subitem
+        {:keys [pub-key-to-name]} derived-state
         id (str "subitem-" task-uuid "-" subitem-idx)]
     (cond
-      (= type :liked-list) {:id id :ui-type :subitem-liked-list :liked-by value}
+      (= type :liked-list) {:id id :ui-type :subitem-liked-list :liked-by (mapv pub-key-to-name value)}
       (= type :time) {:id id :ui-type :subitem-time :time value}
       (= type :image) {:id id :ui-type :subitem-image :url value}
       :else (throw (Exception. (str "task-subitems->ast was given a task subitem with unknown type: " type))))))
 
-(defn user-task->ast [task-idx task]
+(defn user-task->ast [derived-state task-idx task]
   (let [{:keys [uuid title completed subitems reorderable-item-idx liked-by notify?]} task
         id (str "task-" uuid)
         subitems-with-uuid (mapv #(conj % [:task-uuid uuid])
@@ -42,9 +42,9 @@
                                                  :task-idx task-idx
                                                  :title title})))
      :completed completed
-     :subitems (mapv task-subitems->ast (range) subitems-with-uuid)}))
+     :subitems (mapv (partial task-subitems->ast derived-state) (range) subitems-with-uuid)}))
 
-(defn friend-task->ast [task-idx task]
+(defn friend-task->ast [derived-state task-idx task]
   (let [{:keys [title completed liked subitems reorderable-item-idx creator-pub-key uuid notify? card-expanded?]} task
         id (str "task-" uuid)
         subitems-with-uuid (mapv #(conj % [:task-uuid uuid]) subitems)]
@@ -64,9 +64,9 @@
                                      :creator-pub-key creator-pub-key
                                      :task-uuid uuid}))
      :liked liked
-     :subitems (mapv task-subitems->ast (range) subitems-with-uuid)}))
+     :subitems (mapv (partial task-subitems->ast derived-state) (range) subitems-with-uuid)}))
 
-(defn add-tasks->ast [reorderable-item-idx pub-key]
+(defn add-tasks->ast [derived-state reorderable-item-idx pub-key]
   {:id (str "add-task-" pub-key)
    :ui-type :add-task-area
    :on-add-task (fn [value]
@@ -80,7 +80,7 @@
                                           :user-card-idx reorderable-item-idx
                                           :new-task new-task}))))})
 
-(defn person->ast [reorderable-item-idx person]
+(defn person->ast [derived-state reorderable-item-idx person]
   (let [{:keys [user? name tasks pub-key expanded? notify?]} person
         id (str "card-" pub-key)
         tasks (mapv #(conj % {:reorderable-item-idx reorderable-item-idx :creator-pub-key pub-key :card-expanded? expanded?}) tasks)]
@@ -105,10 +105,10 @@
                                               :card-idx reorderable-item-idx
                                               :name value})))
      :tasks (if user?
-              (conj (mapv user-task->ast (range) tasks) (add-tasks->ast reorderable-item-idx pub-key))
-              (mapv friend-task->ast (range) tasks))}))
+              (conj (mapv (partial user-task->ast derived-state) (range) tasks) (add-tasks->ast derived-state reorderable-item-idx pub-key))
+              (mapv (partial friend-task->ast derived-state) (range) tasks))}))
 
-(defn uninitialized-person->ast [reorderable-item-idx item]
+(defn uninitialized-person->ast [derived-state reorderable-item-idx item]
   (let [{:keys [name uuid]} item
         id (str "uninit-" uuid)]
     {:id id
@@ -141,16 +141,16 @@
                 (@handle-ui-event! {:type :add-friend
                                     :name value}))})
 
-(defn list-item->ast [reorderable-item-idx item]
+(defn list-item->ast [derived-state reorderable-item-idx item]
   (let [{:keys [type]} item]
     (condp = type
-      :user (person->ast reorderable-item-idx (conj item {:user? true}))
-      :friend (person->ast reorderable-item-idx (conj item {:user? false}))
-      :uninitialized-person (uninitialized-person->ast reorderable-item-idx item)
+      :user (person->ast derived-state reorderable-item-idx (conj item {:user? true}))
+      :friend (person->ast derived-state reorderable-item-idx (conj item {:user? false}))
+      :uninitialized-person (uninitialized-person->ast derived-state reorderable-item-idx item)
       :friend-search (friend-search->ast)
       (throw (Exception (str "list-item->ast was given a list item with unknown type: " type))))))
 
-(defn reorderable-list->ast [reorderable-items]
+(defn reorderable-list->ast [derived-state reorderable-items]
   {:id "reorderable-list"
    :ui-type :reorderable-list
    :on-reorder (fn [from-index to-index]
@@ -160,27 +160,29 @@
                    (@handle-ui-event! {:type :reorder-items
                                        :from-index from-index
                                        :to-index to-index})))
-   :items (mapv list-item->ast (range) reorderable-items)})
+   :items (mapv (partial list-item->ast derived-state) (range) reorderable-items)})
 
-(defn top-level-screen->ast [state]
-  (let [{:keys [reorderable-items show-qr?]} state]
+(defn top-level-screen->ast [derived-state state]
+  (let [{:keys [reorderable-items show-qr?]} state
+        {:keys [user-pub-key]} derived-state]
     (cond
       show-qr? {:id "qr-screen"
                 :ui-type :qr-screen
+                :user-pub-key user-pub-key
                 :on-close (fn []
                             (@handle-ui-event! {:type :toggle-qr}))}
       :else {:id "screen-base"
              :ui-type :screen-base
-             :reorderable-list (reorderable-list->ast reorderable-items)})))
+             :reorderable-list (reorderable-list->ast derived-state reorderable-items)})))
 
-(defonce handle-ui-event! (atom nil)) ;;this is a hack to avoid circular dependencies, we would like to import this function directly, but instead we will set it at runtime when state->ast is called with both arguments for the first time, and then we can use it in all subsequent calls to state->ast without needing to import it here
+(defonce handle-ui-event! (atom nil)) ;;this is a hack to avoid circular dependencies, we would like to import this function directly, but instead we will set it at runtime when state->ast is called with all arguments for the first time, and then we can use it in all subsequent calls to state->ast without needing to import it here
 
 (defn state->ast
-  ([state ui-event-handler]
+  ([[derived-state state] ui-event-handler]
    (reset! handle-ui-event! ui-event-handler)
-   (state->ast state))
-  ([state]
-   (assert @handle-ui-event! "state->ast was called without a ui-event-handler. Please call state->ast with both state and ui-event-handler at least once before calling it with just state.")
+   (state->ast [derived-state state]))
+  ([[derived-state state]]
+   (assert @handle-ui-event! "state->ast was called without a ui-event-handler. Please call state->ast with state, derived-state, and ui-event-handler at least once before calling it with just state and derived-state.")
    {:id "root"
     :ui-type :root
-    :screen (top-level-screen->ast state)}))
+    :screen (top-level-screen->ast derived-state state)}))

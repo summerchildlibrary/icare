@@ -10,10 +10,10 @@
   "Renders the UI based on the current application state. This function transforms the
   application state into an abstract syntax tree (AST). This AST is then normalized
   and moved into a series of atoms which are watched for changes by our widgets."
-  ([state]
+  ([[derived-state state]]
    (when (nil? @ui-event-handler)
      (throw (Exception. "render-ui! was called before a ui-event-handler was set. Please call render-ui! with both state and ui-event-handler at least once before calling it with just state.")))
-   (-> state
+   (-> [derived-state state]
        ((dart-time "state->ast" state->ast))
        ((dart-time "ast->ast-store" ast->ast-store)))))
 
@@ -21,11 +21,11 @@
   "This is like render-ui! but it actually returns the widget tree instead of just updating the atoms.
   This is used for the initial build of the app, and then after that we just call render-ui!
   to update the atoms and trigger re-renders of the widgets."
-  ([state handle-ui-event!]
+  ([[derived-state state] handle-ui-event!]
    (reset! ui-event-handler handle-ui-event!)
-   (build-widgets! state))
-  ([state]
-   (-> state
+   (build-widgets! [derived-state state]))
+  ([[derived-state state]]
+   (-> [derived-state state]
        ((dart-time "state->ast" state->ast @ui-event-handler))
        ((dart-time "ast->ast-store" ast->ast-store))
        ((dart-time "ast-store->widget" ast-store->widget)))))

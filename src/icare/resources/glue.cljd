@@ -14,7 +14,7 @@
 (defn initialize-resources-from-storage! [private-key public-key persisted-state handle-network-data!]
   (let [state @(initialize-state! public-key persisted-state)
         people-cards (get-people-cards state)
+        derived-state @(initialize-derived-state! people-cards)
         {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids state)]
-    (initialize-derived-state! people-cards)
     (initialize-network! private-key user-task-uuids friend-pub-keys public-key handle-network-data!)
-    state))
+    [derived-state state]))

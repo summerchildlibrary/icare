@@ -16,6 +16,9 @@
   ([] (get-pub-key-to-name-map @derived-store))
   ([derived-state] (:pub-key-to-name derived-state)))
 
+(defn get-derived-state []
+  @derived-store)
+
 ;;Dispatch functions to modify the derived-store
 
 (defn remove-deleted-pub-keys [derived-state]
@@ -73,4 +76,5 @@
 
 (defn initialize-derived-state! [people-cards]
   (prn "Initializing derived state...")
-  (dispatch! {:type :derive-state :people-cards people-cards}))
+  (dispatch! {:type :derive-state :people-cards people-cards})
+  derived-store)

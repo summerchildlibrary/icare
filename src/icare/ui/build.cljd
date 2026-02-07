@@ -317,7 +317,6 @@
        (f/widget
         :watch [{:keys [liked-by]} (get-ast-atom)]
         :padding {:left 15 :bottom 4}
-        :let [liked-by (mapv (get-pub-key-to-name-map) liked-by)]
         (m/Row
          .children [(svg/SvgPicture.asset
                      "assets/icons/ph--arrow-bend-down-right-duotone.svg"
@@ -421,12 +420,9 @@
                               .fontWeight m.FontWeight/normal
                               .color m.Colors/black)))]))
 
-
        :qr-screen
        (f/widget
-        ;; :watch [{:keys [user-pub-key]} (get-ast-atom)]
-        :let [{:keys [on-close]} @(get-ast-atom)
-              user-pub-key (get-user-pub-key)] ;;TODO we need to move this to the ast so that we can watch it, not that this will change
+        :let [{:keys [on-close user-pub-key]} @(get-ast-atom)]
         (m/Center)
         (m/Column
          .mainAxisAlignment m/MainAxisAlignment.center
