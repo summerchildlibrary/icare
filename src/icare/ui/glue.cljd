@@ -1,0 +1,31 @@
+(ns icare.ui.glue
+  (:require [icare.benchmarks :refer [dart-time]]
+            [icare.ui.ast :refer [state->ast]]
+            [icare.ui.normalized-ast :refer [ast->ast-store]]
+            [icare.ui.build :refer [ast-store->widget]]))
+
+(defonce ui-event-handler (atom nil))
+
+(defn render-ui!
+  "Renders the UI based on the current application state. This function transforms the
+  application state into an abstract syntax tree (AST). This AST is then normalized
+  and moved into a series of atoms which are watched for changes by our widgets."
+  ([state]
+   (when (nil? @ui-event-handler)
+     (throw (Exception. "render-ui! was called before a ui-event-handler was set. Please call render-ui! with both state and ui-event-handler at least once before calling it with just state.")))
+   (-> state
+       ((dart-time "state->ast" state->ast))
+       ((dart-time "ast->ast-store" ast->ast-store)))))
+
+(defn build-widgets!
+  "This is like render-ui! but it actually returns the widget tree instead of just updating the atoms.
+  This is used for the initial build of the app, and then after that we just call render-ui!
+  to update the atoms and trigger re-renders of the widgets."
+  ([state handle-ui-event!]
+   (reset! ui-event-handler handle-ui-event!)
+   (build-widgets! state))
+  ([state]
+   (-> state
+       ((dart-time "state->ast" state->ast @ui-event-handler))
+       ((dart-time "ast->ast-store" ast->ast-store))
+       ((dart-time "ast-store->widget" ast-store->widget)))))
