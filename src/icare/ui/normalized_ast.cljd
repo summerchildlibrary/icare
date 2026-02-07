@@ -1,0 +1,81 @@
+(ns icare.ui.normalized-ast)
+
+;; Storage: {id -> atom containing node}
+(defonce ast-store (atom {}))
+
+(defn ast-node?
+  "Returns true if x is an AST node"
+  [x]
+  (and (map? x) (contains? x :ui-type) (contains? x :id)))
+
+(defn ast-node-collection?
+  "Returns true if x is a collection with only AST nodes"
+  [x]
+  (and (coll? x) (empty? (filter (complement ast-node?) x))))
+
+(defn partial-ast-node-collection?
+  "Returns true if x is a partial collection of AST nodes"
+  [x]
+  (and (coll? x) (some ast-node? x) (some (complement ast-node?) x)))
+
+(defn denest-ast-node
+  "Takes an ast-node and replaces nested ast node values with their id's"
+  [node]
+  (reduce-kv (fn [denested-node key value]
+               (cond
+                 (ast-node? value)
+                 (conj denested-node [key (:id value)])
+
+                 (ast-node-collection? value)
+                 (conj denested-node [key (mapv #(:id %) value)])
+
+                 (partial-ast-node-collection? value)
+                 (throw (Exception (str "The ast collection with at least one ast-node must be filled with ast-nodes: " value)))
+
+                 :else
+                 denested-node))
+             node
+             node))
+
+(defn flatten-ast
+  "Takes a list of nested AST nodes, returns a flat collection of denested-node
+   Denesting replaces child AST nodes with their IDs."
+  [ast]
+  (mapcat (fn [node]
+            (if (ast-node? node)
+              (let [nested-nodes (->> node
+                                      (filter (fn [[_ value]] (or (ast-node? value)
+                                                                  (ast-node-collection? value))))
+
+                                      (mapv second)
+                                      flatten)
+                    denested-node (denest-ast-node node)]
+                (concat [denested-node]
+                        (flatten-ast nested-nodes)))
+
+              (throw (Exception (str "flatten ast encountered an element which wasn't an ast node: " node)))))
+          ast))
+
+(defn sync-ast-store!
+  "Updates ast-store with computed ast nodes in atoms
+   does not delete nodes for increased performance for now"
+  [flat-ast]
+  (swap! ast-store
+         (fn [ast-atoms]
+           (reduce (fn [new-atoms {:keys [id] :as node}]
+                     (cond
+                       (contains? new-atoms id)
+                       (do (reset! (new-atoms id) node)
+                           new-atoms)
+
+                       :else
+                       (conj new-atoms [id (atom node)])))
+                   ast-atoms
+                   flat-ast))))
+
+(defn ast->ast-store [ast]
+  (-> ast
+      vector
+      flatten-ast
+      sync-ast-store!)
+  ast-store)
