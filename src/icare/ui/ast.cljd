@@ -26,21 +26,23 @@
      :ui-type :editable-task
      :title title
      :notify? notify?
-     :on-complete (fn []
-                    (@handle-ui-event! {:type :complete-user-task
-                                        :user-card-idx reorderable-item-idx
-                                        :task-idx task-idx
-                                        :completed (not completed)}))
-     :on-edit-task-title (fn [title]
-                           (if (empty? title)
-                             (@handle-ui-event! {:type :delete-user-task
-                                                 :user-card-idx reorderable-item-idx
-                                                 :task-idx task-idx
-                                                 :task task})
-                             (@handle-ui-event! {:type :rename-user-task
-                                                 :user-card-idx reorderable-item-idx
-                                                 :task-idx task-idx
-                                                 :title title})))
+     :on-complete (fn [handle-ui-event!]
+                    (fn []
+                      (handle-ui-event! {:type :complete-user-task
+                                         :user-card-idx reorderable-item-idx
+                                         :task-idx task-idx
+                                         :completed (not completed)})))
+     :on-edit-task-title (fn [handle-ui-event!]
+                           (fn [title]
+                             (if (empty? title)
+                               (handle-ui-event! {:type :delete-user-task
+                                                  :user-card-idx reorderable-item-idx
+                                                  :task-idx task-idx
+                                                  :task task})
+                               (handle-ui-event! {:type :rename-user-task
+                                                  :user-card-idx reorderable-item-idx
+                                                  :task-idx task-idx
+                                                  :title title}))))
      :completed completed
      :subitems (mapv (partial task-subitems->ast derived-state) (range) subitems-with-uuid)}))
 
@@ -53,32 +55,35 @@
      :title title
      :completed completed
      :notify? (and notify? card-expanded?)
-     :on-notifies (fn [_]
-                     (@handle-ui-event! {:type :task-notification-finishes
-                                         :card-idx reorderable-item-idx}))
-     :on-liked (fn []
-                 (@handle-ui-event! {:type :like-friend-task
-                                     :friend-card-idx reorderable-item-idx
-                                     :task-idx task-idx
-                                     :liked (not liked)
-                                     :creator-pub-key creator-pub-key
-                                     :task-uuid uuid}))
+     :on-notifies (fn [handle-ui-event!]
+                    (fn [_]
+                       (handle-ui-event! {:type :task-notification-finishes
+                                          :card-idx reorderable-item-idx})))
+     :on-liked (fn [handle-ui-event!]
+                 (fn []
+                    (handle-ui-event! {:type :like-friend-task
+                                       :friend-card-idx reorderable-item-idx
+                                       :task-idx task-idx
+                                       :liked (not liked)
+                                       :creator-pub-key creator-pub-key
+                                       :task-uuid uuid})))
      :liked liked
      :subitems (mapv (partial task-subitems->ast derived-state) (range) subitems-with-uuid)}))
 
 (defn add-tasks->ast [derived-state reorderable-item-idx pub-key]
   {:id (str "add-task-" pub-key)
    :ui-type :add-task-area
-   :on-add-task (fn [value]
-                  (when (not (empty? value))
-                    (let [new-task {:title value
-                                    :uuid (uuid-generator)
-                                    :liked-by #{}
-                                    :completed false
-                                    :subitems []}]
-                      (@handle-ui-event! {:type :add-user-task
-                                          :user-card-idx reorderable-item-idx
-                                          :new-task new-task}))))})
+   :on-add-task (fn [handle-ui-event!]
+                  (fn [value]
+                    (when (not (empty? value))
+                      (let [new-task {:title value
+                                      :uuid (uuid-generator)
+                                      :liked-by #{}
+                                      :completed false
+                                      :subitems []}]
+                        (handle-ui-event! {:type :add-user-task
+                                           :user-card-idx reorderable-item-idx
+                                           :new-task new-task})))))})
 
 (defn person->ast [derived-state reorderable-item-idx person]
   (let [{:keys [user? name tasks pub-key expanded? notify?]} person
@@ -91,19 +96,21 @@
      :key pub-key
      :idx reorderable-item-idx
      :title name
-     :on-expand (fn [expanded?]
-                  (@handle-ui-event! {:type :card-expansion
-                                      :expanded? expanded?
-                                      :card-idx reorderable-item-idx
-                                      :pub-key pub-key}))
+     :on-expand (fn [handle-ui-event!]
+                  (fn [expanded?]
+                    (handle-ui-event! {:type :card-expansion
+                                       :expanded? expanded?
+                                       :card-idx reorderable-item-idx
+                                       :pub-key pub-key})))
 
-     :on-rename-title (fn [value]
-                        (if (empty? value)
-                          (@handle-ui-event! {:type :delete-card
-                                              :card-idx reorderable-item-idx})
-                          (@handle-ui-event! {:type :rename-card
-                                              :card-idx reorderable-item-idx
-                                              :name value})))
+     :on-rename-title (fn [handle-ui-event!]
+                        (fn [value]
+                           (if (empty? value)
+                             (handle-ui-event! {:type :delete-card
+                                                :card-idx reorderable-item-idx})
+                             (handle-ui-event! {:type :rename-card
+                                                :card-idx reorderable-item-idx
+                                                :name value}))))
      :tasks (if user?
               (conj (mapv (partial user-task->ast derived-state) (range) tasks) (add-tasks->ast derived-state reorderable-item-idx pub-key))
               (mapv (partial friend-task->ast derived-state) (range) tasks))}))
@@ -115,20 +122,22 @@
      :ui-type :uninitialized-person-card
      :key uuid
      :idx reorderable-item-idx
-     :on-rename-title (fn [value]
-                        (if (empty? value)
-                          ;;this is lazy, just create a delete-uninitialized-person event and wire it to the delete-card handler in state
-                          (@handle-ui-event! {:type :delete-uninitialized-person
-                                              :card-idx reorderable-item-idx})
-                          (@handle-ui-event! {:type :rename-uninitialized-person
-                                              :card-idx reorderable-item-idx
-                                              :name value})))
-     :on-show-qr (fn []
-                   (@handle-ui-event! {:type :toggle-qr}))
-     :on-paste-public-key (fn [value]
-                            (@handle-ui-event! {:type :initialize-friend
-                                                :card-idx reorderable-item-idx
-                                                :public-key value}))
+     :on-rename-title (fn [handle-ui-event!]
+                        (fn [value]
+                          (if (empty? value)
+                            (handle-ui-event! {:type :delete-uninitialized-person
+                                               :card-idx reorderable-item-idx})
+                            (handle-ui-event! {:type :rename-uninitialized-person
+                                               :card-idx reorderable-item-idx
+                                               :name value}))))
+     :on-show-qr (fn [handle-ui-event!]
+                   (fn []
+                     (handle-ui-event! {:type :toggle-qr})))
+     :on-paste-public-key (fn [handle-ui-event!]
+                            (fn [value]
+                              (handle-ui-event! {:type :initialize-friend
+                                                 :card-idx reorderable-item-idx
+                                                 :public-key value})))
      :title name}))
 
 ;;TODO we probably don't want a friend search, easier to
@@ -137,9 +146,10 @@
 (defn friend-search->ast []
   {:id "friend-search"
    :ui-type :friend-search-area
-   :on-search (fn [value]
-                (@handle-ui-event! {:type :add-friend
-                                    :name value}))})
+   :on-search (fn [handle-ui-event!]
+                (fn [value]
+                  (handle-ui-event! {:type :add-friend
+                                     :name value})))})
 
 (defn list-item->ast [derived-state reorderable-item-idx item]
   (let [{:keys [type]} item]
@@ -153,13 +163,14 @@
 (defn reorderable-list->ast [derived-state reorderable-items]
   {:id "reorderable-list"
    :ui-type :reorderable-list
-   :on-reorder (fn [from-index to-index]
-                 (let [[from-index to-index] (if (< from-index to-index)
-                                               [from-index (dec to-index)]
-                                               [from-index to-index])]
-                   (@handle-ui-event! {:type :reorder-items
-                                       :from-index from-index
-                                       :to-index to-index})))
+   :on-reorder (fn [handle-ui-event!]
+                 (fn [from-index to-index]
+                   (let [[from-index to-index] (if (< from-index to-index)
+                                                 [from-index (dec to-index)]
+                                                 [from-index to-index])]
+                     (handle-ui-event! {:type :reorder-items
+                                        :from-index from-index
+                                        :to-index to-index}))))
    :items (mapv (partial list-item->ast derived-state) (range) reorderable-items)})
 
 (defn top-level-screen->ast [derived-state state]
@@ -169,20 +180,15 @@
       show-qr? {:id "qr-screen"
                 :ui-type :qr-screen
                 :user-pub-key user-pub-key
-                :on-close (fn []
-                            (@handle-ui-event! {:type :toggle-qr}))}
+                :on-close (fn [handle-ui-event!]
+                            (fn []
+                              (handle-ui-event! {:type :toggle-qr})))}
       :else {:id "screen-base"
              :ui-type :screen-base
              :reorderable-list (reorderable-list->ast derived-state reorderable-items)})))
 
-(defonce handle-ui-event! (atom nil)) ;;this is a hack to avoid circular dependencies, we would like to import this function directly, but instead we will set it at runtime when state->ast is called with all arguments for the first time, and then we can use it in all subsequent calls to state->ast without needing to import it here
-
-(defn state->ast
-  ([[derived-state state] ui-event-handler]
-   (reset! handle-ui-event! ui-event-handler)
-   (state->ast [derived-state state]))
-  ([[derived-state state]]
-   (assert @handle-ui-event! "state->ast was called without a ui-event-handler. Please call state->ast with state, derived-state, and ui-event-handler at least once before calling it with just state and derived-state.")
+;;watch out, this expects [derived-state state] as an argument, the other functions expect derived-state and state separately
+(defn state->ast [[derived-state state]]
    {:id "root"
     :ui-type :root
-    :screen (top-level-screen->ast derived-state state)}))
+    :screen (top-level-screen->ast derived-state state)})

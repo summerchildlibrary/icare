@@ -313,9 +313,8 @@
 ;;We should be careful about when to run this flush since we want to be fairly responsive...
 ;;but you'll get the idea
 (defn dispatch! [event]
-  (if-not @initialized?
-    (throw (Exception. "State store not initialized yet! Call initialize-state! from core first."))
-    (swap! store apply-state-event event)))
+  (assert @initialized? "State store not initialized yet! Call initialize-state! from core first.")
+  (swap! store apply-state-event event))
 
 (defn update-user-pub-key! [pub-key]
   (swap! store update :reorderable-items
