@@ -1,0 +1,9 @@
+(ns icare.benchmarks)
+
+(defn dart-time [name fun & fun-args]
+  (fn [& args]
+    (let [start (DateTime.now)
+          result (apply fun (concat args fun-args))
+          end (DateTime.now)]
+      (prn "Function " name " took" (.-inMilliseconds (.difference end start)) "milliseconds")
+      result)))
