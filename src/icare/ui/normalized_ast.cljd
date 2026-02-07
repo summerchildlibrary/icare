@@ -75,6 +75,6 @@
 (defn ast->ast-store [ast]
   (-> ast
       vector
-      ((dart-time "flatten-ast" flatten-ast))
-      ((dart-time "sync-ast-store" sync-ast-store!)))
+      flatten-ast
+      sync-ast-store!)
   ast-store)

@@ -192,3 +192,6 @@
    {:id "root"
     :ui-type :root
     :screen (top-level-screen->ast derived-state state)})
+
+;;for the sake of performance, we should write this flattened to remove the overhead of flattening the AST to update our atoms
+;;honestly though, performane isn't that bad with the actual compiled app
