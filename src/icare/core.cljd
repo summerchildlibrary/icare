@@ -31,16 +31,16 @@
     [(m/Container
       .color (m/Colors.white))
      (f/widget
-      (m/FittedBox
-       .clipBehavior m/Clip.hardEdge)
+      (m/Positioned
+       .bottom 0)
       (m/Column)
       .children
-      [(f/widget
-        (svg/SvgPicture.asset "assets/grass-pattern.svg"
-                              .fit m/BoxFit.fitWidth))
-       (f/widget
-        (svg/SvgPicture.asset "assets/grass-pattern.svg"
-                              .fit m/BoxFit.fitWidth))])
+      [(svg/SvgPicture.asset "assets/grass-pattern.svg"
+                             .fit m/BoxFit.fitWidth)
+       (svg/SvgPicture.asset "assets/grass-pattern.svg"
+                             .fit m/BoxFit.fitWidth)
+       (svg/SvgPicture.asset "assets/grass-pattern.svg"
+                             .fit m/BoxFit.fitWidth)])
      (f/widget
       (m/Scaffold
        .backgroundColor (m/Colors.transparent))
