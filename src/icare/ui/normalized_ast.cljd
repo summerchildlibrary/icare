@@ -1,5 +1,5 @@
 (ns icare.ui.normalized-ast
-    (:require [icare.benchmarks :refer [dart-time]]))
+    (:require [icare.benchmarks :refer [dart-time report-after-n]]))
 
 ;; Storage: {id -> atom containing node}
 (defonce ast-store (atom {}))
@@ -55,9 +55,31 @@
               (throw (Exception (str "flatten ast encountered an element which wasn't an ast node: " node)))))
           ast))
 
+(defn flatten-ast-nocat
+  "same as flatten-ast but without using concat"
+  [ast-nodes]
+  (letfn [(helper [flattened-so-far ast-nodes]
+            (reduce (fn [flat-nodes node]
+                       (if (ast-node? node)
+                         (let [nested-nodes (->> node
+                                                 (filter (fn [[_ value]] (or (ast-node? value)
+                                                                             (ast-node-collection? value))))
+                                                 (map second)
+                                                 flatten)
+                               denested-node (denest-ast-node node)]
+                           (cons (list (:id denested-node) denested-node) (helper flat-nodes nested-nodes)))
+
+                         (throw (Exception (str "flatten ast encountered an element which wasn't an ast node: " node)))))
+                    flattened-so-far
+                    ast-nodes))]
+    (helper '() ast-nodes)))
+
 (defn sync-ast-store!
   "Updates ast-store with computed ast nodes in atoms
-   does not delete nodes for increased performance for now"
+   does not delete nodes for increased performance for now
+  ast-store is an atom containing a dictionary of
+  ast id's to atoms containing ast nodes, syncing the
+  ast store causes the appropriate widgets to rebuild"
   [flat-ast]
   (swap! ast-store
          (fn [ast-atoms]
@@ -72,9 +94,17 @@
                    ast-atoms
                    flat-ast))))
 
+(def benchmark-flatten-ast (-> flatten-ast
+                               (dart-time "flatten-ast")
+                               (report-after-n 10 "flatten-ast")))
+
+(def benchmark-flatten-ast-nocat (-> flatten-ast-nocat
+                                     (dart-time "flatten-ast-nocat")
+                                     (report-after-n 10 "flatten-ast")))
+
 (defn ast->ast-store [ast]
   (-> ast
       vector
-      flatten-ast
+      flatten-ast-nocat
       sync-ast-store!)
   ast-store)
