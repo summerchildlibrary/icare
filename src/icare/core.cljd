@@ -1,6 +1,7 @@
 (ns icare.core
   (:require ["package:flutter/material.dart" :as m]
             ["package:google_fonts/google_fonts.dart" :as gf]
+            ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["package:flutter/services.dart" :as services]
             [cljd.flutter :as f]
             [icare.ui.glue :refer [build-widgets!]]
@@ -14,24 +15,44 @@
     (m/MaterialApp
      .title "iCare"
      .theme (m/ThemeData
-               .primarySwatch m/Colors.blue
+               .colorScheme (m/ColorScheme.light
+                             .surface m/Colors.white
+                             .background m/Colors.white)
                .textTheme (gf/GoogleFonts.getTextTheme "Playwrite GB J")))
     .home
-    (m/Scaffold)
-    .body
-        ;; (m/AnnotatedRegion
-        ;;  .value (services/SystemUiOverlayStyle
-        ;;          .systemNavigationBarColor (m/Color 0xFF0a3a07)
-        ;;          .systemNavigationBarIconBrightness services/Brightness.light
-        ;;          .statusBarColor (m/Color 0xFF0a3a07)
-        ;;          .statusBarIconBrightness services/Brightness.light))
-    (m/SafeArea)
-    :watch [storage (initialize-storage!)] ;;storage is a future
-    :bypass (when-not storage
-              (m/Text "Loading..."))
-    :let [[private-key public-key persisted-state] storage
-          [derived-state state] (initialize-resources-from-storage! private-key
-                                                                    public-key
-                                                                    persisted-state
-                                                                    handle-network-data!)] ;;i don't like passing handle-network-data! here but it needs to be passed to initialize-network! which is called in initialize-resources! it should probably be passed separately for expliciteness but this is fine for now
-    (build-widgets! [derived-state state] handle-ui-event!)))
+    ;; (m/AnnotatedRegion
+    ;;  .value (services/SystemUiOverlayStyle
+    ;;          .systemNavigationBarColor (m/Color 0xFF0a3a07)
+    ;;          .systemNavigationBarIconBrightness services/Brightness.light))
+    ;;          ;; .statusBarColor (m/Color 0xFF0a3a07)
+    ;;          ;; .statusBarIconBrightness services/Brightness.light))
+    (m/Stack)
+    .children
+    [(m/Container
+      .color (m/Colors.white))
+     (f/widget
+      (m/FittedBox
+       .clipBehavior m/Clip.hardEdge)
+      (m/Column)
+      .children
+      [(f/widget
+        (svg/SvgPicture.asset "assets/grass-pattern.svg"
+                              .fit m/BoxFit.fitWidth))
+       (f/widget
+        (svg/SvgPicture.asset "assets/grass-pattern.svg"
+                              .fit m/BoxFit.fitWidth))])
+     (f/widget
+      (m/Scaffold
+       .backgroundColor (m/Colors.transparent))
+      .body
+      (f/widget
+       (m/SafeArea)
+       :watch [storage (initialize-storage!)] ;;storage is a future
+       :bypass (when-not storage
+                 (m/Text "Loading..."))
+       :let [[private-key public-key persisted-state] storage
+             [derived-state state] (initialize-resources-from-storage! private-key
+                                                                       public-key
+                                                                       persisted-state
+                                                                       handle-network-data!)] ;;i don't like passing handle-network-data! here but it needs to be passed to initialize-network! which is called in initialize-resources! it should probably be passed separately for expliciteness but this is fine for now
+       (build-widgets! [derived-state state] handle-ui-event!)))]))

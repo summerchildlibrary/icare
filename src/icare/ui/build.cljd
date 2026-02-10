@@ -27,9 +27,11 @@
          .children
          [(recursive-call reorderable-list)]))
 
+
        :reorderable-list
        (f/widget
-        (m/Scrollbar)
+        (m/Scrollbar
+         .interactive true)
         :watch [{:keys [items]} (get-ast-atom)]
         :let [{:keys [on-reorder friend-search]} @(get-ast-atom)]
         (m/ReorderableListView
@@ -393,7 +395,8 @@
         :key "friend-search-area"
         :let [{:keys [on-search]} @(get-ast-atom)]
         :padding {:left 15 :bottom 15}
-        (m/Material)
+        (m/Material
+         .type m/MaterialType.transparency)
         (m/Row
          .children [(f/widget
                      :padding {:right 20 :top 4}

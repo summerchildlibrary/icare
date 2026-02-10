@@ -66,6 +66,7 @@ flutter:
 
   # asset section all assets are included in a directory
   assets:
+    - assets/grass-pattern.svg
     - assets/icons/
 
   # An image asset can refer to one or more resolution-specific "variants", see
