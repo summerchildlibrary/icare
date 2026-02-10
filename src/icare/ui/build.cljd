@@ -58,9 +58,9 @@
          .borderRadius (m/BorderRadius.circular 12))
         (m/ExpansionTile
          .expansionAnimationStyle (m/AnimationStyle
-                                   .duration (Duration .milliseconds 1000) ;;TODO maybe this should change depending on how many tasks we have?
-                                   .reverseDuration (Duration .milliseconds 500)
-                                   .reverseCurve (m/Curves.easeOutQuart)
+                                   .duration (Duration .milliseconds 1000)
+                                   .reverseDuration (Duration .milliseconds 1000);;TODO maybe this should change depending on how many tasks we have?
+                                   .reverseCurve (m/Curves.linear)
                                    .curve (m/Curves.elasticOut))
          .controller expansion-controller
          .onExpansionChanged (on-expand handle-ui-event!)
