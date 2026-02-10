@@ -13,8 +13,8 @@
   ([[derived-state state]]
    (assert @widgets-built? "render-ui! was called before the initial build-widgets! call. Make sure to call build-widgets! first to initialize the widget tree.")
    (-> [derived-state state]
-       ((dart-time "state-ast" state->ast))
-       ((dart-time "ast->ast-store" ast->ast-store)))))
+       state->ast
+       ast->ast-store)))
 
 (defn build-widgets!
   "This is like render-ui! but it actually returns the widget tree instead of just updating the atoms.
