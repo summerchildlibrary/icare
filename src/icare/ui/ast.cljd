@@ -97,11 +97,12 @@
      :idx reorderable-item-idx
      :title name
      :on-expand (fn [handle-ui-event!]
-                  (fn [expanded?]
-                    (handle-ui-event! {:type :card-expansion
-                                       :expanded? expanded?
-                                       :card-idx reorderable-item-idx
-                                       :pub-key pub-key})))
+                  (fn [new-expanded?]
+                    (when (not= new-expanded? expanded?)
+                      (handle-ui-event! {:type :card-expansion
+                                         :expanded? new-expanded?
+                                         :card-idx reorderable-item-idx
+                                         :pub-key pub-key}))))
 
      :on-rename-title (fn [handle-ui-event!]
                         (fn [value]
