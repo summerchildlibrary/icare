@@ -2,7 +2,7 @@
   (:require ["package:uuid/uuid.dart" :refer [Uuid]]))
 
 (def uuid-generator (.-v4 (Uuid)))
-(def use-persistent-storage? true)
+(def use-persistent-storage? false)
 
 ;;This namespace defines all side effects on our store
 ;;
@@ -47,11 +47,10 @@
                                                     :notify? false
                                                     :completed true
                                                     :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                                               {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
+                                                               {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}]
                                           ;; {:type :uninitialized-person
                                           ;;  :name "Jun before jun"
                                           ;;  :uuid (uuid-generator)}
-                                          {:type :friend-search}]
                       :show-qr? false}))
 
 ;;Helper functions. Read only operations.
@@ -59,9 +58,6 @@
 (defn get-people-cards
   ([] (get-people-cards @store))
   ([state] (filterv #(#{:friend :user} (:type %)) (:reorderable-items state))))
-
-(defn friend-search-at-bottom? [reorderable-items]
-  (= :friend-search (:type (last reorderable-items))))
 
 (defn get-pub-to-name-map
   ([] (get-pub-to-name-map @store))
@@ -241,9 +237,7 @@
                   (let [new-friend {:type :uninitialized-person
                                     :uuid (uuid-generator)
                                     :name name}]
-                    (vec (concat (subvec items 0 (dec (count items)))
-                                 [new-friend]
-                                 (subvec items (dec (count items))))))))))
+                    (conj items new-friend))))))
 
     :initialize-friend
     (let [{:keys [card-idx public-key]} event]

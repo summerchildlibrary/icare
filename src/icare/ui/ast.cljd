@@ -158,7 +158,6 @@
       :user (person->ast derived-state reorderable-item-idx (conj item {:user? true}))
       :friend (person->ast derived-state reorderable-item-idx (conj item {:user? false}))
       :uninitialized-person (uninitialized-person->ast derived-state reorderable-item-idx item)
-      :friend-search (friend-search->ast)
       (throw (Exception (str "list-item->ast was given a list item with unknown type: " type))))))
 
 (defn reorderable-list->ast [derived-state reorderable-items]
@@ -172,6 +171,7 @@
                      (handle-ui-event! {:type :reorder-items
                                         :from-index from-index
                                         :to-index to-index}))))
+   :friend-search (friend-search->ast)
    :items (mapv (partial list-item->ast derived-state) (range) reorderable-items)})
 
 (defn top-level-screen->ast [derived-state state]

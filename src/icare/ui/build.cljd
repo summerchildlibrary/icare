@@ -31,13 +31,14 @@
        (f/widget
         (m/Scrollbar)
         :watch [{:keys [items]} (get-ast-atom)]
-        :let [{:keys [on-reorder]} @(get-ast-atom)]
+        :let [{:keys [on-reorder friend-search]} @(get-ast-atom)]
         (m/ReorderableListView
          .padding (m/EdgeInsets.symmetric .horizontal 20)
          .onReorder (on-reorder handle-ui-event!)
          .buildDefaultDragHandles false
          .proxyDecorator (fn [child index animation] child)
-         .children (mapv recursive-call items)))
+         .children (mapv recursive-call items)
+         .footer (recursive-call friend-search)))
 
        :task-card
        (f/widget
