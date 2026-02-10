@@ -1,6 +1,31 @@
 (ns icare.benchmarks)
 
-(defn dart-time [name fun & fun-args]
+(defn running-average [old-average n new-value]
+  (/ (+ (* old-average (dec n)) new-value) n))
+
+(defn report-after-n [fun n name & fun-args]
+  (let [count (atom 0)
+        average (atom 0)
+        skip? (atom true)
+        skip 10] ;;skip the first few runs to allow for warmup
+    (fn [& args]
+      (let [start (DateTime.now)
+            result (apply fun (concat args fun-args))
+            end (DateTime.now)
+            difference (.-inMilliseconds (.difference end start))]
+        (swap! count inc)
+        (when-not @skip? (swap! average running-average @count difference))
+        (when (and (>= @count n) (not @skip?))
+          (prn "LOOK AT ME; THIS IS AN IMPORTANT PRINT STATEMENT; FART FART FART!!!!!")
+          (prn "Function " name " average time after" @count "runs:" @average "milliseconds")
+          (reset! count 0)
+          (reset! average 0))
+        (when (>= @count skip)
+           (reset! count 0)
+           (reset! skip? false))
+        result))))
+
+(defn dart-time [fun name & fun-args]
   (fn [& args]
     (let [start (DateTime.now)
           result (apply fun (concat args fun-args))
