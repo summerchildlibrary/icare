@@ -27,21 +27,10 @@
          .children
          [(recursive-call reorderable-list)]))
 
-
        :reorderable-list
        (f/widget
         (m/Scrollbar
          .interactive true)
-        (m/ShaderMask
-         .shaderCallback (fn [bounds]
-                           (.createShader
-                            (m/LinearGradient
-                             .begin m/Alignment.topCenter
-                             .end m/Alignment.bottomCenter
-                             .colors [m/Colors.white m/Colors.transparent]
-                             .stops [0.97 1.0])
-                            bounds))
-         .blendMode m/BlendMode.dstIn) ;;dstIn means that the gradient acts as a mask, where opaque values show the child and transparent values hide the child
         :watch [{:keys [items]} (get-ast-atom)]
         :let [{:keys [on-reorder friend-search]} @(get-ast-atom)]
         (m/ReorderableListView
