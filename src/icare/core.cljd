@@ -46,7 +46,9 @@
        .backgroundColor (m/Colors.transparent))
       .body
       (f/widget
-       (m/SafeArea)
+       (m/SafeArea
+        .top false
+        .bottom false)
        :watch [storage (initialize-storage!)] ;;storage is a future
        :bypass (when-not storage
                  (m/Text "Loading..."))

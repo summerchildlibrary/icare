@@ -90,10 +90,13 @@
                            :user-task-uuids user-task-uuids
                            :friend-pub-keys friend-pub-keys}))
 
-     :delete-uninitialized-person
+     :delete-uninitialized-card
      (update-state-render-and-persist! event false)
 
-     :rename-uninitialized-person
+     :rename-uninitialized-card-friend
+     (update-state-render-and-persist! event false)
+
+     :rename-uninitialized-card-self
      (update-state-render-and-persist! event false)
 
      :rename-card
@@ -108,7 +111,14 @@
      :reorder-items
      (update-state-render-and-persist! event false)
 
-     :toggle-qr ;;just showing a qr code, no need to persist state
+     :send-friend-request
+     (update-state-render-and-persist! event false)
+
+     :toggle-handshake-qr ;;just showing a qr code, no need to persist state
+     (-> [(get-derived-state) (state-dispatch! event)]
+         (render-ui!))
+
+     :toggle-handshake-network
      (-> [(get-derived-state) (state-dispatch! event)]
          (render-ui!))
 

@@ -236,18 +236,20 @@
                 (fn [items]
                   (let [new-friend {:type :uninitialized-person
                                     :uuid (uuid-generator)
-                                    :name name}]
+                                    :friend name
+                                    :self nil}] ;;self referes to our name, for now we start out blank, but we would like to populate this field with the previously used name eventually
                     (conj items new-friend))))))
 
     :initialize-friend
-    (let [{:keys [card-idx public-key]} event]
+    (let [{:keys [card-idx public-key name]} event]
       (if (empty? public-key)
         state
         (update-in state [:reorderable-items card-idx]
                    conj {:pub-key public-key
                          :type :friend
                          :expanded? false
-                         :tasks []})))
+                         :tasks []
+                         :name name})))
 
     :reorder-items
     (let [{:keys [from-index to-index]} event]
@@ -284,18 +286,29 @@
                             task))
                         %)))
 
-    :toggle-qr
+    :toggle-handshake-qr
     (update state :show-qr? not)
 
-    :delete-uninitialized-person
+    :toggle-handshake-network ;;TODO we need to figure out how to do local network discovery
+    state
+
+    :delete-uninitialized-card
     (let [{:keys [card-idx]} event]
       (update state :reorderable-items
               (fn [items] (vec (concat (subvec items 0 card-idx)
                                        (subvec items (inc card-idx)))))))
 
-    :rename-uninitialized-person
+    :rename-uninitialized-card-friend
     (let [{:keys [card-idx name]} event]
-      (assoc-in state [:reorderable-items card-idx :name] name))
+      (assoc-in state [:reorderable-items card-idx :friend] name))
+
+    :rename-uninitialized-card-self
+    (let [{:keys [card-idx name]} event]
+      (assoc-in state [:reorderable-items card-idx :self] name))
+
+    ;;TODO we need to figure out the logic of this
+    :send-friend-request
+    state
 
     (throw (Exception (str "No state handling function found for event: " event)))))
 

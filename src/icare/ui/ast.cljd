@@ -117,29 +117,36 @@
               (mapv (partial friend-task->ast derived-state) (range) tasks))}))
 
 (defn uninitialized-person->ast [derived-state reorderable-item-idx item]
-  (let [{:keys [name uuid]} item
+  (let [{:keys [self friend uuid]} item
         id (str "uninit-" uuid)]
     {:id id
      :ui-type :uninitialized-person-card
      :key uuid
      :idx reorderable-item-idx
-     :on-rename-title (fn [handle-ui-event!]
-                        (fn [value]
-                          (if (empty? value)
-                            (handle-ui-event! {:type :delete-uninitialized-person
-                                               :card-idx reorderable-item-idx})
-                            (handle-ui-event! {:type :rename-uninitialized-person
-                                               :card-idx reorderable-item-idx
-                                               :name value}))))
-     :on-show-qr (fn [handle-ui-event!]
-                   (fn []
-                     (handle-ui-event! {:type :toggle-qr})))
+     :on-rename-from (fn [handle-ui-event!]
+                       (fn [value]
+                         (handle-ui-event! {:type :rename-uninitialized-card-self
+                                            :card-idx reorderable-item-idx
+                                            :name value})))
+     :on-rename-to (fn [handle-ui-event!]
+                     (fn [value]
+                       (if (empty? value)
+                         (handle-ui-event! {:type :delete-uninitialized-card
+                                            :card-idx reorderable-item-idx})
+                         (handle-ui-event! {:type :rename-uninitialized-card-friend
+                                            :card-idx reorderable-item-idx
+                                            :name value}))))
+     :on-send-invite (fn [handle-ui-event!]
+                       (fn []
+                         (handle-ui-event! {:type :send-friend-request}))) ;;TODO we need to figure out the actual logic of this
      :on-paste-public-key (fn [handle-ui-event!]
                             (fn [value]
                               (handle-ui-event! {:type :initialize-friend
+                                                 :name name
                                                  :card-idx reorderable-item-idx
                                                  :public-key value})))
-     :title name}))
+     :to-title friend
+     :from-title self}))
 
 ;;TODO we probably don't want a friend search, easier to
 ;;have local discovery and adding friends via sharing links
@@ -147,6 +154,12 @@
 (defn friend-search->ast []
   {:id "friend-search"
    :ui-type :friend-search-area
+   :on-handshake-qr (fn [handle-ui-event!]
+                      (fn []
+                        (handle-ui-event! {:type :toggle-handshake-qr})))
+   :on-handshake-network (fn [handle-ui-event!]
+                           (fn []
+                             (handle-ui-event! {:type :toggle-handshake-network})))
    :on-search (fn [handle-ui-event!]
                 (fn [value]
                   (handle-ui-event! {:type :add-friend
@@ -183,7 +196,7 @@
                 :user-pub-key user-pub-key
                 :on-close (fn [handle-ui-event!]
                             (fn []
-                              (handle-ui-event! {:type :toggle-qr})))}
+                              (handle-ui-event! {:type :toggle-handshake-qr})))}
       :else {:id "screen-base"
              :ui-type :screen-base
              :reorderable-list (reorderable-list->ast derived-state reorderable-items)})))

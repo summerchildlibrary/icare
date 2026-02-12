@@ -2,6 +2,7 @@
   (:require ["package:flutter/material.dart" :as m]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["package:qr_flutter/qr_flutter.dart" :as qr]
+            ["package:share_plus/share_plus.dart" :as share]
             [cljd.flutter :as f]
             [cljd.string :as str]))
 
@@ -22,10 +23,29 @@
 
        :screen-base
        (f/widget
-        :watch [{:keys [reorderable-list]} (get-ast-atom)]
+        :context ctx
+        :let [notch-height (-> (m/MediaQuery.of ctx) .-padding .-top)]
         (m/Stack
          .children
-         [(recursive-call reorderable-list)]))
+         [(f/widget
+           :padding {:top notch-height}
+           :let [{:keys [reorderable-list]} @(get-ast-atom)]
+           (recursive-call reorderable-list))
+          (f/widget
+           (m/IgnorePointer)
+           (m/Column)
+           .children
+           [(m/Container
+             .height (* 1/5 notch-height)
+             .color m/Colors.white)
+            (m/Container
+             .height (* 4/5 notch-height)
+             .decoration (m/BoxDecoration
+                          .gradient (m/LinearGradient
+                                     .begin m/Alignment.topCenter
+                                     .end m/Alignment.bottomCenter
+                                     .colors [(m/Colors.white.withOpacity 1)
+                                              (m/Colors.white.withOpacity 0)])))])]))
 
        :reorderable-list
        (f/widget
@@ -34,6 +54,7 @@
         :watch [{:keys [items]} (get-ast-atom)]
         :let [{:keys [on-reorder friend-search]} @(get-ast-atom)]
         (m/ReorderableListView
+         .clipBehavior m/Clip.none
          .padding (m/EdgeInsets.symmetric .horizontal 20)
          .onReorder (on-reorder handle-ui-event!)
          .buildDefaultDragHandles false
@@ -59,7 +80,7 @@
          .expansionAnimationStyle (m/AnimationStyle
                                    .duration (Duration .milliseconds 700)
                                    .reverseDuration (Duration .milliseconds 100);;TODO I can't get this value to affect the actual duration
-                                   .reverseCurve (m/Curves.fastOutSlowIn)
+                                   .reverseCurve (m/Curves.linear)
                                    .curve (m/Curves.elasticOut))
          .controller expansion-controller
          .onExpansionChanged (on-expand handle-ui-event!)
@@ -77,10 +98,10 @@
                                           (m/Colors.black.withOpacity 0.3)))
                           .borderRadius (m/BorderRadius.circular 12))
          .leading (if expanded?
-                    (m/Icon m/Icons.drag_handle .color (m/Colors.black.withOpacity 0.2))
+                    (m/Icon m/Icons.drag_handle .color (m/Colors.black.withOpacity 0.2) .size 24)
                     (m/ReorderableDragStartListener
                      .index idx
-                     .child (m/Icon m.Icons/drag_handle)))
+                     .child (m/Icon m.Icons/drag_handle .size 24)))
          .title (f/widget
                  (m/Align .alignment m/Alignment.centerLeft)
                  (m/Row)
@@ -106,8 +127,8 @@
        :uninitialized-person-card
        (f/widget
         :key key
-        :watch [{:keys [idx title]} (get-ast-atom)]
-        :let [{:keys [on-rename-title on-show-qr on-paste-public-key]} @(get-ast-atom)]
+        :watch [{:keys [idx to-title from-title]} (get-ast-atom)]
+        :let [{:keys [on-rename-from on-rename-to on-send-invite on-paste-public-key]} @(get-ast-atom)]
         :padding {:vertical 6}
         (m/Material
          .elevation 0
@@ -120,49 +141,90 @@
                         .color (m/Colors.black.withOpacity 0.3))
                  .borderRadius (m/BorderRadius.circular 12))
          .title (f/widget
-                 (m/Align .alignment m/Alignment.centerLeft)
+                 :let [y-offset -10
+                       text-field-width 120]
+                 (m/Transform.translate .offset (m/Offset 0 y-offset))
                  (m/Row)
                  .children
                  [(f/widget
-                   (m/SizedBox .width 150)
+                   (m/SizedBox .width text-field-width)
                    (m/TextField
                     .textInputAction m.TextInputAction/done
                     .style (m/TextStyle
                             .fontSize 16
                             .fontWeight m/FontWeight.bold
-                            .color m/Colors.grey)
-                    .onSubmitted (on-rename-title handle-ui-event!)
+                            .color m/Colors.black)
+                    .onSubmitted (on-rename-from handle-ui-event!)
                     .decoration (m/InputDecoration
-                                 .contentPadding (m/EdgeInsets.only .bottom 0)
-                                 .border m/InputBorder.none)
+                                 .hintText "your name..."
+                                 .hintStyle (m/TextStyle .fontSize 16
+                                                         .fontWeight m/FontWeight.bold
+                                                         .color m.Colors/grey)
+                                 .contentPadding (m/EdgeInsets.only .bottom y-offset))
                     .strutStyle (m/StrutStyle
                                  .fontSize 16
                                  .height 1.9
                                  .forceStrutHeight true)
-                    .controller (m/TextEditingController. .text (str title))))
-                  (m/Spacer .flex 8)
-                  (m/IconButton
-                   .iconSize 30
-                   .icon (m/Icon m/Icons.qr_code_2 .color m/Colors.black)
-                   .onPressed (on-show-qr handle-ui-event!))
-                  (m/Spacer .flex 1)])
+                    .controller (m/TextEditingController .text from-title)))
+                  (f/widget
+                   :padding {:left 12 :right 12 :top (+ (- y-offset) 6)}
+                   (m/Icon m/Icons.sync_alt_outlined .size 20 .color (if (empty? from-title) m/Colors.grey m/Colors.black)))
+                  (f/widget
+                   (m/SizedBox .width text-field-width)
+                   (m/TextField
+                    .textInputAction m.TextInputAction/done
+                    .style (m/TextStyle
+                            .fontSize 16
+                            .fontWeight m/FontWeight.bold
+                            .color m/Colors.black)
+                    .onSubmitted (on-rename-to handle-ui-event!)
+                    .decoration (m/InputDecoration
+                                 .contentPadding (m/EdgeInsets.only .bottom y-offset))
+                    .strutStyle (m/StrutStyle
+                                 .fontSize 16
+                                 .height 1.9
+                                 .forceStrutHeight true)
+                    .controller (m/TextEditingController .text (str to-title))))
+                  (m/Spacer)
+                  (f/widget
+                   (m/Transform.translate .offset (m/Offset 0 (- y-offset)))
+                   (m/IconButton
+                    .iconSize 30
+                    .icon (m/Icon m/Icons.send_rounded .color (if (empty? from-title) m/Colors.grey m/Colors.green))
+                    .onPressed (when-not (empty? from-title)
+                                 (fn []
+                                   (-> (.instance share/SharePlus) ;;TODO, this smells like a resource and we should probably treat it as one, for now, this is just for demoing
+                                       (.share (share/ShareParams. .text "hi, I'd like to add you as a friend on this social task app:
+                                                                         something.com")))
+                                   ((on-send-invite handle-ui-event!))))))])
          .subtitle (f/widget
-                    :let [text-controller (m/TextEditingController)]
-                    (m/TextField
-                     .textInputAction m.TextInputAction/done
-                     .style (m/TextStyle
-                             .fontSize 16
-                             .fontWeight m/FontWeight.bold
-                             .color m/Colors.grey)
-                     .onSubmitted (on-paste-public-key handle-ui-event!)
-                     .decoration (m/InputDecoration
-                                  .hintText "paste public key..."
-                                  .hintStyle (m/TextStyle
-                                              .fontSize 16
-                                              .fontWeight m.FontWeight/normal
-                                              .color m.Colors/grey)
-                                  .contentPadding (m/EdgeInsets.only .bottom 0))
-                     .controller text-controller))))
+                    :let [status-string (cond ;;TODO we can extend this with more statuses like "invite sent, waiting for acceptance", "invite accepted", "invite rejected", etc.)]
+                                          (empty? from-title)
+                                          "0. Start out by entering your name. This is how your friend will see you when they accept your invite."
+                                          :else (str "1. Click the send button to share the invite link with your friend."))]
+                    (m/Text status-string
+                            .style (m/TextStyle
+                                    .fontSize 14
+                                    .fontWeight m/FontWeight.normal
+                                    .color m/Colors.grey)))))
+
+         ;; .subtitle (f/widget
+         ;;            :let [text-controller (m/TextEditingController)]
+         ;;            (m/TextField
+         ;;             .textInputAction m.TextInputAction/done
+         ;;             .style (m/TextStyle
+         ;;                     .fontSize 16
+         ;;                     .fontWeight m/FontWeight.bold
+         ;;                     .color m/Colors.grey)
+         ;;             .onSubmitted (on-paste-public-key handle-ui-event!)
+         ;;             .decoration (m/InputDecoration
+         ;;                          .hintText "paste public key..."
+         ;;                          .hintStyle (m/TextStyle
+         ;;                                      .fontSize 16
+         ;;                                      .fontWeight m.FontWeight/normal
+         ;;                                      .color m.Colors/grey)
+         ;;                          .contentPadding (m/EdgeInsets.only .bottom 0))
+         ;;             .controller text-controller))))
 
        :editable-task
        (f/widget
@@ -190,7 +252,7 @@
              .maxLines nil
              .style (m/TextStyle
                      .fontSize 22
-                     .fontWeight m.FontWeight/normal
+                     .fontWeight m/FontWeight.normal
                      .color m.Colors/black
                      .decoration (if completed
                                    m.TextDecoration/lineThrough
@@ -214,7 +276,7 @@
                      (m/IconButton
                       .icon (m/Icon m/Icons.add
                                     .size 26
-                                    .color m.Colors/red)
+                                    .color m/Colors.black)
                       .onPressed nil))
                     (f/widget
                      :let [text-controller (m/TextEditingController.)]
@@ -229,7 +291,7 @@
                                    .hintText "new task..."
                                    .hintStyle (m/TextStyle
                                                .fontSize 22
-                                               .fontWeight m.FontWeight/normal
+                                               .fontWeight m/FontWeight.normal
                                                .color m.Colors/grey)
                                    .contentPadding (m/EdgeInsets.only .bottom 0))
                       .strutStyle (m/StrutStyle
@@ -239,7 +301,7 @@
                       .controller text-controller
                       .style (m/TextStyle
                               .fontSize 22
-                              .fontWeight m.FontWeight/normal
+                              .fontWeight m/FontWeight.normal
                               .color m.Colors/black)))]))
 
        :ronly-task
@@ -342,7 +404,7 @@
                                          ", and " (last liked-by)))
                             .style (m/TextStyle
                                     .fontSize 14
-                                    .fontWeight m.FontWeight/normal
+                                    .fontWeight m/FontWeight.normal
                                     .color m.Colors/red))]))
 
        :subitem-time
@@ -362,7 +424,7 @@
                     (m/Text (str "Completed at " (.-hour time) ":" (.-minute time))
                             .style (m/TextStyle
                                     .fontSize 14
-                                    .fontWeight m.FontWeight/normal
+                                    .fontWeight m/FontWeight.normal
                                     .color m.Colors/pink))]))
 
        :subitem-image
@@ -392,41 +454,61 @@
        :friend-search-area
        (f/widget
         :key "friend-search-area"
-        :let [{:keys [on-search]} @(get-ast-atom)]
-        :padding {:left 15 :bottom 15}
+        :let [{:keys [on-search on-handshake-qr on-handshake-network]} @(get-ast-atom)]
+        :padding {:vertical 6}
         (m/Material
-         .type m/MaterialType.transparency)
-        (m/Row
-         .children [(f/widget
-                     :padding {:right 20 :top 4}
-                     (m/Icon m.Icons/person_add
-                             .size 22
-                             .color m.Colors/black))
-                    (f/widget
-                     :let [text-controller (m/TextEditingController.)]
-                     (m/SizedBox .width 180)
-                     (m/TextField
-                      .textInputAction m.TextInputAction/done
-                      .cursorHeight 38
-                      .onSubmitted (fn [new-friend-name]
-                                     (.clear text-controller)
-                                     ((on-search handle-ui-event!) new-friend-name))
-                      .decoration (m/InputDecoration
-                                   .hintText "add friend..."
-                                   .hintStyle (m/TextStyle
-                                               .fontSize 22
-                                               .fontWeight m.FontWeight/normal
-                                               .color m.Colors/grey)
-                                   .contentPadding (m/EdgeInsets.only .bottom 0))
-                      .strutStyle (m/StrutStyle
-                                   .fontSize 22
-                                   .height 1.9
-                                   .forceStrutHeight true)
-                      .controller text-controller
-                      .style (m/TextStyle
-                              .fontSize 22
-                              .fontWeight m.FontWeight/normal
-                              .color m.Colors/black)))]))
+         .elevation 0)
+        (m/ListTile
+         .shape (m/RoundedRectangleBorder
+                 .side (m/BorderSide
+                        .color (m/Colors.black.withOpacity 0.3))
+                 .borderRadius (m/BorderRadius.circular 12))
+         .leading (m/Icon m.Icons/person_add
+                          .size 24
+                          .color m.Colors/black)
+         .title (f/widget
+                 :let [y-offset -10]
+                 (m/Transform.translate .offset (m/Offset 0 y-offset))
+                 (m/Row)
+                 .children
+                 [(f/widget
+                   :let [text-controller (m/TextEditingController.)]
+                   (m/SizedBox .width 180)
+                   (m/TextField
+                    .style (m/TextStyle
+                            .fontSize 16
+                            .fontWeight m/FontWeight.bold
+                            .color m.Colors/black)
+                    .textInputAction m.TextInputAction/done
+                    ;; .cursorHeight 38
+                    .onSubmitted (fn [new-friend-name]
+                                   (.clear text-controller)
+                                   ((on-search handle-ui-event!) new-friend-name))
+                    .decoration (m/InputDecoration
+                                 .hintText "add friend..."
+                                 .hintStyle (m/TextStyle
+                                             .fontSize 16
+                                             .fontWeight m/FontWeight.bold
+                                             .color m.Colors/grey)
+                                 .contentPadding (m/EdgeInsets.only .bottom y-offset))
+                    .strutStyle (m/StrutStyle
+                                 .fontSize 16
+                                 .height 1.9
+                                 .forceStrutHeight true)
+                    .controller text-controller))
+                  (m/Spacer)
+                  (f/widget
+                   (m/Transform.translate .offset (m/Offset 0 (- y-offset)))
+                   (m/IconButton
+                    .iconSize 30
+                    .icon (m/Icon m/Icons.qr_code_scanner_outlined .color m/Colors.green)
+                    .onPressed (on-handshake-qr handle-ui-event!)))
+                  (f/widget
+                   (m/Transform.translate .offset (m/Offset 0 (- y-offset)))
+                   (m/IconButton
+                    .iconSize 30
+                    .icon (m/Icon m/Icons.wifi_tethering .color m/Colors.green)
+                    .onPressed (on-handshake-network handle-ui-event!)))])))
 
        :qr-screen
        (f/widget
