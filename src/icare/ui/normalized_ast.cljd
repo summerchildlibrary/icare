@@ -56,7 +56,10 @@
           ast))
 
 (defn flatten-ast-nocat
-  "same as flatten-ast but without using concat"
+  "same as flatten-ast but without using concat
+  i'm pretty sure this has the same complexity as the concat
+  version because of lazy sequences, but interesting
+  excersize to make this"
   [ast-nodes]
   (letfn [(helper [flattened-so-far ast-nodes]
             (reduce (fn [flat-nodes node]
