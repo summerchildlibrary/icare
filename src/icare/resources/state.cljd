@@ -9,7 +9,7 @@
 (defonce initialized? (atom false))
 
 (defonce store (atom {:reorderable-items [{:type :user
-                                           :name "Me"
+                                           :name "You"
                                            :expanded? true
                                            :pub-key nil
                                            :tasks [{:title "wake up"
