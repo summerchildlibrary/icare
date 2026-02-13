@@ -164,6 +164,7 @@
        :uninitialized-person-card
        (f/widget
         :key key
+        :context ctx
         :watch [{:keys [idx to-title from-title]} (get-ast-atom)]
         :let [{:keys [on-rename-from on-rename-to on-send-invite on-paste-public-key]} @(get-ast-atom)]
         :padding {:vertical 6}
@@ -172,68 +173,82 @@
          .borderRadius (m/BorderRadius.circular 12))
         (m/ReorderableDelayedDragStartListener
          .index idx)
+        :let [phone-width (.-width (m/MediaQuery.sizeOf ctx))
+              text-field-width 120
+              small-width? (<= phone-width (* 2 text-field-width 1.5))
+              text-field-width (if small-width? 112 text-field-width)
+              y-offset -10
+              from-text-field (f/widget
+                               (m/SizedBox .width text-field-width)
+                               (m/TextField
+                                .textInputAction m.TextInputAction/done
+                                .style (m/TextStyle
+                                        .fontSize 16
+                                        .fontWeight m/FontWeight.bold
+                                        .color m/Colors.black)
+                                .onSubmitted (on-rename-from handle-ui-event!)
+                                .decoration (m/InputDecoration
+                                             .hintText "your name..."
+                                             .hintStyle (m/TextStyle .fontSize 16
+                                                                     .fontWeight m/FontWeight.bold
+                                                                     .color m.Colors/grey)
+                                             .contentPadding (m/EdgeInsets.only .bottom y-offset))
+                                .strutStyle (m/StrutStyle
+                                             .fontSize 16
+                                             .height 1.9
+                                             .forceStrutHeight true)
+                                .controller (m/TextEditingController .text from-title)))
+              middle-icon (f/widget
+                           :padding {:horizontal 12 :top (+ (- y-offset) 6)}
+                           (m/Icon m/Icons.sync_alt_outlined
+                                  .size 20
+                                  .color (if (empty? from-title)
+                                           m/Colors.grey
+                                           m/Colors.black)))
+              to-text-field (f/widget
+                             (m/SizedBox .width text-field-width)
+                             (m/TextField
+                              .textInputAction m.TextInputAction/done
+                              .style (m/TextStyle
+                                      .fontSize 16
+                                      .fontWeight m/FontWeight.bold
+                                      .color m/Colors.black)
+                              .onSubmitted (on-rename-to handle-ui-event!)
+                              .decoration (m/InputDecoration
+                                           .contentPadding (m/EdgeInsets.only .bottom y-offset))
+                              .strutStyle (m/StrutStyle
+                                           .fontSize 16
+                                           .height 1.9
+                                           .forceStrutHeight true)
+                              .controller (m/TextEditingController .text (str to-title))))
+              send-button (f/widget
+                           :padding {:left 4}
+                           (m/Transform.translate .offset (m/Offset 0 (- y-offset)))
+                           (m/IconButton
+                            .iconSize 30
+                            .icon (m/Icon m/Icons.send_rounded .color (if (empty? from-title) m/Colors.grey m/Colors.green))
+                            .onPressed (when-not (empty? from-title)
+                                         (fn []
+                                           (-> (.instance share/SharePlus) ;;TODO, this smells like a resource and we should probably treat it as one, for now, this is just for demoing
+                                               (.share (share/ShareParams. .text "hi, I'd like to add you as a friend on this social task app:
+                                                                         something.com")))
+                                           ((on-send-invite handle-ui-event!))))))]
+
         (m/ListTile
          .shape (m/RoundedRectangleBorder
                  .side (m/BorderSide
                         .color (m/Colors.black.withOpacity 0.3))
                  .borderRadius (m/BorderRadius.circular 12))
          .title (f/widget
-                 :let [y-offset -10
-                       text-field-width 120]
                  (m/Transform.translate .offset (m/Offset 0 y-offset))
                  (m/Row)
                  .children
-                 [(f/widget
-                   (m/SizedBox .width text-field-width)
-                   (m/TextField
-                    .textInputAction m.TextInputAction/done
-                    .style (m/TextStyle
-                            .fontSize 16
-                            .fontWeight m/FontWeight.bold
-                            .color m/Colors.black)
-                    .onSubmitted (on-rename-from handle-ui-event!)
-                    .decoration (m/InputDecoration
-                                 .hintText "your name..."
-                                 .hintStyle (m/TextStyle .fontSize 16
-                                                         .fontWeight m/FontWeight.bold
-                                                         .color m.Colors/grey)
-                                 .contentPadding (m/EdgeInsets.only .bottom y-offset))
-                    .strutStyle (m/StrutStyle
-                                 .fontSize 16
-                                 .height 1.9
-                                 .forceStrutHeight true)
-                    .controller (m/TextEditingController .text from-title)))
-                  (f/widget
-                   :padding {:left 12 :right 12 :top (+ (- y-offset) 6)}
-                   (m/Icon m/Icons.sync_alt_outlined .size 20 .color (if (empty? from-title) m/Colors.grey m/Colors.black)))
-                  (f/widget
-                   (m/SizedBox .width text-field-width)
-                   (m/TextField
-                    .textInputAction m.TextInputAction/done
-                    .style (m/TextStyle
-                            .fontSize 16
-                            .fontWeight m/FontWeight.bold
-                            .color m/Colors.black)
-                    .onSubmitted (on-rename-to handle-ui-event!)
-                    .decoration (m/InputDecoration
-                                 .contentPadding (m/EdgeInsets.only .bottom y-offset))
-                    .strutStyle (m/StrutStyle
-                                 .fontSize 16
-                                 .height 1.9
-                                 .forceStrutHeight true)
-                    .controller (m/TextEditingController .text (str to-title))))
+                 [from-text-field
+                  (if small-width? send-button middle-icon)
+                  to-text-field
                   (m/Spacer)
-                  (f/widget
-                   (m/Transform.translate .offset (m/Offset 0 (- y-offset)))
-                   (m/IconButton
-                    .iconSize 30
-                    .icon (m/Icon m/Icons.send_rounded .color (if (empty? from-title) m/Colors.grey m/Colors.green))
-                    .onPressed (when-not (empty? from-title)
-                                 (fn []
-                                   (-> (.instance share/SharePlus) ;;TODO, this smells like a resource and we should probably treat it as one, for now, this is just for demoing
-                                       (.share (share/ShareParams. .text "hi, I'd like to add you as a friend on this social task app:
-                                                                         something.com")))
-                                   ((on-send-invite handle-ui-event!))))))])
+                  (if small-width? (m/Spacer) send-button)])
+
          .subtitle (f/widget
                     :let [status-string (cond ;;TODO we can extend this with more statuses like "invite sent, waiting for acceptance", "invite accepted", "invite rejected", etc.)]
                                           (empty? from-title)
