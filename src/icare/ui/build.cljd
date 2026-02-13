@@ -30,7 +30,7 @@
            (recursive-call reorderable-list))
           (f/widget
            :context ctx
-           :let [phone-padding (m/MediaQuery.paddingOf ctx)
+           :let [phone-padding (m/MediaQuery.viewPaddingOf ctx)
                  notch-height (.-top phone-padding)]
            (m/IgnorePointer)
            (m/Column)
@@ -49,17 +49,41 @@
 
        :reorderable-list
        (f/widget
-        :managed [scroll-controller (m/ScrollController)]
+        :context ctx
+        :managed [scroll-controller (m/ScrollController)
+                  focus-callback (fn []
+                                   (when-let [focused (.-primaryFocus m/FocusManager.instance)]
+                                     (Future.delayed
+                                      (Duration .milliseconds 300)
+                                      (fn []
+                                        (let [phone-insets (m/MediaQuery.viewInsetsOf ctx)
+                                              keyboard-to-bottom (.-bottom phone-insets)
+                                              phone-size (m/MediaQuery.sizeOf ctx)
+                                              phone-length (.-height phone-size)
+                                              focused-to-top (.-dy (.-offset focused))
+                                              focused-to-bottom (- phone-length focused-to-top)
+                                              focus-scroll-delta (max
+                                                                  0
+                                                                  (+ 40 (- keyboard-to-bottom focused-to-bottom)))
+                                              scroll-offset (.-offset scroll-controller)
+                                              focus-scroll (+ scroll-offset focus-scroll-delta)]
+                                          (.animateTo scroll-controller
+                                                      focus-scroll
+                                                      .duration (Duration .milliseconds 300)
+                                                      .curve m/Curves.linear))))))
+                  :dispose nil
+                  _ (doto m/FocusManager.instance (.addListener focus-callback))
+                  :dispose (.removeListener focus-callback)]
         (m/Scrollbar ;;TODO we should make this default ios style if we're gonna keep bouncy physics for android
          .controller scroll-controller
          .interactive true)
-        :context ctx
         :watch [{:keys [items]} (get-ast-atom)]
         :let [{:keys [on-reorder friend-search]} @(get-ast-atom)
-              phone-padding (m/MediaQuery.paddingOf ctx)
+              phone-padding (m/MediaQuery.viewPaddingOf ctx)
               phone-size (m/MediaQuery.sizeOf ctx)
+              phone-height (.-height phone-size)
               notch-height (.-top phone-padding)
-              relative-start (/ notch-height (.-height phone-size))]
+              relative-start (/ notch-height phone-height)]
         (m/ReorderableListView
          .anchor relative-start
          ;; .physics (m/BouncingScrollPhysics) ;;TODO this is like ios style for android, i think i prefer it but maybe we should keep the default android physics for android
@@ -448,7 +472,12 @@
        (f/widget
         :key "friend-search-area"
         :let [{:keys [on-search on-handshake-qr on-handshake-network]} @(get-ast-atom)]
-        :padding {:top 6 :bottom 100} ;;this is here so that we always have some room to scroll the list upwards
+        :context ctx
+        :let [phone-insets (m/MediaQuery.viewInsetsOf ctx)
+              keyboard-height (.-bottom phone-insets)]
+        (m/AnimatedPadding ;;this is here to make sure the friend search area is visible when the keyboard is open
+         .padding (m/EdgeInsets.only .top 6 .bottom (+ 100 keyboard-height))
+         .duration (Duration .milliseconds 300))
         (m/Material
          .elevation 0)
         (m/ListTile
@@ -466,7 +495,7 @@
                  .children
                  [(f/widget
                    :let [text-controller (m/TextEditingController.)]
-                   (m/SizedBox .width 180)
+                   (m/SizedBox .width 120)
                    (m/TextField
                     .style (m/TextStyle
                             .fontSize 16

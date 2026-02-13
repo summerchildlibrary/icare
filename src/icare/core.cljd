@@ -48,7 +48,7 @@
      (f/widget
       (m/Scaffold
        .backgroundColor m/Colors.transparent
-       .resizeToAvoidBottomInset true)
+       .resizeToAvoidBottomInset false) ;;we handle this manually by scrolling to make our text fields visible
       .body
       (f/widget
        :context ctx
@@ -62,8 +62,7 @@
                                                                        public-key
                                                                        persisted-state
                                                                        handle-network-data!)] ;;i don't like passing handle-network-data! here but it needs to be passed to initialize-network! which is called in initialize-resources! it should probably be passed separately for expliciteness but this is fine for now
-       (m/SafeArea
-        .top false) ;;we handle the top manually for better rendering. I'd like to get rid of the bottom because having it causes
-                    ;;buggy rendering, but without it, opening the keyboard doesn't push the appropriate text fields up.
-                    ;;probably need to figure out a better autoscroll system in general
+       (m/SafeArea ;;we handle the top and bottom manually for edge to edge rendering
+        .bottom false
+        .top false)
        (build-widgets! [derived-state state] handle-ui-event!)))]))
