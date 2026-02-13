@@ -23,15 +23,15 @@
 
        :screen-base
        (f/widget
-        :context ctx
-        :let [notch-height (-> (m/MediaQuery.of ctx) .-padding .-top)]
         (m/Stack
          .children
          [(f/widget
-           :padding {:top notch-height}
            :let [{:keys [reorderable-list]} @(get-ast-atom)]
            (recursive-call reorderable-list))
           (f/widget
+           :context ctx
+           :let [phone-padding (m/MediaQuery.paddingOf ctx)
+                 notch-height (.-top phone-padding)]
            (m/IgnorePointer)
            (m/Column)
            .children
@@ -49,11 +49,21 @@
 
        :reorderable-list
        (f/widget
-        (m/Scrollbar
+        :managed [scroll-controller (m/ScrollController)]
+        (m/Scrollbar ;;TODO we should make this default ios style if we're gonna keep bouncy physics for android
+         .controller scroll-controller
          .interactive true)
+        :context ctx
         :watch [{:keys [items]} (get-ast-atom)]
-        :let [{:keys [on-reorder friend-search]} @(get-ast-atom)]
+        :let [{:keys [on-reorder friend-search]} @(get-ast-atom)
+              phone-padding (m/MediaQuery.paddingOf ctx)
+              phone-size (m/MediaQuery.sizeOf ctx)
+              notch-height (.-top phone-padding)
+              relative-start (/ notch-height (.-height phone-size))]
         (m/ReorderableListView
+         .anchor relative-start
+         ;; .physics (m/BouncingScrollPhysics) ;;TODO this is like ios style for android, i think i prefer it but maybe we should keep the default android physics for android
+         .scrollController scroll-controller
          .clipBehavior m/Clip.none
          .padding (m/EdgeInsets.symmetric .horizontal 20)
          .onReorder (on-reorder handle-ui-event!)
@@ -65,6 +75,7 @@
        :task-card
        (f/widget
         :key key
+        :context ctx
         :managed [expansion-controller (m/ExpansibleController)]
         :watch [{:keys [expanded? idx title has-alert? title tasks]} (get-ast-atom)]
         :let [{:keys [on-expand on-rename-title]} @(get-ast-atom)
@@ -99,7 +110,7 @@
                           .borderRadius (m/BorderRadius.circular 12))
          .leading (if expanded?
                     (m/Icon m/Icons.drag_handle .color (m/Colors.black.withOpacity 0.2) .size 24)
-                    (m/ReorderableDragStartListener
+                    (m/ReorderableDelayedDragStartListener
                      .index idx
                      .child (m/Icon m.Icons/drag_handle .size 24)))
          .title (f/widget
@@ -133,7 +144,7 @@
         (m/Material
          .elevation 0
          .borderRadius (m/BorderRadius.circular 12))
-        (m/ReorderableDragStartListener
+        (m/ReorderableDelayedDragStartListener
          .index idx)
         (m/ListTile
          .shape (m/RoundedRectangleBorder
@@ -207,24 +218,6 @@
                                     .fontSize 14
                                     .fontWeight m/FontWeight.normal
                                     .color m/Colors.grey)))))
-
-         ;; .subtitle (f/widget
-         ;;            :let [text-controller (m/TextEditingController)]
-         ;;            (m/TextField
-         ;;             .textInputAction m.TextInputAction/done
-         ;;             .style (m/TextStyle
-         ;;                     .fontSize 16
-         ;;                     .fontWeight m/FontWeight.bold
-         ;;                     .color m/Colors.grey)
-         ;;             .onSubmitted (on-paste-public-key handle-ui-event!)
-         ;;             .decoration (m/InputDecoration
-         ;;                          .hintText "paste public key..."
-         ;;                          .hintStyle (m/TextStyle
-         ;;                                      .fontSize 16
-         ;;                                      .fontWeight m.FontWeight/normal
-         ;;                                      .color m.Colors/grey)
-         ;;                          .contentPadding (m/EdgeInsets.only .bottom 0))
-         ;;             .controller text-controller))))
 
        :editable-task
        (f/widget
@@ -455,7 +448,7 @@
        (f/widget
         :key "friend-search-area"
         :let [{:keys [on-search on-handshake-qr on-handshake-network]} @(get-ast-atom)]
-        :padding {:vertical 6}
+        :padding {:top 6 :bottom 100} ;;this is here so that we always have some room to scroll the list upwards
         (m/Material
          .elevation 0)
         (m/ListTile
@@ -480,7 +473,6 @@
                             .fontWeight m/FontWeight.bold
                             .color m.Colors/black)
                     .textInputAction m.TextInputAction/done
-                    ;; .cursorHeight 38
                     .onSubmitted (fn [new-friend-name]
                                    (.clear text-controller)
                                    ((on-search handle-ui-event!) new-friend-name))

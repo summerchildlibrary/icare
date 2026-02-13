@@ -12,6 +12,8 @@
 
 (defn main []
   (f/run
+    ;;only for older android's this is default on ios and newer androids
+    :let [_ (services/SystemChrome.setEnabledSystemUIMode services/SystemUiMode.edgeToEdge)]
     (m/MaterialApp
      .title "iCare"
      .theme (m/ThemeData
@@ -20,12 +22,14 @@
                              .background m/Colors.white)
                .textTheme (gf/GoogleFonts.getTextTheme "Playwrite GB J")))
     .home
-    ;; (m/AnnotatedRegion
-    ;;  .value (services/SystemUiOverlayStyle
-    ;;          .systemNavigationBarColor (m/Color 0xFF0a3a07)
-    ;;          .systemNavigationBarIconBrightness services/Brightness.light))
-    ;;          ;; .statusBarColor (m/Color 0xFF0a3a07)
-    ;;          ;; .statusBarIconBrightness services/Brightness.light))
+    (m/AnnotatedRegion
+     .value (services/SystemUiOverlayStyle
+             ;;android settings
+             .systemNavigationBarColor m/Colors.transparent
+             .systemNavigationBarIconBrightness services/Brightness.dark
+             .systemNavigationBarContrastEnforced false
+             .statusBarColor m/Colors.transparent
+             .statusBarIconBrightness services/Brightness.dark))
     (m/Stack)
     .children
     [(m/Container
@@ -43,18 +47,23 @@
                              .fit m/BoxFit.fitWidth)])
      (f/widget
       (m/Scaffold
-       .backgroundColor (m/Colors.transparent))
+       .backgroundColor m/Colors.transparent
+       .resizeToAvoidBottomInset true)
       .body
       (f/widget
-       (m/SafeArea
-        .top false
-        .bottom false)
+       :context ctx
        :watch [storage (initialize-storage!)] ;;storage is a future
        :bypass (when-not storage
-                 (m/Text "Loading..."))
+                 (f/widget
+                  (m/SafeArea)
+                  (m/Text "Loading...")))
        :let [[private-key public-key persisted-state] storage
              [derived-state state] (initialize-resources-from-storage! private-key
                                                                        public-key
                                                                        persisted-state
                                                                        handle-network-data!)] ;;i don't like passing handle-network-data! here but it needs to be passed to initialize-network! which is called in initialize-resources! it should probably be passed separately for expliciteness but this is fine for now
+       (m/SafeArea
+        .top false) ;;we handle the top manually for better rendering. I'd like to get rid of the bottom because having it causes
+                    ;;buggy rendering, but without it, opening the keyboard doesn't push the appropriate text fields up.
+                    ;;probably need to figure out a better autoscroll system in general
        (build-widgets! [derived-state state] handle-ui-event!)))]))
