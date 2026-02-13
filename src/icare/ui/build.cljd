@@ -62,9 +62,11 @@
                                               phone-length (.-height phone-size)
                                               focused-to-top (.-dy (.-offset focused))
                                               focused-to-bottom (- phone-length focused-to-top)
+                                              extra-height 60
                                               focus-scroll-delta (max
                                                                   0
-                                                                  (+ 40 (- keyboard-to-bottom focused-to-bottom)))
+                                                                  (+ extra-height
+                                                                     (- keyboard-to-bottom focused-to-bottom)))
                                               scroll-offset (.-offset scroll-controller)
                                               focus-scroll (+ scroll-offset focus-scroll-delta)]
                                           (.animateTo scroll-controller
@@ -254,6 +256,7 @@
           .crossAxisAlignment m.CrossAxisAlignment/center
           .children
           [(f/widget
+            :padding {:top 2}
             (m/IconButton
              .icon (m/Icon (if completed
                              m/Icons.check_box
@@ -284,16 +287,18 @@
 
        :add-task-area
        (f/widget
-        :let [{:keys [on-add-task]} @(get-ast-atom)]
+        :let [{:keys [on-add-task]} @(get-ast-atom)
+              input-line-offset -4]
         :padding {:left 20}
+        (m/Transform.translate .offset (m/Offset 0 input-line-offset))
         (m/Row
          .crossAxisAlignment m.CrossAxisAlignment/center
          .children [(f/widget
-                     :padding {:top 8}
+                     :padding {:top (+ (- input-line-offset) 2)}
                      (m/IconButton
-                      .icon (m/Icon m/Icons.add
+                      .icon (m/Icon m/Icons.check_box_outline_blank
                                     .size 26
-                                    .color m/Colors.black)
+                                    .color m/Colors.grey)
                       .onPressed nil))
                     (f/widget
                      :let [text-controller (m/TextEditingController.)]
@@ -310,7 +315,8 @@
                                                .fontSize 22
                                                .fontWeight m/FontWeight.normal
                                                .color m.Colors/grey)
-                                   .contentPadding (m/EdgeInsets.only .bottom 0))
+                                   .border m/InputBorder.none
+                                   .contentPadding (m/EdgeInsets.only .bottom input-line-offset))
                       .strutStyle (m/StrutStyle
                                    .fontSize 22
                                    .height 1.9
@@ -475,9 +481,10 @@
         :context ctx
         :let [phone-insets (m/MediaQuery.viewInsetsOf ctx)
               keyboard-height (.-bottom phone-insets)]
-        (m/AnimatedPadding ;;this is here to make sure the friend search area is visible when the keyboard is open
-         .padding (m/EdgeInsets.only .top 6 .bottom (+ 100 keyboard-height))
-         .duration (Duration .milliseconds 300))
+        ;; (m/AnimatedPadding ;;this is here to make sure the friend search area is visible when the keyboard is open
+        ;;  .padding (m/EdgeInsets.only .top 6 .bottom (+ 100 keyboard-height))
+        ;;  .duration (Duration .milliseconds 300))
+        :padding {:top 6 :bottom 350}
         (m/Material
          .elevation 0)
         (m/ListTile
