@@ -3,7 +3,7 @@
 
 ;;TODO it would be useful to store a set of friend-pub-keys and user-task-uuids
 (defonce derived-store (atom {:pub-key-to-name {}
-                              :active-pub-keys #{} ;;this is a helper value of the derived-store, it should always be empty after deriving the state. Its purpose is to make it easy to delete pubkeys that get removed from the actual state
+                              :helper-active-pub-keys #{} ;;this is a helper value of the derived-store, it should always be empty after deriving the state. Its purpose is to make it easy to delete pubkeys that get removed from the actual state
                               :user-pub-key nil}))
 
 
@@ -23,21 +23,21 @@
 
 (defn remove-deleted-pub-keys [derived-state]
   (let [old-pub-keys (keys (:pub-key-to-name derived-state))
-        active-pub-keys (:active-pub-keys derived-state)
+        active-pub-keys (:helper-active-pub-keys derived-state)
         discard-pub-keys (filter (complement active-pub-keys) old-pub-keys)]
     (-> (reduce (fn [acc discard-pub-key]
                   (-> acc
                       (update :pub-key-to-name dissoc discard-pub-key)))
                 derived-state
                 discard-pub-keys)
-        (assoc :active-pub-keys #{}))))
+        (assoc :helper-active-pub-keys #{}))))
 
 (defn update-derived-state [derived-state pub-key name]
   (letfn [(add-missing-keys [derived-state]
             (let [{:keys [pub-key-to-name pub-key-to-card-controller]} derived-state
                   missing-pub-key? (or (not (contains? pub-key-to-name pub-key))
                                        (not (contains? pub-key-to-card-controller pub-key)))
-                  derived-state (update derived-state :active-pub-keys conj pub-key)]
+                  derived-state (update derived-state :helper-active-pub-keys conj pub-key)]
               (if missing-pub-key?
                 (-> derived-state
                     (assoc-in [:pub-key-to-name pub-key] name))

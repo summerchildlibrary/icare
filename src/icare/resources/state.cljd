@@ -16,13 +16,13 @@
                                                     :uuid (uuid-generator)
                                                     :completed false
                                                     :notify? false
-                                                    :liked-by #{"b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"}
+                                                    :notify-requesters #{ "b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"}
                                                     :subitems []}
                                                    {:title "go to monkey bars"
                                                     :uuid (uuid-generator)
                                                     :completed true
                                                     :notify? false
-                                                    :liked-by #{}
+                                                    :notify-requesters #{}
                                                     :subitems [{:type :time :value "2026-01-06 09:18:04Z"}]}]}
                                                                ;; {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
                                           {:type :friend
@@ -141,18 +141,29 @@
   (condp = (:type event)
 
     ;;--- Network events ---
-
-    :liked-event
-    (let [{:keys [liked task-uuid creator-pub-key]} event
+    :update-notify-requesters
+    (let [{:keys [want-notifications? task-uuid notification-requester event-json]} event ;;TODO we need the event-json here as receipt to present to the server to allow us to notify that person
           user-pub-key (get-user-pub-key state)
           user-card-idx (pub-key->reorderable-item-idx (:reorderable-items state) user-pub-key)
           task-idx (when user-card-idx
                      (uuid->task-idx (get-in state [:reorderable-items user-card-idx :tasks]) task-uuid))]
       (if (or (nil? user-card-idx) (nil? task-idx))
         state
-        (update-in state [:reorderable-items user-card-idx :tasks task-idx :liked-by]
-                   (if liked conj disj)
-                   creator-pub-key)))
+        (update-in state [:reorderable-items user-card-idx :tasks task-idx :notify-requesters]
+                   (if want-notifications? conj disj)
+                   notification-requester)))
+
+    ;; :liked-event
+    ;; (let [{:keys [liked task-uuid creator-pub-key]} event
+    ;;       user-pub-key (get-user-pub-key state)
+    ;;       user-card-idx (pub-key->reorderable-item-idx (:reorderable-items state) user-pub-key)
+    ;;       task-idx (when user-card-idx
+    ;;                  (uuid->task-idx (get-in state [:reorderable-items user-card-idx :tasks]) task-uuid))]
+    ;;   (if (or (nil? user-card-idx) (nil? task-idx))
+    ;;     state
+    ;;     (update-in state [:reorderable-items user-card-idx :tasks task-idx :liked-by]
+    ;;                (if liked conj disj)
+    ;;                creator-pub-key)))
 
     :update-task-event
     (let [{:keys [task creator-pub-key]} event
@@ -215,7 +226,12 @@
       (assoc-in state [:reorderable-items friend-card-idx :tasks task-idx :liked] liked))
 
     :add-user-task
-    (let [{:keys [user-card-idx new-task]} event]
+    (let [{:keys [user-card-idx title]} event
+          new-task {:title title
+                    :uuid (uuid-generator)
+                    :notify-requesters #{}
+                    :completed false
+                    :subitems []}]
       (update-in state [:reorderable-items user-card-idx :tasks] conj new-task))
 
     :delete-card

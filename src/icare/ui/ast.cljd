@@ -65,30 +65,28 @@
                                        :friend-card-idx reorderable-item-idx
                                        :task-idx task-idx
                                        :liked (not liked)
+                                       :want-notifications? (not liked)
                                        :creator-pub-key creator-pub-key
                                        :task-uuid uuid})))
      :liked liked
      :subitems (mapv (partial task-subitems->ast derived-state) (range) subitems-with-uuid)}))
 
-(defn add-tasks->ast [derived-state reorderable-item-idx pub-key]
+(defn add-tasks->ast [derived-state new-task-idx reorderable-item-idx pub-key]
   {:id (str "add-task-" pub-key)
    :ui-type :add-task-area
    :on-add-task (fn [handle-ui-event!]
                   (fn [value]
                     (when (not (empty? value))
-                      (let [new-task {:title value
-                                      :uuid (uuid-generator)
-                                      :liked-by #{}
-                                      :completed false
-                                      :subitems []}]
-                        (handle-ui-event! {:type :add-user-task
-                                           :user-card-idx reorderable-item-idx
-                                           :new-task new-task})))))})
+                      (handle-ui-event! {:type :add-user-task
+                                         :user-card-idx reorderable-item-idx
+                                         :task-idx new-task-idx
+                                         :title value}))))})
 
 (defn person->ast [derived-state reorderable-item-idx person]
   (let [{:keys [user? name tasks pub-key expanded? notify?]} person
         id (str "card-" pub-key)
-        tasks (mapv #(conj % {:reorderable-item-idx reorderable-item-idx :creator-pub-key pub-key :card-expanded? expanded?}) tasks)]
+        tasks (mapv #(conj % {:reorderable-item-idx reorderable-item-idx :creator-pub-key pub-key :card-expanded? expanded?}) tasks)
+        new-task-idx (count tasks)]
     {:id id
      :ui-type :task-card
      :expanded? expanded?
@@ -113,7 +111,8 @@
                                                 :card-idx reorderable-item-idx
                                                 :name value}))))
      :tasks (if user?
-              (conj (mapv (partial user-task->ast derived-state) (range) tasks) (add-tasks->ast derived-state reorderable-item-idx pub-key))
+              (conj (mapv (partial user-task->ast derived-state) (range) tasks)
+                    (add-tasks->ast derived-state new-task-idx reorderable-item-idx pub-key))
               (mapv (partial friend-task->ast derived-state) (range) tasks))}))
 
 (defn uninitialized-person->ast [derived-state reorderable-item-idx item]

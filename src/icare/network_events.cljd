@@ -7,8 +7,10 @@
 ;;If you require icare.resources.network here you will cause a cyclic dependancy. The way I recommend to avoid this
 ;;is by taking in the dispatcher function as an argument to handle-network-data! check the comment in the network.cljd file.
 
+(def send-updated-task-kind 39505)
 (def liked-event-kind 39506)
-(def update-task-event-kind 39505)
+(def update-request-to-notify-kind 39507)
+(def fulfill-notify-kind 29508) ;;a 2 here is a nostr convention that means that this kind is ephemeral and should not be stored by the relay
 
 ;;This module handles incoming websocket events.
 ;;It parses incoming messages and updates state + storage directly.
@@ -19,16 +21,26 @@
           event-json (get data 2)
           event ^Event (.fromJson Event event-json)] ;;this will automatically verify the event signature, if invalid it will throw
       (condp = (.-kind event)
-        liked-event-kind
+        update-request-to-notify-kind
         (let [content (read-string (.-content event))
               task-uuid (:task-uuid content)
-              liked (:liked content)
-              creator-pub-key (.-pubkey event)]
-          (update-state-and-persist! {:type :liked-event :liked liked
-                                      :task-uuid task-uuid :creator-pub-key creator-pub-key})
-          (prn "Received liked event:" (.-content event) "with tags:" (.-tags event)))
+              want-notifications? (:want-notifications? content)
+              notification-requester (.-pubkey event)]
+          (update-state-and-persist! {:type :update-notify-requesters :want-notifications? want-notifications?
+                                      :task-uuid task-uuid :notification-requester notification-requester
+                                      :event-json event-json})
+          (prn "Received request to notify event:" (.-content event) "with tags:" (.-tags event)))
 
-        update-task-event-kind
+        ;; liked-event-kind
+        ;; (let [content (read-string (.-content event))
+        ;;       task-uuid (:task-uuid content)
+        ;;       liked (:liked content)
+        ;;       creator-pub-key (.-pubkey event)]
+        ;;   (update-state-and-persist! {:type :liked-event :liked liked
+        ;;                               :task-uuid task-uuid :creator-pub-key creator-pub-key})
+        ;;   (prn "Received liked event:" (.-content event) "with tags:" (.-tags event)))
+
+        send-updated-task-kind
         (let [task-data (read-string (.-content event))
               creator-pub-key (.-pubkey event)]
           (when-not (nil? task-data)
