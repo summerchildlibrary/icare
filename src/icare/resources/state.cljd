@@ -4,11 +4,16 @@
 (def uuid-generator (.-v4 (Uuid)))
 (def use-persistent-storage? false)
 
-;;This namespace defines all side effects on our store
+;;This namespace manages all application state in one place
+;;The store contains three top-level keys:
+;;  :state - the main application state (reorderable-items, show-qr?, etc)
+;;  :derived-state - computed values derived from state (pub-key-to-name, user-pub-key)
+;;  :notify-receipts - notification receipts for push notifications
 ;;
 (defonce initialized? (atom false))
 
-(defonce store (atom {:reorderable-items [{:type :user
+(def default-state
+  {:reorderable-items [{:type :user
                                            :name "You"
                                            :expanded? true
                                            :pub-key nil
@@ -25,42 +30,55 @@
                                                     :notify-requesters #{}
                                                     :subitems [{:type :time :value "2026-01-06 09:18:04Z"}]}]}
                                                                ;; {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
-                                          {:type :friend
-                                           :name "Example 🎸🎸"
-                                           :expanded? false
-                                           :pub-key "b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"
-                                           :tasks [{:title "Defeated bear"
-                                                    :uuid (uuid-generator)
-                                                    :liked false
-                                                    :notify? false
-                                                    :completed false
-                                                    :subitems []}
-                                                   {:title "go to sleep"
-                                                    :uuid (uuid-generator)
-                                                    :liked false
-                                                    :notify? true
-                                                    :completed true
-                                                    :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-                                                   {:title "went for walk"
-                                                    :uuid (uuid-generator)
-                                                    :liked false
-                                                    :notify? false
-                                                    :completed true
-                                                    :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                                               {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}]
+                       {:type :friend
+                        :name "Example 🎸🎸"
+                        :expanded? false
+                        :pub-key "b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"
+                        :tasks [{:title "Defeated bear"
+                                 :uuid (uuid-generator)
+                                 :liked false
+                                 :notify? false
+                                 :completed false
+                                 :subitems []}
+                                {:title "go to sleep"
+                                 :uuid (uuid-generator)
+                                 :liked false
+                                 :notify? true
+                                 :completed true
+                                 :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                                {:title "went for walk"
+                                 :uuid (uuid-generator)
+                                 :liked false
+                                 :notify? false
+                                 :completed true
+                                 :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                            {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}]
                                           ;; {:type :uninitialized-person
                                           ;;  :name "Jun before jun"
                                           ;;  :uuid (uuid-generator)}
-                      :show-qr? false}))
+   :show-qr? false})
+
+(def default-derived-state
+  {:pub-key-to-name {}
+   :helper-active-pub-keys #{} ;; helper value, always empty after deriving
+   :user-pub-key nil})
+
+(def default-notify-receipts
+  {}) ;; {task-uuid -> #{requester-pub-keys-with-receipts}}
+
+(defonce store (atom {:state default-state
+                      :derived-state default-derived-state
+                      :notify-receipts default-notify-receipts}))
 
 ;;Helper functions. Read only operations.
+;;Note: These functions work with the :state slice, not the full store
 
 (defn get-people-cards
-  ([] (get-people-cards @store))
+  ([] (get-people-cards (:state @store)))
   ([state] (filterv #(#{:friend :user} (:type %)) (:reorderable-items state))))
 
 (defn get-pub-to-name-map
-  ([] (get-pub-to-name-map @store))
+  ([] (get-pub-to-name-map (:state @store)))
   ([state] (let [reorderable-items (:reorderable-items state)]
              (into {}
                    (->> reorderable-items
@@ -68,7 +86,7 @@
                         (map (juxt :pub-key :name)))))))
 
 (defn get-task-by-indexes
-  ([user-card-idx task-idx] (get-task-by-indexes @store user-card-idx task-idx))
+  ([user-card-idx task-idx] (get-task-by-indexes (:state @store) user-card-idx task-idx))
   ([state user-card-idx task-idx] (get-in state [:reorderable-items user-card-idx :tasks task-idx])))
 
 (defn get-person-task-uuids [person]
@@ -76,7 +94,7 @@
     (mapv (fn [task] (:uuid task)) tasks)))
 
 (defn gather-pub-keys-and-uuids
-  ([] (gather-pub-keys-and-uuids @store))
+  ([] (gather-pub-keys-and-uuids (:state @store)))
   ([state] (let [reorderable-items (:reorderable-items state)]
              (reduce
               (fn [acc reorderable-item]
@@ -89,7 +107,7 @@
               reorderable-items))))
 
 (defn get-user-pub-key
-  ([] (get-user-pub-key @store))
+  ([] (get-user-pub-key (:state @store)))
   ([state] (let [reorderable-items (:reorderable-items state)]
              (->> reorderable-items
                   (filter #(= :user (:type %)))
@@ -97,7 +115,7 @@
                   :pub-key))))
 
 (defn get-reorderable-item-by-idx
-  ([reorderable-item-idx] (get-reorderable-item-by-idx @store reorderable-item-idx))
+  ([reorderable-item-idx] (get-reorderable-item-by-idx (:state @store) reorderable-item-idx))
   ([state reorderable-item-idx] (get-in state [:reorderable-items reorderable-item-idx])))
 
 (defn get-reorderable-item-idx-by-predicate [reorderable-items predicate]
@@ -328,29 +346,88 @@
 
     (throw (Exception (str "No state handling function found for event: " event)))))
 
-;;TODO
-;;at some point I'll have to implement event batching
-;;To do that, disptach network events should queue events
-;;then we have to write a flush function that clears the
-;;queue and runs swap! store (reduce #(... appply-network-event acc event) state queue)
-;;We should be careful about when to run this flush since we want to be fairly responsive...
-;;but you'll get the idea
+;;
+;; DERIVED STATE LOGIC
+;; Computes derived values from state (pub-key-to-name mapping, user-pub-key)
+;;
+
+(defn remove-deleted-pub-keys [derived-state]
+  (let [old-pub-keys (keys (:pub-key-to-name derived-state))
+        active-pub-keys (:helper-active-pub-keys derived-state)
+        discard-pub-keys (filter (complement active-pub-keys) old-pub-keys)]
+    (-> (reduce (fn [acc discard-pub-key]
+                  (update acc :pub-key-to-name dissoc discard-pub-key))
+                derived-state
+                discard-pub-keys)
+        (assoc :helper-active-pub-keys #{}))))
+
+(defn update-derived-for-card [derived-state pub-key name]
+  (-> derived-state
+      (update :helper-active-pub-keys conj pub-key)
+      (assoc-in [:pub-key-to-name pub-key] name)))
+
+(defn derive-from-state [derived-state state]
+  (let [people-cards (get-people-cards state)]
+    (-> (reduce (fn [acc card]
+                  (let [{:keys [pub-key name type]} card]
+                    (cond-> (update-derived-for-card acc pub-key name)
+                      (= type :user) (assoc :user-pub-key pub-key))))
+                derived-state
+                people-cards)
+        remove-deleted-pub-keys)))
+
+;;
+;; NOTIFY RECEIPTS LOGIC
+;; Stores receipts that allow us to send push notifications
+;;
+
+(defn apply-notify-receipts-event [notify-receipts event]
+  ;; For now, just return unchanged. Add event handlers as needed.
+  notify-receipts)
+
+;;
+;; UNIFIED DISPATCH
+;; Updates all three state slices atomically
+;;
+
+(defn apply-db-event [db event]
+  (let [new-state (apply-state-event (:state db) event)
+        new-derived (derive-from-state (:derived-state db) new-state)
+        new-receipts (apply-notify-receipts-event (:notify-receipts db) event)]
+    {:state new-state
+     :derived-state new-derived
+     :notify-receipts new-receipts}))
+
 (defn dispatch! [event]
   (assert @initialized? "State store not initialized yet! Call initialize-state! from core first.")
-  (swap! store apply-state-event event))
+  (swap! store apply-db-event event))
 
 (defn update-user-pub-key! [pub-key]
-  (swap! store update :reorderable-items
-         (fn [items]
-           (let [user-idx (get-user-reorderable-item-idx items)]
-             (assoc-in items [user-idx :pub-key] pub-key)))))
+  (swap! store update :state
+         (fn [state]
+           (let [user-idx (get-user-reorderable-item-idx (:reorderable-items state))]
+             (assoc-in state [:reorderable-items user-idx :pub-key] pub-key)))))
+
+;;
+;; GETTERS for each state slice
+;;
+
+(defn get-state [] (:state @store))
+(defn get-derived-state [] (:derived-state @store))
+(defn get-notify-receipts [] (:notify-receipts @store))
+(defn get-db [] @store)
 
 ;;Call this function from core, this is the intended way to get a reference to the store
 (defn initialize-state! [pub-key persisted-state]
   (when-not @initialized?
     (prn "Initializing state with pub key:" pub-key)
-    (when-some [state persisted-state] ;;this is only nil the first time the app runs
-      (when use-persistent-storage? (reset! store state)))
+    (when-some [state persisted-state]
+      (when use-persistent-storage?
+        (swap! store assoc :state state)))
     (reset! initialized? true)
-    (update-user-pub-key! pub-key))
+    (update-user-pub-key! pub-key)
+    ;; Derive initial state
+    (swap! store (fn [db]
+                   (assoc db :derived-state
+                          (derive-from-state (:derived-state db) (:state db))))))
   store)

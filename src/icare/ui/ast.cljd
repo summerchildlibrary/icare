@@ -200,11 +200,11 @@
              :ui-type :screen-base
              :reorderable-list (reorderable-list->ast derived-state reorderable-items)})))
 
-;;watch out, this expects [derived-state state] as an argument, the other functions expect derived-state and state separately
-(defn state->ast [[derived-state state]]
-   {:id "root"
-    :ui-type :root
-    :screen (top-level-screen->ast derived-state state)})
+(defn state->ast [db]
+  (let [{:keys [derived-state state]} db]
+    {:id "root"
+     :ui-type :root
+     :screen (top-level-screen->ast derived-state state)}))
 
 ;;for the sake of performance, we should write this flattened to remove the overhead of flattening the AST to update our atoms
 ;;honestly though, performane isn't that bad with the actual compiled app

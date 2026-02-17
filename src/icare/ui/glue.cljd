@@ -10,19 +10,19 @@
   "Renders the UI based on the current application state. This function transforms the
   application state into an abstract syntax tree (AST). This AST is then normalized
   and moved into a series of atoms which are watched for changes by our widgets."
-  ([[derived-state state]]
-   (assert @widgets-built? "render-ui! was called before the initial build-widgets! call. Make sure to call build-widgets! first to initialize the widget tree.")
-   (-> [derived-state state]
-       state->ast
-       ast->ast-store)))
+  [db]
+  (assert @widgets-built? "render-ui! was called before the initial build-widgets! call. Make sure to call build-widgets! first to initialize the widget tree.")
+  (-> db
+      state->ast
+      ast->ast-store))
 
 (defn build-widgets!
   "This is like render-ui! but it actually returns the widget tree instead of just updating the atoms.
   This is used for the initial build of the app, on subsequent attempts to render, i.e. after ui and network events
   we just call render-ui! to update the atoms and trigger re-renders of the widgets."
-  ([[derived-state state] handle-ui-event!]
-   (reset! widgets-built? true)
-   (-> [derived-state state]
-       state->ast
-       ast->ast-store
-       (ast-store->widget handle-ui-event!))))
+  [db handle-ui-event!]
+  (reset! widgets-built? true)
+  (-> db
+      state->ast
+      ast->ast-store
+      (ast-store->widget handle-ui-event!)))

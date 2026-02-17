@@ -1,11 +1,8 @@
 (ns icare.ui-events
   (:require [icare.resources.network :refer [dispatch!] :rename {dispatch! network-dispatch!}]
             [icare.resources.storage :refer [dispatch!] :rename {dispatch! storage-dispatch!}]
-            [icare.resources.derived-state
-             :refer [dispatch! get-derived-state get-user-pub-key]
-             :rename {dispatch! derived-state-dispatch!}]
             [icare.resources.state
-             :refer [dispatch! get-people-cards get-task-by-indexes gather-pub-keys-and-uuids get-task-by-indexes]
+             :refer [dispatch! get-state get-derived-state get-task-by-indexes gather-pub-keys-and-uuids]
              :rename {dispatch! state-dispatch!}]
             [icare.resources.glue :refer [update-state-and-persist!]]
             [icare.ui.glue :refer [render-ui!]]))
@@ -14,52 +11,48 @@
 ;;Coordinates state updates, storage persistence, and outbound network messages.
 ;;UI event callbacks are defined in ast.cljd and passed to widgets in build.cljd.
 ;;
-(defn update-state-render-and-persist! [event derive-state?]
-  (let [new-state (update-state-and-persist! event)
-        new-derived-state (if derive-state?
-                            (derived-state-dispatch! {:type :derive-state
-                                                      :people-cards (get-people-cards new-state)})
-                            (get-derived-state))]
-    (render-ui! [new-derived-state new-state])
-    [new-derived-state new-state]))
+(defn update-state-render-and-persist! [event]
+  (let [db (update-state-and-persist! event)]
+    (render-ui! db)
+    db))
 
 (defn handle-ui-event! [event]
   (let [{:keys [type]} event]
     (condp = type
       :complete-user-task
-     (let [[derived-state state] (update-state-render-and-persist! event false)
-           updated-task (get-task-by-indexes state (:user-card-idx event) (:task-idx event))]
+     (let [db (update-state-render-and-persist! event)
+           updated-task (get-task-by-indexes (:state db) (:user-card-idx event) (:task-idx event))]
        (network-dispatch! {:type :send-updated-task
                            :deleted false
                            :task updated-task}))
 
      :delete-user-task
      (do
-       (update-state-render-and-persist! event false)
+       (update-state-render-and-persist! event)
        (network-dispatch! {:type :send-updated-task
                            :deleted true
                            :task (:task event)}))
 
      :rename-user-task
-     (let [[derived-state state] (update-state-render-and-persist! event false)
-           updated-task (get-task-by-indexes state (:user-card-idx event) (:task-idx event))]
+     (let [db (update-state-render-and-persist! event)
+           updated-task (get-task-by-indexes (:state db) (:user-card-idx event) (:task-idx event))]
        (network-dispatch! {:type :send-updated-task
                            :deleted false
                            :task updated-task}))
 
      :like-friend-task
      (do
-       (update-state-render-and-persist! event false)
+       (update-state-render-and-persist! event)
        (network-dispatch! {:type :update-request-to-notify
                            :want-notifications? (:want-notifications? event)
                            :to-pub-key (:creator-pub-key event)
                            :task-uuid (:task-uuid event)}))
 
      :add-user-task
-     (let [[derived-state state] (update-state-render-and-persist! event false)
-           new-task (get-task-by-indexes state (:user-card-idx event) (:task-idx event))
-           {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids state)
-           user-pub-key (get-user-pub-key derived-state)]
+     (let [db (update-state-render-and-persist! event)
+           new-task (get-task-by-indexes (:state db) (:user-card-idx event) (:task-idx event))
+           {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids (:state db))
+           user-pub-key (:user-pub-key (:derived-state db))]
        (network-dispatch! {:type :send-updated-task
                            :deleted false
                            :task new-task})
@@ -69,9 +62,9 @@
                            :friend-pub-keys friend-pub-keys}))
 
      :delete-card
-     (let [[derived-state state] (update-state-render-and-persist! event true)
-           {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids state)
-           user-pub-key (get-user-pub-key derived-state)]
+     (let [db (update-state-render-and-persist! event)
+           {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids (:state db))
+           user-pub-key (:user-pub-key (:derived-state db))]
        (network-dispatch! {:type :update-friend-tasks-subscription
                            :friend-pub-keys friend-pub-keys})
        (network-dispatch! {:type :update-notify-requests-subscription
@@ -80,12 +73,12 @@
                            :friend-pub-keys friend-pub-keys}))
 
      :add-friend
-     (update-state-render-and-persist! event false)
+     (update-state-render-and-persist! event)
 
      :initialize-friend
-     (let [[derived-state state] (update-state-render-and-persist! event true)
-           {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids state)
-           user-pub-key (get-user-pub-key derived-state)]
+     (let [db (update-state-render-and-persist! event)
+           {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids (:state db))
+           user-pub-key (:user-pub-key (:derived-state db))]
        (network-dispatch! {:type :update-friend-tasks-subscription
                            :friend-pub-keys friend-pub-keys})
        (network-dispatch! {:type :update-notify-requests-subscription
@@ -94,35 +87,35 @@
                            :friend-pub-keys friend-pub-keys}))
 
      :delete-uninitialized-card
-     (update-state-render-and-persist! event false)
+     (update-state-render-and-persist! event)
 
      :rename-uninitialized-card-friend
-     (update-state-render-and-persist! event false)
+     (update-state-render-and-persist! event)
 
      :rename-uninitialized-card-self
-     (update-state-render-and-persist! event false)
+     (update-state-render-and-persist! event)
 
      :rename-card
-     (update-state-render-and-persist! event true)
+     (update-state-render-and-persist! event)
 
      :task-notification-finishes
-     (update-state-render-and-persist! event false)
+     (update-state-render-and-persist! event)
 
      :card-expansion
-     (update-state-render-and-persist! event false)
+     (update-state-render-and-persist! event)
 
      :reorder-items
-     (update-state-render-and-persist! event false)
+     (update-state-render-and-persist! event)
 
      :send-friend-request
-     (update-state-render-and-persist! event false)
+     (update-state-render-and-persist! event)
 
      :toggle-handshake-qr ;;just showing a qr code, no need to persist state
-     (-> [(get-derived-state) (state-dispatch! event)]
-         (render-ui!))
+     (let [db (state-dispatch! event)]
+       (render-ui! db))
 
      :toggle-handshake-network
-     (-> [(get-derived-state) (state-dispatch! event)]
-         (render-ui!))
+     (let [db (state-dispatch! event)]
+       (render-ui! db))
 
      (throw (Exception (str "Unknown event type in ui-events dispatch: " event))))))

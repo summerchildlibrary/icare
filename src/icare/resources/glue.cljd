@@ -1,20 +1,17 @@
 (ns icare.resources.glue
   (:require [icare.resources.state
-             :refer [dispatch! initialize-state! gather-pub-keys-and-uuids get-people-cards]
+             :refer [dispatch! initialize-state! gather-pub-keys-and-uuids]
              :rename {dispatch! state-dispatch!}]
             [icare.resources.storage :refer [dispatch!] :rename {dispatch! storage-dispatch!}]
-            [icare.resources.derived-state :refer [initialize-derived-state!]]
             [icare.resources.network :refer [initialize-network!]]))
 
 (defn update-state-and-persist! [event]
-  (let [new-state (state-dispatch! event)]
-    (storage-dispatch! {:type :state-change-event :new-state new-state})
-    new-state))
+  (let [db (state-dispatch! event)]
+    (storage-dispatch! {:type :state-change-event :new-state (:state db)})
+    db))
 
 (defn initialize-resources-from-storage! [private-key public-key persisted-state handle-network-data!]
-  (let [state @(initialize-state! public-key persisted-state)
-        people-cards (get-people-cards state)
-        derived-state @(initialize-derived-state! people-cards)
-        {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids state)]
+  (let [db @(initialize-state! public-key persisted-state)
+        {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids (:state db))]
     (initialize-network! private-key user-task-uuids friend-pub-keys public-key handle-network-data!)
-    [derived-state state]))
+    db))

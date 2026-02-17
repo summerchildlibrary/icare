@@ -4,8 +4,6 @@
             [cljd.edn :refer [read-string]]
             [icare.resources.glue :refer [update-state-and-persist!]]
             [icare.ui.glue :refer [render-ui!]]))
-;;If you require icare.resources.network here you will cause a cyclic dependancy. The way I recommend to avoid this
-;;is by taking in the dispatcher function as an argument to handle-network-data! check the comment in the network.cljd file.
 
 (def send-updated-task-kind 39505)
 (def liked-event-kind 39506)

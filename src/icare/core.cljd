@@ -58,11 +58,11 @@
                   (m/SafeArea)
                   (m/Text "Loading...")))
        :let [[private-key public-key persisted-state] storage
-             [derived-state state] (initialize-resources-from-storage! private-key
-                                                                       public-key
-                                                                       persisted-state
-                                                                       handle-network-data!)] ;;i don't like passing handle-network-data! here but it needs to be passed to initialize-network! which is called in initialize-resources! it should probably be passed separately for expliciteness but this is fine for now
+             db (initialize-resources-from-storage! private-key
+                                                    public-key
+                                                    persisted-state
+                                                    handle-network-data!)] ;;i don't like passing handle-network-data! here but it needs to be passed to initialize-network! which is called in initialize-resources! it should probably be passed separately for expliciteness but this is fine for now
        (m/SafeArea ;;we handle the top and bottom manually for edge to edge rendering
         .bottom false
         .top false)
-       (build-widgets! [derived-state state] handle-ui-event!)))]))
+       (build-widgets! db handle-ui-event!)))]))
