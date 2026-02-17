@@ -424,31 +424,6 @@
                 .offset (m/Offset 0 -2)
                 .child (m/Column .children (mapv recursive-call subitems)))])))))
 
-       :subitem-liked-list ;;todo, we have to move the name lookup to the ast so that to provide proper updates
-       (f/widget
-        :watch [{:keys [liked-by]} (get-ast-atom)]
-        :padding {:left 15 :bottom 4}
-        (m/Row
-         .children [(svg/SvgPicture.asset
-                     "assets/icons/ph--arrow-bend-down-right-duotone.svg"
-                     .colorFilter (m/ColorFilter.mode m/Colors.red m/BlendMode.srcIn)
-                     .width 16
-                     .height 16)
-                    (m/SizedBox .width 4)
-                    (m/Text (cond
-                              (= 1 (count liked-by))
-                              (str "Loved by " (first liked-by))
-
-                              (= 2 (count liked-by))
-                              (str "Loved by " (str/join " and " liked-by))
-
-                              :else (str "Loved by " (str/join ", " (butlast liked-by))
-                                         ", and " (last liked-by)))
-                            .style (m/TextStyle
-                                    .fontSize 14
-                                    .fontWeight m/FontWeight.normal
-                                    .color m.Colors/red))]))
-
        :subitem-time
        (f/widget
         :watch [{:keys [time]} (get-ast-atom)]

@@ -7,21 +7,16 @@
 
 (defn task-subitems->ast [derived-state subitem-idx subitem]
   (let [{:keys [type value task-uuid]} subitem
-        {:keys [pub-key-to-name]} derived-state
         id (str "subitem-" task-uuid "-" subitem-idx)]
     (cond
-      (= type :liked-list) {:id id :ui-type :subitem-liked-list :liked-by (mapv pub-key-to-name value)}
       (= type :time) {:id id :ui-type :subitem-time :time value}
       (= type :image) {:id id :ui-type :subitem-image :url value}
       :else (throw (Exception. (str "task-subitems->ast was given a task subitem with unknown type: " type))))))
 
 (defn user-task->ast [derived-state task-idx task]
-  (let [{:keys [uuid title completed subitems reorderable-item-idx liked-by notify?]} task
+  (let [{:keys [uuid title completed subitems reorderable-item-idx notify?]} task
         id (str "task-" uuid)
-        subitems-with-uuid (mapv #(conj % [:task-uuid uuid])
-                                 (if (seq liked-by)
-                                   (concat [{:type :liked-list :value liked-by}] subitems)
-                                   subitems))]
+        subitems-with-uuid (mapv #(conj % [:task-uuid uuid]) subitems)]
     {:id id
      :ui-type :editable-task
      :title title
