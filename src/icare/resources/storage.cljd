@@ -10,8 +10,10 @@
 ;;basically storage handles all our persistent data needs
 
 (def store-file-name "icare_state.txt")
+(def receipts-file-name "icare_receipts.txt")
 (defonce initialized? (atom false))
 (defonce store-file (atom nil))
+(defonce receipts-file (atom nil))
 
 (defn ^Future get-secure-credentials [key-generator]
   (let [storage (FlutterSecureStorage)
@@ -37,23 +39,33 @@
     (reset! initialized? true)
     (let [directory (await (getApplicationDocumentsDirectory))
           path (.-path directory)
-          file-path (str path "/" store-file-name)
-          file ^File (File file-path)
-          _ (when-not (await (.exists file))
-              (await (.create file)))]
-      (reset! store-file file)))
+          state-file-path (str path "/" store-file-name)
+          state-file ^File (File state-file-path)
+          receipts-file-path (str path "/" receipts-file-name)
+          receipts-file* ^File (File receipts-file-path)
+          _ (when-not (await (.exists state-file))
+              (await (.create state-file)))
+          _ (when-not (await (.exists receipts-file*))
+              (await (.create receipts-file*)))]
+      (reset! store-file state-file)
+      (reset! receipts-file receipts-file*)))
   (let [[private-key public-key] (await (get-secure-credentials (.-generate Keychain))) ;;this is a little ugly for the sake of development code that constantly reloads.
         serial-persisted-state (await (.readAsString ^File @store-file))
+        serial-persisted-receipts (await (.readAsString ^File @receipts-file))
         state (when-not (empty? serial-persisted-state) ;;read-string does this in clj but not in cljd
-                (read-string serial-persisted-state))]
-    [private-key public-key state]))
-
-(defn create-string [event]
-  (condp = (:type event)
-    :state-change-event (pr-str (:new-state event))
-    (throw (Exception (str "tried to modify storage with an unknown event" event)))))
+                (read-string serial-persisted-state))
+        receipts (when-not (empty? serial-persisted-receipts)
+                   (read-string serial-persisted-receipts))]
+    [private-key public-key state receipts]))
 
 (defn dispatch! [event]
   (if-not @initialized?
     (throw (Exception. "Tried to dispatch to storage before it was initialized"))
-    (await (.writeAsString ^File @store-file (create-string event)))))
+    (condp = (:type event)
+      :state-change-event
+      (await (.writeAsString ^File @store-file (pr-str (:new-state event))))
+
+      :receipts-change-event
+      (await (.writeAsString ^File @receipts-file (pr-str (:new-receipts event))))
+
+      (throw (Exception (str "tried to modify storage with an unknown event" event))))))

@@ -2,7 +2,8 @@
   (:require ["package:nostr/nostr.dart" :refer [Event]]
             ["dart:convert" :refer [jsonDecode]]
             [cljd.edn :refer [read-string]]
-            [icare.resources.glue :refer [update-state-and-persist!]]
+            [icare.resources.state :refer [dispatch!] :rename {dispatch! state-dispatch!}]
+            [icare.resources.storage :refer [dispatch!] :rename {dispatch! storage-dispatch!}]
             [icare.ui.glue :refer [render-ui!]]))
 
 (def send-updated-task-kind 39505)
@@ -23,10 +24,11 @@
         (let [content (read-string (.-content event))
               task-uuid (:task-uuid content)
               want-notifications? (:want-notifications? content)
-              notification-requester (.-pubkey event)]
-          (update-state-and-persist! {:type :update-notify-requesters :want-notifications? want-notifications?
-                                      :task-uuid task-uuid :notification-requester notification-requester
-                                      :event-json event-json})
+              notification-requester (.-pubkey event)
+              db (state-dispatch! {:type :update-notify-requesters :want-notifications? want-notifications?
+                                   :task-uuid task-uuid :notification-requester notification-requester
+                                   :event-json event-json})]
+          (storage-dispatch! {:type :receipts-change-event :new-receipts (:notify-receipts db)})
           (prn "Received request to notify event:" (.-content event) "with tags:" (.-tags event)))
 
         ;; liked-event-kind
@@ -42,8 +44,10 @@
         (let [task-data (read-string (.-content event))
               creator-pub-key (.-pubkey event)]
           (when-not (nil? task-data)
-            (update-state-and-persist! {:type :update-task-event :task task-data
-                                        :creator-pub-key creator-pub-key})
+            (let [db (state-dispatch! {:type :update-task-event :task task-data
+                                       :creator-pub-key creator-pub-key})]
+              (render-ui! db)
+              (storage-dispatch! {:type :state-change-event :new-state (:state db)}))
             (prn "Received update task event:" task-data "with tags:" (.-tags event))))
 
         (prn "Unhandled event kind:" (.-kind event) "with content:" (.-content event))))

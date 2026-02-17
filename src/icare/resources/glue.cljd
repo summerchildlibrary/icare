@@ -10,8 +10,8 @@
     (storage-dispatch! {:type :state-change-event :new-state (:state db)})
     db))
 
-(defn initialize-resources-from-storage! [private-key public-key persisted-state handle-network-data!]
-  (let [db @(initialize-state! public-key persisted-state)
+(defn initialize-resources-from-storage! [private-key public-key persisted-state persisted-receipts handle-network-data!]
+  (let [db @(initialize-state! public-key persisted-state persisted-receipts)
         {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids (:state db))]
     (initialize-network! private-key user-task-uuids friend-pub-keys public-key handle-network-data!)
     db))
