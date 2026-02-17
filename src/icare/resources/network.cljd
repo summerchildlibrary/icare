@@ -40,7 +40,7 @@
     (let [{:keys [to-pub-key task-uuid want-notifications?]} event]
       (-> (.from Event
                  .kind update-request-to-notify-kind
-                 .content (prn-str {:want-notifications? want-notifications? :task-uuid task-uuid})
+                 .content (prn-str {:want-notifications? want-notifications? :task-uuid task-uuid :device-token nil}) ;;TODO we need to include the actual device token
                  .tags [(.from #/(List String) ["a" (str update-request-to-notify-kind ":" to-pub-key ":" task-uuid)])]
                  .privkey @private-key)
           .serialize))

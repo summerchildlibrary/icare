@@ -1,0 +1,10 @@
+{:paths ["src" "../shared"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.4"}
+        ;; WebSocket client for connecting to Nostr relay
+        org.java-websocket/Java-WebSocket {:mvn/version "1.5.4"}
+        ;; JSON parsing
+        org.clojure/data.json {:mvn/version "2.5.0"}
+        ;; secp256k1 for Nostr signature verification
+        fr.acinq.secp256k1/secp256k1-kmp-jni-jvm {:mvn/version "0.15.0"}
+        ;; HTTP client for sending push notifications
+        clj-http/clj-http {:mvn/version "3.12.3"}}}
