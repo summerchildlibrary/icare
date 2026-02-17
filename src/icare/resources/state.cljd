@@ -14,22 +14,20 @@
 
 (def default-state
   {:reorderable-items [{:type :user
-                                           :name "You"
-                                           :expanded? true
-                                           :pub-key nil
-                                           :tasks [{:title "wake up"
-                                                    :uuid (uuid-generator)
-                                                    :completed false
-                                                    :notify? false
-                                                    :notify-requesters #{ "b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"}
-                                                    :subitems []}
-                                                   {:title "go to monkey bars"
-                                                    :uuid (uuid-generator)
-                                                    :completed true
-                                                    :notify? false
-                                                    :notify-requesters #{}
-                                                    :subitems [{:type :time :value "2026-01-06 09:18:04Z"}]}]}
-                                                               ;; {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
+                        :name "You"
+                        :expanded? true
+                        :pub-key nil
+                        :tasks [{:title "wake up"
+                                 :uuid "test-task-uuid-1234"
+                                 :completed false
+                                 :notify? false
+                                 :subitems []}
+                                {:title "go to monkey bars"
+                                 :uuid (uuid-generator)
+                                 :completed true
+                                 :notify? false
+                                 :subitems [{:type :time :value "2026-01-06 09:18:04Z"}]}]}
+                                            ;; {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
                        {:type :friend
                         :name "Example 🎸🎸"
                         :expanded? false
@@ -64,7 +62,7 @@
    :user-pub-key nil})
 
 (def default-notify-receipts
-  {}) ;; {task-uuid -> #{requester-pub-keys-with-receipts}}
+  {"test-task-uuid-1234" {"b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b" {:dummy "receipt"}}}) ;; {task-uuid -> {requester-pub-key -> event-json}}
 
 (defonce store (atom {:state default-state
                       :derived-state default-derived-state
@@ -152,201 +150,6 @@
       (assoc-in state [:reorderable-items card-idx :tasks task-idx :notify?] true))))
 
 ;;
-;;APPLY STATE EVENT - All state transformations in one place
-;;
-
-(defn apply-state-event [state event]
-  (condp = (:type event)
-
-    ;;--- Network events ---
-    :update-notify-requesters
-    (let [{:keys [want-notifications? task-uuid notification-requester event-json]} event ;;TODO we need the event-json here as receipt to present to the server to allow us to notify that person
-          user-pub-key (get-user-pub-key state)
-          user-card-idx (pub-key->reorderable-item-idx (:reorderable-items state) user-pub-key)
-          task-idx (when user-card-idx
-                     (uuid->task-idx (get-in state [:reorderable-items user-card-idx :tasks]) task-uuid))]
-      (if (or (nil? user-card-idx) (nil? task-idx))
-        state
-        (update-in state [:reorderable-items user-card-idx :tasks task-idx :notify-requesters]
-                   (if want-notifications? conj disj)
-                   notification-requester)))
-
-    ;; :liked-event
-    ;; (let [{:keys [liked task-uuid creator-pub-key]} event
-    ;;       user-pub-key (get-user-pub-key state)
-    ;;       user-card-idx (pub-key->reorderable-item-idx (:reorderable-items state) user-pub-key)
-    ;;       task-idx (when user-card-idx
-    ;;                  (uuid->task-idx (get-in state [:reorderable-items user-card-idx :tasks]) task-uuid))]
-    ;;   (if (or (nil? user-card-idx) (nil? task-idx))
-    ;;     state
-    ;;     (update-in state [:reorderable-items user-card-idx :tasks task-idx :liked-by]
-    ;;                (if liked conj disj)
-    ;;                creator-pub-key)))
-
-    :update-task-event
-    (let [{:keys [task creator-pub-key]} event
-          task-uuid (:uuid task)
-          deleted? (:deleted task)
-          card-idx (pub-key->reorderable-item-idx (:reorderable-items state) creator-pub-key)
-          task-idx (when card-idx
-                     (uuid->task-idx (get-in state [:reorderable-items card-idx :tasks]) task-uuid))
-          user-pub-key (get-user-pub-key state)
-          task (conj task [:liked (contains? (:liked-by task) user-pub-key)])]
-      (or
-       ;; Delete existing task
-       (when (and card-idx task-idx deleted?)
-         (update-in state [:reorderable-items card-idx :tasks]
-                    (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
-                                             (subvec tasks (inc task-idx)))))))
-       ;; Add new task
-       (when (and card-idx (nil? task-idx) (not deleted?))
-         (update-in state [:reorderable-items card-idx :tasks]
-                    conj (conj task [:notify? true])))
-       ;; Update existing task
-       (when (and card-idx task-idx (not deleted?))
-         (-> state
-             (assoc-in [:reorderable-items card-idx :tasks task-idx] task)
-             (notify-task card-idx task-idx)))
-       ;; Default: ignore nonsensical events
-       state))
-
-    ;;--- UI events ---
-
-    :complete-user-task
-    (let [{:keys [user-card-idx task-idx completed]} event]
-      (update-in state [:reorderable-items user-card-idx :tasks task-idx]
-                 (fn [task]
-                   (let [new-task (assoc task :completed completed)]
-                     (cond
-                       (and (not completed)
-                            (seq (:subitems new-task))
-                            (= :time (-> new-task :subitems first :type)))
-                       (update new-task :subitems subvec 1)
-
-                       completed
-                       (update new-task :subitems
-                               #(apply vector {:type :time :value (.toIso8601String (DateTime/now))} %))
-
-                       :else new-task)))))
-
-    :delete-user-task
-    (let [{:keys [user-card-idx task-idx]} event]
-      (update-in state [:reorderable-items user-card-idx :tasks]
-                 (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
-                                          (subvec tasks (inc task-idx)))))))
-
-    :rename-user-task
-    (let [{:keys [user-card-idx task-idx title]} event]
-      (assoc-in state [:reorderable-items user-card-idx :tasks task-idx :title] title))
-
-    :like-friend-task
-    (let [{:keys [friend-card-idx task-idx liked]} event]
-      (assoc-in state [:reorderable-items friend-card-idx :tasks task-idx :liked] liked))
-
-    :add-user-task
-    (let [{:keys [user-card-idx title]} event
-          new-task {:title title
-                    :uuid (uuid-generator)
-                    :notify-requesters #{}
-                    :completed false
-                    :subitems []}]
-      (update-in state [:reorderable-items user-card-idx :tasks] conj new-task))
-
-    :delete-card
-    (let [{:keys [card-idx]} event]
-      (update state :reorderable-items
-              (fn [items] (vec (concat (subvec items 0 card-idx)
-                                       (subvec items (inc card-idx)))))))
-
-    :rename-card
-    (let [{:keys [card-idx name]} event]
-      (assoc-in state [:reorderable-items card-idx :name] name))
-
-    :add-friend
-    (let [{:keys [name]} event]
-      (if (empty? name)
-        state
-        (update state :reorderable-items
-                (fn [items]
-                  (let [new-friend {:type :uninitialized-person
-                                    :uuid (uuid-generator)
-                                    :friend name
-                                    :self nil}] ;;self referes to our name, for now we start out blank, but we would like to populate this field with the previously used name eventually
-                    (conj items new-friend))))))
-
-    :initialize-friend
-    (let [{:keys [card-idx public-key name]} event]
-      (if (empty? public-key)
-        state
-        (update-in state [:reorderable-items card-idx]
-                   conj {:pub-key public-key
-                         :type :friend
-                         :expanded? false
-                         :tasks []
-                         :name name})))
-
-    :reorder-items
-    (let [{:keys [from-index to-index]} event]
-      (update state :reorderable-items
-              (fn [items]
-                (vec (if (< from-index to-index)
-                       (concat (subvec items 0 from-index)
-                               (subvec items (inc from-index) (inc to-index))
-                               [(nth items from-index)]
-                               (subvec items (inc to-index)))
-                       (concat (subvec items 0 to-index)
-                               [(nth items from-index)]
-                               (subvec items to-index from-index)
-                               (subvec items (inc from-index))))))))
-
-    :card-expansion
-    (let [{:keys [card-idx expanded?]} event]
-      (-> state
-          (cond-> expanded?
-            (update :reorderable-items
-                    #(mapv (fn [item]
-                             (if (contains? item :expanded?)
-                               (assoc item :expanded? false)
-                               item))
-                           %)))
-          (assoc-in [:reorderable-items card-idx :expanded?] expanded?)))
-
-    :task-notification-finishes
-    (let [{:keys [card-idx]} event]
-      (update-in state [:reorderable-items card-idx :tasks]
-                 #(mapv (fn [task]
-                          (if (contains? task :notify?)
-                            (assoc task :notify? false)
-                            task))
-                        %)))
-
-    :toggle-handshake-qr
-    (update state :show-qr? not)
-
-    :toggle-handshake-network ;;TODO we need to figure out how to do local network discovery
-    state
-
-    :delete-uninitialized-card
-    (let [{:keys [card-idx]} event]
-      (update state :reorderable-items
-              (fn [items] (vec (concat (subvec items 0 card-idx)
-                                       (subvec items (inc card-idx)))))))
-
-    :rename-uninitialized-card-friend
-    (let [{:keys [card-idx name]} event]
-      (assoc-in state [:reorderable-items card-idx :friend] name))
-
-    :rename-uninitialized-card-self
-    (let [{:keys [card-idx name]} event]
-      (assoc-in state [:reorderable-items card-idx :self] name))
-
-    ;;TODO we need to figure out the logic of this
-    :send-friend-request
-    state
-
-    (throw (Exception (str "No state handling function found for event: " event)))))
-
-;;
 ;; DERIVED STATE LOGIC
 ;; Computes derived values from state (pub-key-to-name mapping, user-pub-key)
 ;;
@@ -376,27 +179,195 @@
                 people-cards)
         remove-deleted-pub-keys)))
 
-;;
-;; NOTIFY RECEIPTS LOGIC
-;; Stores receipts that allow us to send push notifications
-;;
-
-(defn apply-notify-receipts-event [notify-receipts event]
-  ;; For now, just return unchanged. Add event handlers as needed.
-  notify-receipts)
+(defn derive-db
+  "Helper to recompute derived-state from current state.
+   Call this after state changes that affect pub-keys or names."
+  [db]
+  (assoc db :derived-state (derive-from-state (:derived-state db) (:state db))))
 
 ;;
-;; UNIFIED DISPATCH
-;; Updates all three state slices atomically
+;;APPLY DB EVENT - All state transformations in one place
+;;Each handler updates :state and optionally calls derive-db for events that change pub-keys/names
 ;;
 
 (defn apply-db-event [db event]
-  (let [new-state (apply-state-event (:state db) event)
-        new-derived (derive-from-state (:derived-state db) new-state)
-        new-receipts (apply-notify-receipts-event (:notify-receipts db) event)]
-    {:state new-state
-     :derived-state new-derived
-     :notify-receipts new-receipts}))
+  (condp = (:type event)
+
+    ;;--- Network events ---
+    :update-notify-requesters
+    (let [{:keys [want-notifications? task-uuid notification-requester event-json]} event]
+      (if want-notifications?
+        (assoc-in db [:notify-receipts task-uuid notification-requester] event-json)
+        (update-in db [:notify-receipts task-uuid] dissoc notification-requester)))
+
+    :update-task-event
+    (let [{:keys [task creator-pub-key]} event
+          state (:state db)
+          task-uuid (:uuid task)
+          deleted? (:deleted task)
+          card-idx (pub-key->reorderable-item-idx (:reorderable-items state) creator-pub-key)
+          task-idx (when card-idx
+                     (uuid->task-idx (get-in state [:reorderable-items card-idx :tasks]) task-uuid))
+          user-pub-key (get-user-pub-key state)
+          task (conj task [:liked (contains? (:liked-by task) user-pub-key)])]
+      (or
+       ;; Delete existing task
+       (when (and card-idx task-idx deleted?)
+         (update-in db [:state :reorderable-items card-idx :tasks]
+                    (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
+                                             (subvec tasks (inc task-idx)))))))
+       ;; Add new task
+       (when (and card-idx (nil? task-idx) (not deleted?))
+         (update-in db [:state :reorderable-items card-idx :tasks]
+                    conj (conj task [:notify? true])))
+       ;; Update existing task
+       (when (and card-idx task-idx (not deleted?))
+         (-> db
+             (assoc-in [:state :reorderable-items card-idx :tasks task-idx] task)
+             (update :state notify-task card-idx task-idx)))
+       ;; Default: ignore nonsensical events
+       db))
+
+    ;;--- UI events ---
+
+    :complete-user-task
+    (let [{:keys [user-card-idx task-idx completed]} event]
+      (update-in db [:state :reorderable-items user-card-idx :tasks task-idx]
+                 (fn [task]
+                   (let [new-task (assoc task :completed completed)]
+                     (cond
+                       (and (not completed)
+                            (seq (:subitems new-task))
+                            (= :time (-> new-task :subitems first :type)))
+                       (update new-task :subitems subvec 1)
+
+                       completed
+                       (update new-task :subitems
+                               #(apply vector {:type :time :value (.toIso8601String (DateTime/now))} %))
+
+                       :else new-task)))))
+
+    :delete-user-task
+    (let [{:keys [user-card-idx task-idx]} event]
+      (update-in db [:state :reorderable-items user-card-idx :tasks]
+                 (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
+                                          (subvec tasks (inc task-idx)))))))
+
+    :rename-user-task
+    (let [{:keys [user-card-idx task-idx title]} event]
+      (assoc-in db [:state :reorderable-items user-card-idx :tasks task-idx :title] title))
+
+    :like-friend-task
+    (let [{:keys [friend-card-idx task-idx liked]} event]
+      (assoc-in db [:state :reorderable-items friend-card-idx :tasks task-idx :liked] liked))
+
+    :add-user-task
+    (let [{:keys [user-card-idx title]} event
+          new-task {:title title
+                    :uuid (uuid-generator)
+                    :completed false
+                    :subitems []}]
+      (update-in db [:state :reorderable-items user-card-idx :tasks] conj new-task))
+
+    :delete-card
+    (let [{:keys [card-idx]} event]
+      (-> db
+          (update-in [:state :reorderable-items]
+                     (fn [items] (vec (concat (subvec items 0 card-idx)
+                                              (subvec items (inc card-idx))))))
+          derive-db))
+
+    :rename-card
+    (let [{:keys [card-idx name]} event]
+      (-> db
+          (assoc-in [:state :reorderable-items card-idx :name] name)
+          derive-db))
+
+    :add-friend
+    (let [{:keys [name]} event]
+      (if (empty? name)
+        db
+        (update-in db [:state :reorderable-items]
+                   (fn [items]
+                     (let [new-friend {:type :uninitialized-person
+                                       :uuid (uuid-generator)
+                                       :friend name
+                                       :self nil}] ;;self refers to our name, for now we start out blank, but we would like to populate this field with the previously used name eventually
+                       (conj items new-friend))))))
+
+    :initialize-friend
+    (let [{:keys [card-idx public-key name]} event]
+      (if (empty? public-key)
+        db
+        (-> db
+            (update-in [:state :reorderable-items card-idx]
+                       conj {:pub-key public-key
+                             :type :friend
+                             :expanded? false
+                             :tasks []
+                             :name name})
+            derive-db)))
+
+    :reorder-items
+    (let [{:keys [from-index to-index]} event]
+      (update-in db [:state :reorderable-items]
+                 (fn [items]
+                   (vec (if (< from-index to-index)
+                          (concat (subvec items 0 from-index)
+                                  (subvec items (inc from-index) (inc to-index))
+                                  [(nth items from-index)]
+                                  (subvec items (inc to-index)))
+                          (concat (subvec items 0 to-index)
+                                  [(nth items from-index)]
+                                  (subvec items to-index from-index)
+                                  (subvec items (inc from-index))))))))
+
+    :card-expansion
+    (let [{:keys [card-idx expanded?]} event]
+      (-> db
+          (cond-> expanded?
+            (update-in [:state :reorderable-items]
+                       #(mapv (fn [item]
+                                (if (contains? item :expanded?)
+                                  (assoc item :expanded? false)
+                                  item))
+                              %)))
+          (assoc-in [:state :reorderable-items card-idx :expanded?] expanded?)))
+
+    :task-notification-finishes
+    (let [{:keys [card-idx]} event]
+      (update-in db [:state :reorderable-items card-idx :tasks]
+                 #(mapv (fn [task]
+                          (if (contains? task :notify?)
+                            (assoc task :notify? false)
+                            task))
+                        %)))
+
+    :toggle-handshake-qr
+    (update-in db [:state :show-qr?] not)
+
+    :toggle-handshake-network ;;TODO we need to figure out how to do local network discovery
+    db
+
+    :delete-uninitialized-card
+    (let [{:keys [card-idx]} event]
+      (update-in db [:state :reorderable-items]
+                 (fn [items] (vec (concat (subvec items 0 card-idx)
+                                          (subvec items (inc card-idx)))))))
+
+    :rename-uninitialized-card-friend
+    (let [{:keys [card-idx name]} event]
+      (assoc-in db [:state :reorderable-items card-idx :friend] name))
+
+    :rename-uninitialized-card-self
+    (let [{:keys [card-idx name]} event]
+      (assoc-in db [:state :reorderable-items card-idx :self] name))
+
+    ;;TODO we need to figure out the logic of this
+    :send-friend-request
+    db
+
+    (throw (Exception (str "No state handling function found for event: " event)))))
 
 (defn dispatch! [event]
   (assert @initialized? "State store not initialized yet! Call initialize-state! from core first.")
@@ -418,12 +389,14 @@
 (defn get-db [] @store)
 
 ;;Call this function from core, this is the intended way to get a reference to the store
-(defn initialize-state! [pub-key persisted-state]
+(defn initialize-state! [pub-key persisted-state persisted-receipts]
   (when-not @initialized?
     (prn "Initializing state with pub key:" pub-key)
-    (when-some [state persisted-state]
-      (when use-persistent-storage?
-        (swap! store assoc :state state)))
+    (when use-persistent-storage?
+      (when-some [state persisted-state]
+        (swap! store assoc :state state))
+      (when-some [receipts persisted-receipts]
+        (swap! store assoc :notify-receipts receipts)))
     (reset! initialized? true)
     (update-user-pub-key! pub-key)
     ;; Derive initial state
