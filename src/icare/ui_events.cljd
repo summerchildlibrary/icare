@@ -19,12 +19,21 @@
 (defn handle-ui-event! [event]
   (let [{:keys [type]} event]
     (condp = type
-      :complete-user-task
+     :complete-user-task
      (let [db (update-state-render-and-persist! event)
-           updated-task (get-task-by-indexes (:state db) (:user-card-idx event) (:task-idx event))]
+           updated-task (get-task-by-indexes (:state db) (:user-card-idx event) (:task-idx event))
+           task-uuid (:uuid updated-task)
+           receipts (get-in db [:notify-receipts task-uuid])]
        (network-dispatch! {:type :send-updated-task
                            :deleted false
-                           :task updated-task}))
+                           :task updated-task})
+       (when (and (:completed event) receipts)
+         (doseq [[requester-pub-key event-json] receipts]
+           (network-dispatch! {:type :fulfill-notify
+                               :to-pub-key requester-pub-key
+                               :notify-receipt event-json
+                               :notification-content {:task-title (:title updated-task)
+                                                      :task-uuid task-uuid}}))))
 
      :delete-user-task
      (do
