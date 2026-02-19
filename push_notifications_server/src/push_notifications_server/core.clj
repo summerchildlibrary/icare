@@ -1,15 +1,16 @@
 (ns push-notifications-server.core
   (:require [clojure.data.json :as json]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [clj-http.client :as http])
   (:import (fr.acinq.secp256k1 Secp256k1)
+           (com.google.auth.oauth2 GoogleCredentials)
            (org.java_websocket.client WebSocketClient)
            (org.java_websocket.handshake ServerHandshake)
-           (java.net URI)
+           (java.net URI URL HttpURLConnection)
+           (java.io FileInputStream)
            (java.security MessageDigest)
            (java.util HexFormat)))
 
-(def fulfill-notify-kind 29508)
-(def relay-url "ws://localhost:8080")
 
 ;; --- Crypto utilities ---
 (defonce ^Secp256k1 secp256k1 (Secp256k1/get))
@@ -65,10 +66,38 @@
 
 ;; --- Push notification logic ---
 
-(defn send-push-notification!
-  "Send a push notification to a device"
-  [device-token title body data])
-  ;; TODO: send via FCM/APNs
+;;TODO - define a clear schema for the content of fulfill-notify events and receipts and keep it in a shared place
+(def fulfill-notify-kind 29508)
+(def receipt-kind 39507)
+
+(def project-id "do-do-online")
+(def fcm-url (str "https://fcm.googleapis.com/v1/projects/" project-id "/messages:send"))
+(def service-account-path "do-do-online-firebase-adminsdk-fbsvc-809d342389.json")
+(def fcm-scope "https://www.googleapis.com/auth/firebase.messaging")
+
+(defn get-access-token []
+  (-> (GoogleCredentials/fromStream (FileInputStream. service-account-path))
+      (.createScoped [fcm-scope])
+      (doto .refresh)
+      (.getAccessToken)
+      (.getTokenValue)))
+
+(defn send-push-notification! [{:keys [title body device-token]}]
+  (http/post fcm-url
+             {:headers {"Authorization" (str "Bearer " (get-access-token))}
+              :content-type :json
+              :body (json/write-str
+                     {:message
+                      {:token device-token
+                       :notification
+                       {:title title
+                        :body body}}})}))
+
+(comment
+ (send-push-notification!
+  {:title "Test Notification"
+   :body "This is a test push notification from the server."
+   :device-token "dc_FPzorRRK4m505ixKImx:APA91bECDruMHcHZzaw4xAmEVWRaivnjugQRTozIQMbN2uCIJ6nulHIUMM3vbObaXTNkjzejkYmpONQAs59zM-mcMvTDjLju19eFW2NpD53T8BIDLrDr43o"}))
 
 (defonce ws-client (atom nil))
 
@@ -96,61 +125,52 @@
     (println "Subscribing to fulfill-notify events...")
     (.send client req-message)))
 
-(defn verify-event-kind
-  "Verify event is of expected kind. Returns event or nil."
+(defn verify-and-read-fulfill
   [event expected-kind]
   (when (= expected-kind (:kind event))
-    event))
+    (when-let [verified (verify-nostr-event event)]
+      (when-let [content (try
+                           (clojure.edn/read-string (:content verified))
+                           (catch Exception _
+                             nil))]
+        {:fulfill (assoc event :content content)}))))
 
-(defn verify-and-extract-content
-  "Verify event and extract parsed content. Returns {:event ... :content ...} or nil."
-  [event]
-  (when-let [verified (verify-nostr-event event)]
-    (when-let [content (try
-                         (clojure.edn/read-string (:content verified))
-                         (catch Exception _
-                           nil))]
-      {:event verified :content content})))
+(defn verify-and-read-receipt
+  [{:keys [fulfill] :as ctx} expected-kind]
+  (let [{:keys [notify-receipt]} (:content fulfill)]
+    (when-let [parsed-receipt (try
+                                (json/read-str notify-receipt :key-fn keyword)
+                                (catch Exception _
+                                  nil))]
+      (when (= expected-kind (:kind parsed-receipt))
+        (when-let [verified-receipt (verify-nostr-event parsed-receipt)]
+          (when-let [receipt-content (try
+                                       (clojure.edn/read-string (:content verified-receipt))
+                                       (catch Exception _
+                                         nil))]
+            (assoc ctx
+                   :receipt (assoc verified-receipt :content receipt-content))))))))
 
-(defn verify-and-extract-receipt
-  [{:keys [event content] :as ctx}]
-  (let [{:keys [notify-receipt notification-content]} content]
-    (prn notify-receipt)
-    (when-let [verified-receipt (verify-nostr-event notify-receipt)]
-      (when-let [receipt-content (try
-                                   (clojure.edn/read-string (:content verified-receipt))
-                                   (catch Exception _
-                                     nil))]
-        (assoc ctx
-               :verified-receipt verified-receipt
-               :verified-receipt-content receipt-content
-               :notification-content notification-content)))))
-
-(defn extract-notification-data
-  [{:keys [verified-receipt notification-content verified-receipt-content] :as ctx}]
-  (let [recipient-pubkey (get verified-receipt "pubkey")
-        device-token (:device-token verified-receipt-content)
-        {:keys [task-title task-uuid]} notification-content]
-    (when (and device-token task-title)
-      {:device-token device-token
-       :recipient-pubkey recipient-pubkey
-       :task-title task-title
-       :task-uuid task-uuid})))
+(defn verify-pubkeys-match
+  [{:keys [fulfill receipt] :as ctx}]
+  (let [fulfill-pubkey (:pubkey fulfill)
+        fulfill-to-pubkey (get-in fulfill [:content :to-pubkey])
+        receipt-pubkey (:pubkey receipt)
+        receipt-to-pubkey (get-in receipt [:content :to-pubkey])]
+    (when (and (= fulfill-pubkey receipt-to-pubkey)
+               (= receipt-pubkey fulfill-to-pubkey))
+      ctx)))
 
 (defn handle-fulfill-notify-event
   "Process a fulfill-notify event through verification pipeline"
   [event]
   (some-> event
-          (verify-event-kind fulfill-notify-kind)
-          verify-and-extract-content
-          verify-and-extract-receipt
-          extract-notification-data
-          (as-> data
-                (do (println "Sending notification to" (:recipient-pubkey data) "for task:" (:task-title data))
-                    (send-push-notification! (:device-token data)
-                                             "Task Completed!"
-                                             (:task-title data)
-                                             {:task-uuid (:task-uuid data)})))))
+          (verify-and-read-fulfill fulfill-notify-kind)
+          (verify-and-read-receipt receipt-kind)
+          verify-pubkeys-match
+          :fulfill
+          (get-in [:content :notification-content])
+          send-push-notification!))
 
 (defn handle-websocket-message
   "Handle incoming WebSocket message from relay"
@@ -169,6 +189,8 @@
 
 ;; --- Main entry point ---
 
+(def relay-url "ws://localhost:8080")
+
 (defn start-server!
   "Start the push notification server - connects to relay and listens for fulfill-notify events"
   []
@@ -182,7 +204,6 @@
     (.connect client)
     (println "Push notification server started, connecting to" relay-url)
     client))
-
 
 (defn -main
   [& args]

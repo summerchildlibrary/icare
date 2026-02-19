@@ -3,6 +3,10 @@
             ["package:google_fonts/google_fonts.dart" :as gf]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["package:flutter/services.dart" :as services]
+            ["package:flutter/foundation.dart" :as foundation] ;;for push notifications / we need to get the device id to send to our pnotification server
+            ["package:firebase_core/firebase_core.dart" :as firebase]
+            ["firebase_options.dart" :as firebase-options]
+            ["package:firebase_messaging/firebase_messaging.dart" :as firebase-messaging]
             [cljd.flutter :as f]
             [icare.ui.glue :refer [build-widgets!]]
             [icare.resources.glue :refer [initialize-resources-from-storage!]]
@@ -10,10 +14,28 @@
             [icare.ui-events :refer [handle-ui-event!]]
             [icare.resources.storage :refer [initialize-storage!]]))
 
+;; dc_FPzorRRK4m505ixKImx:APA91bECDruMHcHZzaw4xAmEVWRaivnjugQRTozIQMbN2uCIJ6nulHIUMM3vbObaXTNkjzejkYmpONQAs59zM-mcMvTDjLju19eFW2NpD53T8BIDLrDr43o
+
+(defn ^Future request-notifcation-permission! []
+  (m/WidgetsFlutterBinding.ensureInitialized)
+  (await (firebase/Firebase.initializeApp
+          .options firebase-options/DefaultFirebaseOptions.currentPlatform)) ;;storage is a future
+  (let [messaging (firebase-messaging/FirebaseMessaging.instance)]
+    (await (.requestPermission messaging ;;TODO this needs to run when we actually need permissions i.e. when we heart something
+            .alert true
+            .announcement true
+            .badge true
+            .carPlay false
+            .criticalAlert false
+            .provisional false
+            .sound true))
+    (prn (await (.getToken messaging)))) ;;TODO this will throw on ios at the moment because we're not a developer, also doesn't work on old android phones... need to investigate
+  nil)
+
 (defn main []
+  (await (request-notifcation-permission!))
   (f/run
-    ;;only for older android's this is default on ios and newer androids
-    :let [_ (services/SystemChrome.setEnabledSystemUIMode services/SystemUiMode.edgeToEdge)]
+    :let [_ (services/SystemChrome.setEnabledSystemUIMode services/SystemUiMode.edgeToEdge)] ;;only for older android's this is default on ios and newer androids
     (m/MaterialApp
      .title "iCare"
      .theme (m/ThemeData
@@ -51,8 +73,7 @@
        .resizeToAvoidBottomInset false) ;;we handle this manually by scrolling to make our text fields visible
       .body
       (f/widget
-       :context ctx
-       :watch [storage (initialize-storage!)] ;;storage is a future
+       :watch [storage (initialize-storage!)]
        :bypass (when-not storage
                  (f/widget
                   (m/SafeArea)

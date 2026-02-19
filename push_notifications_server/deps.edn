@@ -7,4 +7,6 @@
         ;; secp256k1 for Nostr signature verification
         fr.acinq.secp256k1/secp256k1-kmp-jni-jvm {:mvn/version "0.15.0"}
         ;; HTTP client for sending push notifications
-        clj-http/clj-http {:mvn/version "3.12.3"}}}
+        clj-http/clj-http {:mvn/version "3.12.3"}
+        ;; Google Auth Library for obtaining access tokens to call FCM API
+        com.google.auth/google-auth-library-oauth2-http {:mvn/version "1.19.0"}}}

@@ -58,7 +58,6 @@ test/cljd-out/
 /.clj-kondo/
 
 # Magit
-/ios/
 /lib/
 /linux/
 /macos/
@@ -66,3 +65,4 @@ test/cljd-out/
 /windows/
 /REPL.lock
 /.lsp/
+/push_notifications_server/do-do-online-firebase-adminsdk-fbsvc-809d342389.json

@@ -31,7 +31,9 @@
     (let [{:keys [to-pub-key notify-receipt notification-content]} event]
       (-> (.from Event
                  .kind fulfill-notify-kind
-                 .content (prn-str {:notify-receipt notify-receipt :notification-content notification-content})
+                 .content (prn-str {:notify-receipt notify-receipt
+                                    :notification-content notification-content
+                                    :to-pub-key to-pub-key})
                  .tags [(.from #/(List String) ["p" to-pub-key])]
                  .privkey @private-key)
           .serialize))
@@ -40,22 +42,13 @@
     (let [{:keys [to-pub-key task-uuid want-notifications?]} event]
       (-> (.from Event
                  .kind update-request-to-notify-kind
-                 .content (prn-str {:want-notifications? want-notifications? :task-uuid task-uuid :device-token nil}) ;;TODO we need to include the actual device token
+                 .content (prn-str {:want-notifications? want-notifications?
+                                    :task-uuid task-uuid
+                                    :device-token nil
+                                    :to-pub-key to-pub-key}) ;;TODO we need to include the actual device token
                  .tags [(.from #/(List String) ["a" (str update-request-to-notify-kind ":" to-pub-key ":" task-uuid)])]
                  .privkey @private-key)
           .serialize))
-
-    ;; ;;the naming here is pretty confusing, this is sent when adding or removing a like, the creator-pub-key is the pub key of the person who created the task, not the person liking the task, the task-uuid is the uuid of the task being liked, and liked is a boolean representing whether this is adding or removing a like
-    ;; ;;deprecated, our app no longer sends these events, instead, liking a task sends a request to be notified about that task usint the add-or-remove-notify-event
-    ;; ;;will probably delete soon
-    ;; :liked-event
-    ;; (let [{:keys [liked creator-pub-key task-uuid]} event]
-    ;;   (-> (.from Event
-    ;;              .kind liked-event-kind
-    ;;              .content (prn-str {:liked liked :task-uuid task-uuid})
-    ;;              .tags [(.from #/(List String) ["a" (str update-task-event-kind ":" creator-pub-key ":" task-uuid)])]
-    ;;              .privkey @private-key)
-    ;;       .serialize))
 
     ;;we send this event both when creating a new task and when updating an existing task, the deleted flag is what determines whether the task should be deleted or not
     :send-updated-task
@@ -64,7 +57,7 @@
           task (conj task [:deleted deleted])]
       (-> (.from Event
                  .kind send-updated-task-kind
-                 .content (prn-str task) ;;TODO is this a security risk? are we gonna get pwned son?
+                 .content (prn-str task) ;;TODO is this a security risk?
                  .tags [(.from #/(List String) ["d" task-uuid])]
                  .privkey @private-key)
           .serialize))
@@ -82,21 +75,6 @@
                      .kinds [update-request-to-notify-kind]
                      .a a-tags)])
           .serialize))
-
-    ;; ;;this is deprecates since we no longer send liked-events
-    ;; ;;will delete soon
-    ;; :reactions-request
-    ;; (let [{:keys [user-pub-key user-task-uuids friend-pub-keys]} event
-    ;;       a-tags (or (mapv (fn [task-uuid]
-    ;;                          (str update-task-event-kind ":" user-pub-key ":" task-uuid))
-    ;;                        user-task-uuids)
-    ;;                  [])]
-    ;;   (-> (Request "notification requests"
-    ;;                [(Filter
-    ;;                  .authors friend-pub-keys
-    ;;                  .kinds [liked-event-kind]
-    ;;                  .a a-tags)])
-    ;;       .serialize))
 
     :update-friend-tasks-subscription
     (let [{:keys [friend-pub-keys]} event]
@@ -136,7 +114,10 @@
     (prn "Initializing network...")
     (reset! initialized? true)
     (reset! private-key new-private-key)
-    (let [ws (await (.connect WebSocket relay-url))] ;;TODO this can throw an exception, we need to handle reconnection logic here
-      (reset! web-socket ws)
-      (start-listening! ws user-task-uuids friend-pub-keys user-pub-key handle-network-data!)))
+    (try
+      (let [ws (await (.connect WebSocket relay-url))] ;;TODO this can throw an exception, we need to handle reconnection logic here
+        (reset! web-socket ws)
+        (start-listening! ws user-task-uuids friend-pub-keys user-pub-key handle-network-data!))
+      (catch Exception e
+        (prn "Failed to connect to WebSocket relay:" e))))
   @web-socket)

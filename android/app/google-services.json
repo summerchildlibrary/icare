@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "147503673385",
+    "project_id": "do-do-online",
+    "storage_bucket": "do-do-online.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:147503673385:android:1738bb7fb335168f72ec38",
+        "android_client_info": {
+          "package_name": "com.example.cljd_icare"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBupxKbp8Nh_G0YQhik6hv3VTZf6k3pdBQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

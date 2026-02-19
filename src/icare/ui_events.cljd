@@ -25,15 +25,15 @@
            task-uuid (:uuid updated-task)
            receipts (get-in db [:notify-receipts task-uuid])]
        (network-dispatch! {:type :send-updated-task
-                           :deleted false
-                           :task updated-task})
+                           :task updated-task
+                           :deleted false})
        (when (and (:completed event) receipts)
          (doseq [[requester-pub-key event-json] receipts]
            (network-dispatch! {:type :fulfill-notify
                                :to-pub-key requester-pub-key
                                :notify-receipt event-json
-                               :notification-content {:task-title (:title updated-task)
-                                                      :task-uuid task-uuid}}))))
+                               :notification-content {:title (:title updated-task)
+                                                      :body "Was completed"}})))) ;;TODO we want better messages such as x completed y, for this we want the notification receipt to include the task title and the user name
 
      :delete-user-task
      (do

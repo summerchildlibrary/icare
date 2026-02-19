@@ -117,9 +117,8 @@
         (m/ExpansionTile
          .expansionAnimationStyle (m/AnimationStyle
                                    .duration (Duration .milliseconds 700)
-                                   .reverseDuration (Duration .milliseconds 100);;TODO I can't get this value to affect the actual duration
                                    .reverseCurve (m/Curves.linear)
-                                   .curve (m/Curves.elasticOut))
+                                   .curve (m/Curves.linear))
          .controller expansion-controller
          .onExpansionChanged (on-expand handle-ui-event!)
          .childrenPadding (m/EdgeInsets.only .bottom 20)
@@ -178,7 +177,7 @@
          .index idx)
         :let [phone-width (.-width (m/MediaQuery.sizeOf ctx))
               text-field-width 120
-              small-width? (<= phone-width (* 2 text-field-width 1.5))
+              small-width? (<= phone-width (* 2 text-field-width 1.8)) ;;TODO
               text-field-width (if small-width? 112 text-field-width)
               y-offset -10
               from-text-field (f/widget
