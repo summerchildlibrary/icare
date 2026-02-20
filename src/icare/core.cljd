@@ -3,37 +3,14 @@
             ["package:google_fonts/google_fonts.dart" :as gf]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["package:flutter/services.dart" :as services]
-            ["package:flutter/foundation.dart" :as foundation] ;;for push notifications / we need to get the device id to send to our pnotification server
-            ["package:firebase_core/firebase_core.dart" :as firebase]
-            ["firebase_options.dart" :as firebase-options]
-            ["package:firebase_messaging/firebase_messaging.dart" :as firebase-messaging]
             [cljd.flutter :as f]
-            [icare.ui.glue :refer [build-widgets!]]
-            [icare.resources.glue :refer [initialize-resources-from-storage!]]
+            [icare.ui.glue :refer [build-widgets! render-ui!]]
+            [icare.resources.glue :refer [initialize-resources!]]
             [icare.network-events :refer [handle-network-data!]]
-            [icare.ui-events :refer [handle-ui-event!]]
-            [icare.resources.storage :refer [initialize-storage!]]))
-
-;; dc_FPzorRRK4m505ixKImx:APA91bECDruMHcHZzaw4xAmEVWRaivnjugQRTozIQMbN2uCIJ6nulHIUMM3vbObaXTNkjzejkYmpONQAs59zM-mcMvTDjLju19eFW2NpD53T8BIDLrDr43o
-
-(defn ^Future request-notifcation-permission! []
-  (m/WidgetsFlutterBinding.ensureInitialized)
-  (await (firebase/Firebase.initializeApp
-          .options firebase-options/DefaultFirebaseOptions.currentPlatform)) ;;storage is a future
-  (let [messaging (firebase-messaging/FirebaseMessaging.instance)]
-    (await (.requestPermission messaging ;;TODO this needs to run when we actually need permissions i.e. when we heart something
-            .alert true
-            .announcement true
-            .badge true
-            .carPlay false
-            .criticalAlert false
-            .provisional false
-            .sound true))
-    (prn (await (.getToken messaging)))) ;;TODO this will throw on ios at the moment because we're not a developer, also doesn't work on old android phones... need to investigate
-  nil)
+            [icare.ui-events :refer [handle-ui-event!]]))
 
 (defn main []
-  (await (request-notifcation-permission!))
+  (await (m/WidgetsFlutterBinding.ensureInitialized))
   (f/run
     :let [_ (services/SystemChrome.setEnabledSystemUIMode services/SystemUiMode.edgeToEdge)] ;;only for older android's this is default on ios and newer androids
     (m/MaterialApp
@@ -42,7 +19,7 @@
                .colorScheme (m/ColorScheme.light
                              .surface m/Colors.white
                              .background m/Colors.white)
-               .textTheme (gf/GoogleFonts.getTextTheme "Playwrite GB J")))
+               .textTheme (gf/GoogleFonts.getTextTheme "Dekko")))
     .home
     (m/AnnotatedRegion
      .value (services/SystemUiOverlayStyle
@@ -55,7 +32,7 @@
     (m/Stack)
     .children
     [(m/Container
-      .color (m/Colors.white))
+      .color (m/Color 0xFFE8F5E9))
      (f/widget
       (m/Positioned
        .bottom 0)
@@ -73,17 +50,12 @@
        .resizeToAvoidBottomInset false) ;;we handle this manually by scrolling to make our text fields visible
       .body
       (f/widget
-       :watch [storage (initialize-storage!)]
-       :bypass (when-not storage
+       ;;We wait for futures and show a loading screen
+       :watch [db (initialize-resources! handle-network-data!)]
+       :bypass (when-not db
                  (f/widget
                   (m/SafeArea)
                   (m/Text "Loading...")))
-       :let [[private-key public-key persisted-state persisted-receipts] storage
-             db (initialize-resources-from-storage! private-key
-                                                    public-key
-                                                    persisted-state
-                                                    persisted-receipts
-                                                    handle-network-data!)] ;;i don't like passing handle-network-data! here but it needs to be passed to initialize-network! which is called in initialize-resources! it should probably be passed separately for expliciteness but this is fine for now
        (m/SafeArea ;;we handle the top and bottom manually for edge to edge rendering
         .bottom false
         .top false)

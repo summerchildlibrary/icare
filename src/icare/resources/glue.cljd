@@ -1,17 +1,39 @@
 (ns icare.resources.glue
   (:require [icare.resources.state
-             :refer [dispatch! initialize-state! gather-pub-keys-and-uuids]
+             :refer [dispatch! initialize-state! gather-pub-keys-and-uuids get-device-token]
              :rename {dispatch! state-dispatch!}]
-            [icare.resources.storage :refer [dispatch!] :rename {dispatch! storage-dispatch!}]
-            [icare.resources.network :refer [initialize-network!]]))
+            [icare.resources.storage :refer [initialize-storage! dispatch!] :rename {dispatch! storage-dispatch!}]
+            [icare.resources.network :refer [initialize-network!]]
+            ["package:flutter/foundation.dart" :as foundation] ;;for push notifications / we need to get the device id to send to our pnotification server
+            ["package:firebase_core/firebase_core.dart" :as firebase]
+            ["firebase_options.dart" :as firebase-options]
+            ["package:firebase_messaging/firebase_messaging.dart" :as firebase-messaging]))
 
 (defn update-state-and-persist! [event]
   (let [db (state-dispatch! event)]
     (storage-dispatch! {:type :state-change-event :new-state (:state db)})
     db))
 
-(defn initialize-resources-from-storage! [private-key public-key persisted-state persisted-receipts handle-network-data!]
+(defn ^Future get-device-token-future []
+  (await (firebase/Firebase.initializeApp
+          .options firebase-options/DefaultFirebaseOptions.currentPlatform))
+  (let [messaging (firebase-messaging/FirebaseMessaging.instance)
+        old-token (get-device-token)]
+    ;;TODO this is a good place to set the listener for token changes
+    (when-not (nil? old-token)
+      (.getToken messaging))))
+
+(defn ^Future initialize-resources-from-storage! [private-key public-key persisted-state persisted-receipts handle-network-data!]
   (let [db @(initialize-state! public-key persisted-state persisted-receipts)
+        device-token (get-device-token {:state db})
+        new-device-token (await (get-device-token-future))
+        db (if (not= device-token new-device-token) ;;TODO when the device token changes, we need to send a bunch of updated notify request calls. We need to figure out how to handle network reconnection, probably we can have a network event that gets called on both on initial connection and reconnection to the ws, there is where we can grab the latest device token and send the updated notify requests and updated task calls. It might not even be neccessary to store the device token since we plan on resending all our state on every reconnection, if we try and be smart about it we might need to create some sort of queue for failed network calls that we resend on device connection. Then, we wouldn't even have to worry about at what point in the app cycle we send out the update notify requestsif we try and be smart about it we might need to create some sort of queue for failed network calls that we resend on device connection. Then, we wouldn't even have to worry about at what point in the app cycle we send out the update notify requests.
+             (update-state-and-persist! {:type :update-device-token :device-token new-device-token})
+             db)
         {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids (:state db))]
     (initialize-network! private-key user-task-uuids friend-pub-keys public-key handle-network-data!)
     db))
+
+(defn ^Future initialize-resources! [handle-network-data!]
+  (let [[private-key public-key persisted-state persisted-receipts] (await (initialize-storage!))]
+    (initialize-resources-from-storage! private-key public-key persisted-state persisted-receipts handle-network-data!)))
