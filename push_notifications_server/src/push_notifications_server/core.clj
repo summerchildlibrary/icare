@@ -11,7 +11,6 @@
            (java.security MessageDigest)
            (java.util HexFormat)))
 
-
 ;; --- Crypto utilities ---
 (defonce ^Secp256k1 secp256k1 (Secp256k1/get))
 (defonce digester (MessageDigest/getInstance "SHA-256"))
@@ -95,9 +94,10 @@
 
 (comment
  (send-push-notification!
-  {:title "Test Notification"
-   :body "This is a test push notification from the server."
-   :device-token "dc_FPzorRRK4m505ixKImx:APA91bECDruMHcHZzaw4xAmEVWRaivnjugQRTozIQMbN2uCIJ6nulHIUMM3vbObaXTNkjzejkYmpONQAs59zM-mcMvTDjLju19eFW2NpD53T8BIDLrDr43o"}))
+  {:title "Jun completed: defeat the bear"
+   :body ""
+   ;;this is my actual device token, do not spam me with notifications, please
+   :device-token "dS9t_qGNp0mCsZqgKNU8Ur:APA91bHM8INlW4q8XMZ_IgvhTlnuMRdB3XCLYlJdFms9CtYXCt4w5n8Qj5qW1jIw3DmiM3UiywttFINaTtAN-f6JNmSBKUZ5ETRBm9AGit8QLtkCbbeQZKo"}))
 
 (defonce ws-client (atom nil))
 
