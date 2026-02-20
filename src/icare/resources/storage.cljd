@@ -51,11 +51,9 @@
       (reset! receipts-file receipts-file*)))
   (let [[private-key public-key] (await (get-secure-credentials (.-generate Keychain))) ;;this is a little ugly for the sake of development code that constantly reloads.
         serial-persisted-state (await (.readAsString ^File @store-file))
+        state (read-string serial-persisted-state)
         serial-persisted-receipts (await (.readAsString ^File @receipts-file))
-        state (when-not (empty? serial-persisted-state) ;;read-string does this in clj but not in cljd
-                (read-string serial-persisted-state))
-        receipts (when-not (empty? serial-persisted-receipts)
-                   (read-string serial-persisted-receipts))]
+        receipts (read-string serial-persisted-receipts)]
     [private-key public-key state receipts]))
 
 (defn dispatch! [event]
