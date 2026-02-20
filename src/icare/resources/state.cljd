@@ -54,7 +54,8 @@
                                           ;; {:type :uninitialized-person
                                           ;;  :name "Jun before jun"
                                           ;;  :uuid (uuid-generator)}
-   :show-qr? false})
+   :show-qr? false
+   :device-token nil})
 
 (def default-derived-state
   {:pub-key-to-name {}
@@ -70,6 +71,10 @@
 
 ;;Helper functions. Read only operations.
 ;;Note: These functions work with the :state slice, not the full store
+
+(defn get-device-token
+  ([] (get-device-token (:state @store)))
+  ([state] (:device-token state)))
 
 (defn get-people-cards
   ([] (get-people-cards (:state @store)))
@@ -362,6 +367,10 @@
     :rename-uninitialized-card-self
     (let [{:keys [card-idx name]} event]
       (assoc-in db [:state :reorderable-items card-idx :self] name))
+
+    :update-device-token
+    (let [{:keys [device-token]} event]
+      (assoc-in db [:state :device-token] device-token))
 
     ;;TODO we need to figure out the logic of this
     :send-friend-request
