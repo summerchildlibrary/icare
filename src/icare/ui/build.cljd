@@ -101,15 +101,19 @@
        :task-card
        (f/widget
         :key key
-        :context ctx
         :managed [expansion-controller (m/ExpansibleController)]
         :watch [{:keys [expanded? idx title has-alert? title tasks]} (get-ast-atom)]
         :managed [text-controller (m/TextEditingController .text (str title))]
         :let [{:keys [on-expand on-rename-title]} @(get-ast-atom)
-              _ (do (if expanded?
-                      (.expand expansion-controller)
-                      (.collapse expansion-controller))
-                    nil)]
+            ;; we use a microtask here to make sure .expand and .collapse trigger the updated on-expand callback.
+            ;; without a microtask. .expand/.collapse trigger the on-expand callback of the old expansiontile which sends the wrong dispatch to state
+            ;; this solution works but is not very clean, the easiest alternative is to get rid of the onExpansionChanged callback, and use a gesture
+            ;; detector or button to open and close the expansiontile, this way, expanding and collapsing won't have side effects other than rebuilding
+            ;; the expansiontile
+              _ (Future.microtask (fn []
+                                    (if expanded?
+                                      (.expand expansion-controller)
+                                      (.collapse expansion-controller))))]
         :padding {:vertical 6}
         (m/Material
          .elevation 0
@@ -134,11 +138,11 @@
                                           (m/Colors.orange.withOpacity 1)
                                           (m/Colors.black.withOpacity 0.3)))
                           .borderRadius (m/BorderRadius.circular 12))
-         .leading (if expanded?
-                    (m/Icon m/Icons.drag_handle .color (m/Colors.black.withOpacity 0.2) .size 24)
-                    (m/ReorderableDelayedDragStartListener
-                     .index idx
-                     .child (m/Icon m.Icons/drag_handle .size 24)))
+         ;; .leading (if expanded?
+         ;;            (m/Icon m/Icons.drag_handle .color (m/Colors.black.withOpacity 0.2) .size 24)
+         ;;            (m/ReorderableDelayedDragStartListener
+         ;;             .index idx
+         ;;             .child (m/Icon m.Icons/drag_handle .size 24)))
          .title (f/widget
                  (m/Align .alignment m/Alignment.centerLeft)
                  (m/Row)
@@ -147,8 +151,8 @@
                    (m/SizedBox .width 150)
                    (m/TextField
                     .style (m/TextStyle
-                            .fontSize 16
-                            .fontWeight m/FontWeight.bold
+                            .fontSize 14
+                            .fontWeight m/FontWeight.normal
                             .color m/Colors.black)
                     .onSubmitted (on-rename-title handle-ui-event!)
                     .decoration (m/InputDecoration
@@ -479,15 +483,16 @@
         ;;  .duration (Duration .milliseconds 300))
         :padding {:top 6 :bottom 350}
         (m/Material
-         .elevation 0)
+         .elevation 0
+         .borderRadius (m/BorderRadius.circular 12))
         (m/ListTile
          .shape (m/RoundedRectangleBorder
                  .side (m/BorderSide
                         .color (m/Colors.black.withOpacity 0.3))
                  .borderRadius (m/BorderRadius.circular 12))
-         .leading (m/Icon m.Icons/person_add
-                          .size 24
-                          .color m.Colors/black)
+         ;; .leading (m/Icon m.Icons/person_add
+         ;;                  .size 24
+         ;;                  .color m.Colors/black)
          .title (f/widget
                  :let [y-offset -10]
                  (m/Transform.translate .offset (m/Offset 0 y-offset))
