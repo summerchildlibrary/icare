@@ -66,3 +66,4 @@ test/cljd-out/
 /REPL.lock
 /.lsp/
 /push_notifications_server/do-do-online-firebase-adminsdk-fbsvc-809d342389.json
+/ios/build/
