@@ -56,6 +56,7 @@ test/cljd-out/
 
 # Mine
 /.clj-kondo/
+/push_notifications_server/.nrepl-port
 
 # Magit
 /lib/
