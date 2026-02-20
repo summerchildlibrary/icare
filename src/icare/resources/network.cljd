@@ -40,16 +40,18 @@
           .serialize))
 
     :update-request-to-notify
-    (let [{:keys [to-pub-key task-uuid want-notifications?]} event]
-      (-> (.from Event
-                 .kind update-request-to-notify-kind
-                 .content (prn-str {:want-notifications? want-notifications?
-                                    :task-uuid task-uuid
-                                    :device-token (get-device-token)
-                                    :to-pub-key to-pub-key})
-                 .tags [(.from #/(List String) ["a" (str update-request-to-notify-kind ":" to-pub-key ":" task-uuid)])]
-                 .privkey @private-key)
-          .serialize))
+    (let [{:keys [to-pub-key task-uuid want-notifications?]} event
+          device-token (get-device-token)]
+      (when device-token
+        (-> (.from Event
+                   .kind update-request-to-notify-kind
+                   .content (prn-str {:want-notifications? want-notifications?
+                                      :task-uuid task-uuid
+                                      :device-token device-token
+                                      :to-pub-key to-pub-key})
+                   .tags [(.from #/(List String) ["a" (str update-request-to-notify-kind ":" to-pub-key ":" task-uuid)])]
+                   .privkey @private-key)
+            .serialize)))
 
     ;;we send this event both when creating a new task and when updating an existing task, the deleted flag is what determines whether the task should be deleted or not
     :send-updated-task
@@ -89,7 +91,7 @@
 
 (defn dispatch! [event]
   (let [message (create-message event)]
-    (if (and send-events @web-socket @initialized?)
+    (if (and send-events @web-socket @initialized? message)
       (do (.add ^WebSocket @web-socket message)
           (prn "Sent event to relay:" message))
       (prn "WebSocket not initialized while trying to send event"))))
