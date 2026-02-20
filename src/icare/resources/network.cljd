@@ -1,6 +1,7 @@
 (ns icare.resources.network
   (:require ["package:nostr/nostr.dart" :refer [Event Request Filter]]
-            ["dart:io" :refer [WebSocket]]))
+            ["dart:io" :refer [WebSocket]]
+            [icare.resources.state :refer [get-device-token]]))
 
 ;;This module handles outbound network messages.
 ;;It creates and sends Nostr events to the relay.
@@ -44,8 +45,8 @@
                  .kind update-request-to-notify-kind
                  .content (prn-str {:want-notifications? want-notifications?
                                     :task-uuid task-uuid
-                                    :device-token nil
-                                    :to-pub-key to-pub-key}) ;;TODO we need to include the actual device token
+                                    :device-token (get-device-token)
+                                    :to-pub-key to-pub-key})
                  .tags [(.from #/(List String) ["a" (str update-request-to-notify-kind ":" to-pub-key ":" task-uuid)])]
                  .privkey @private-key)
           .serialize))
