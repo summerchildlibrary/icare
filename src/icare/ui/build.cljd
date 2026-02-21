@@ -3,8 +3,9 @@
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["package:qr_flutter/qr_flutter.dart" :as qr]
             ["package:share_plus/share_plus.dart" :as share]
-            [cljd.flutter :as f]
-            [cljd.string :as str]))
+            ["dart:ui" :as ui]
+            ["dart:math" :as math]
+            [cljd.flutter :as f]))
 
 ;;TODO extract common styles to constants
 (defn ast-store->widget
@@ -113,8 +114,68 @@
               _ (Future.microtask (fn []
                                     (if expanded?
                                       (.expand expansion-controller)
-                                      (.collapse expansion-controller))))]
-        :padding {:vertical 6}
+                                      (.collapse expansion-controller))))
+             ;; --- Liquid glass border tuning knobs ---
+              r 12.0
+              glass-border
+              (reify :extends m/CustomPainter
+                (paint [_ canvas size]
+                  (let [hi 0.95                           ;; “fully opaque” white arc
+                        mid 0.5                          ;; transition opacity at corners
+                        lo 0.25                           ;; “almost icon color” (very transparent white)
+                        stroke (if expanded? 1.35 1.15)   ;; thin hairline-ish border, slightly stronger expanded
+                        half (/ stroke 2.0)
+                        ;; Draw stroke *inside* the bounds so it doesn't get clipped
+                        rect (ui/Rect.fromLTWH
+                              half
+                              half
+                              (- (.-width size) stroke)
+                              (- (.-height size) stroke))
+                        rrect (ui/RRect.fromRectAndRadius
+                               rect
+                               (ui/Radius.circular (- r half)))
+
+
+                        ;; SweepGradient angle=0 starts at (1, 0.5) and sweeps clockwise.
+                        ;; These stops approximate your description (in normalized border coords):
+                        ;; Bright arc: (1,0.4) -> (0.2,0)   [bottom-right + most of bottom edge]
+                        ;; Bright arc: (0,0.7) -> (0.7,1)   [top-left + most of top edge]
+                        grad (m/SweepGradient
+                              .startAngle 0.0
+                              .endAngle (* 2.0 math/pi)
+                              .colors [(m/Colors.white.withOpacity lo)   ;; low (right edge)
+                                       (m/Colors.white.withOpacity lo)
+                                       (m/Colors.white.withOpacity hi)   ;; ramp up into bright bottom arc
+                                       (m/Colors.white.withOpacity hi)   ;; bright bottom arc plateau
+                                       (m/Colors.white.withOpacity mid)  ;; fade near bottom-left
+                                       (m/Colors.white.withOpacity lo)   ;; low (left edge)
+                                       (m/Colors.white.withOpacity lo)
+                                       (m/Colors.white.withOpacity hi)   ;; ramp up into bright top arc
+                                       (m/Colors.white.withOpacity hi)   ;; bright top arc plateau
+                                       (m/Colors.white.withOpacity mid)  ;; fade near top-right
+                                       (m/Colors.white.withOpacity lo)   ;; low (right edge)
+                                       (m/Colors.white.withOpacity lo)]
+                              .stops [0.00 0.02
+                                      0.035 0.336
+                                      0.37 0.414
+                                      0.561 0.585
+                                      0.811 0.86
+                                      0.914 1.00])
+
+
+                        p (doto (m/Paint)
+                            (.-style! ui/PaintingStyle.stroke)
+                            (.-strokeWidth! stroke)
+                            (.-strokeJoin! ui/StrokeJoin.round)
+                            (.-isAntiAlias! true)
+                            (.-shader! (.createShader grad rect)))]
+                    (.drawRRect canvas rrect p)))
+
+
+                ;; Border depends on expanded? (stroke), so repaint when rebuilt
+                (shouldRepaint [_ _] true))]
+        :padding {:vertical 12}
+        (m/CustomPaint .foregroundPainter glass-border)
         (m/Material
          .elevation 0
          .borderRadius (m/BorderRadius.circular 12))
@@ -138,11 +199,11 @@
                                           (m/Colors.orange.withOpacity 1)
                                           (m/Colors.black.withOpacity 0.3)))
                           .borderRadius (m/BorderRadius.circular 12))
-         ;; .leading (if expanded?
-         ;;            (m/Icon m/Icons.drag_handle .color (m/Colors.black.withOpacity 0.2) .size 24)
-         ;;            (m/ReorderableDelayedDragStartListener
-         ;;             .index idx
-         ;;             .child (m/Icon m.Icons/drag_handle .size 24)))
+         .leading (if expanded?
+                    (m/Icon m/Icons.drag_handle .color (m/Colors.black.withOpacity 0.2) .size 24)
+                    (m/ReorderableDelayedDragStartListener
+                     .index idx
+                     .child (m/Icon m.Icons/drag_handle .size 24)))
          .title (f/widget
                  (m/Align .alignment m/Alignment.centerLeft)
                  (m/Row)
@@ -481,7 +542,7 @@
         ;; (m/AnimatedPadding ;;this is here to make sure the friend search area is visible when the keyboard is open
         ;;  .padding (m/EdgeInsets.only .top 6 .bottom (+ 100 keyboard-height))
         ;;  .duration (Duration .milliseconds 300))
-        :padding {:top 6 :bottom 350}
+        :padding {:top 12 :bottom 350}
         (m/Material
          .elevation 0
          .borderRadius (m/BorderRadius.circular 12))
