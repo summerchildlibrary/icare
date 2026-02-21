@@ -5,6 +5,7 @@
             ["package:flutter/services.dart" :as services]
             ["package:firebase_core/firebase_core.dart" :as firebase]
             ["firebase_options.dart" :as firebase-options]
+            ["package:haptic_feedback/haptic_feedback.dart" :as haptics]
             [cljd.flutter :as f]
             [icare.ui.glue :refer [build-widgets! render-ui!]]
             [icare.resources.glue :refer [initialize-resources!]]
@@ -15,6 +16,7 @@
   (await (m/WidgetsFlutterBinding.ensureInitialized))
   (await (firebase/Firebase.initializeApp
           .options firebase-options/DefaultFirebaseOptions.currentPlatform))
+  (await (haptics/Haptics.canVibrate))
   (f/run
     :let [_ (services/SystemChrome.setEnabledSystemUIMode services/SystemUiMode.edgeToEdge)] ;;only for older android's this is default on ios and newer androids
     (m/MaterialApp
