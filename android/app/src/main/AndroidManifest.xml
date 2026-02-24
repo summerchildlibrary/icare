@@ -32,7 +32,7 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data
                     android:scheme="https"
-                    android:host="app.websitename.com"
+                    android:host="app.summerchildlibrary.com"
                     android:pathPrefix="/list" />
             </intent-filter>
         </activity>
