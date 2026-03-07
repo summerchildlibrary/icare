@@ -45,6 +45,7 @@ dependencies:
   firebase_core: ^4.4.0
   firebase_messaging: ^16.1.1
   haptic_feedback: ^0.6.4+3
+  reorderable_grid: ^1.0.13
 
 dev_dependencies:
   flutter_test:
@@ -71,6 +72,7 @@ flutter:
   # asset section all assets are included in a directory
   assets:
     - assets/grass-pattern.svg
+    - assets/animated/
     - assets/icons/
 
   # An image asset can refer to one or more resolution-specific "variants", see
