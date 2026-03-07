@@ -1,15 +1,14 @@
 (ns icare.core
   (:require ["package:flutter/material.dart" :as m]
             ["package:google_fonts/google_fonts.dart" :as gf]
-            ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["package:flutter/services.dart" :as services]
             ["package:firebase_core/firebase_core.dart" :as firebase]
             ["firebase_options.dart" :as firebase-options]
             ["package:haptic_feedback/haptic_feedback.dart" :as haptics]
             [cljd.flutter :as f]
-            [icare.ui.glue :refer [build-widgets! render-ui!]]
             [icare.resources.glue :refer [initialize-resources!]]
             [icare.network-events :refer [handle-network-data!]]
+            [icare.ui.glue :refer [build-widgets!]]
             [icare.ui-events :refer [handle-ui-event!]]))
 
 (defn main []
@@ -17,52 +16,36 @@
   (await (firebase/Firebase.initializeApp
           .options firebase-options/DefaultFirebaseOptions.currentPlatform))
   (await (haptics/Haptics.canVibrate))
+  (services/SystemChrome.setEnabledSystemUIMode services/SystemUiMode.edgeToEdge)
   (f/run
-    :let [_ (services/SystemChrome.setEnabledSystemUIMode services/SystemUiMode.edgeToEdge)] ;;only for older android's this is default on ios and newer androids
-    (m/MaterialApp
-     .title "iCare"
-     .theme (m/ThemeData
-               .colorScheme (m/ColorScheme.light
-                             .surface m/Colors.white
-                             .background m/Colors.white)
-               .textTheme (gf/GoogleFonts.getTextTheme "Dekko")))
-    .home
-    (m/AnnotatedRegion
-     .value (services/SystemUiOverlayStyle
-             ;;android settings
-             .systemNavigationBarColor m/Colors.transparent
-             .systemNavigationBarIconBrightness services/Brightness.dark
-             .systemNavigationBarContrastEnforced false
-             .statusBarColor m/Colors.transparent
-             .statusBarIconBrightness services/Brightness.dark))
-    (m/Stack)
-    .children
-    [(m/Container
-      .color (m/Color 0xFFE8F5E9))
-     (f/widget
-      (m/Positioned
-       .bottom 0)
-      (m/Column)
-      .children
-      [(svg/SvgPicture.asset "assets/grass-pattern.svg"
-                             .fit m/BoxFit.fitWidth)
-       (svg/SvgPicture.asset "assets/grass-pattern.svg"
-                             .fit m/BoxFit.fitWidth)
-       (svg/SvgPicture.asset "assets/grass-pattern.svg"
-                             .fit m/BoxFit.fitWidth)])
-     (f/widget
-      (m/Scaffold
-       .backgroundColor m/Colors.transparent
-       .resizeToAvoidBottomInset false) ;;we handle this manually by scrolling to make our text fields visible
-      .body
-      (f/widget
-       ;;We wait for futures and show a loading screen
-       :watch [db (initialize-resources! handle-network-data!)]
-       :bypass (when-not db
-                 (f/widget
-                  (m/SafeArea)
-                  (m/Text "Loading...")))
-       (m/SafeArea ;;we handle the top and bottom manually for edge to edge rendering
-        .bottom false
-        .top false)
-       (build-widgets! db handle-ui-event!)))]))
+   (m/MaterialApp
+    .title "iCare"
+    .theme (m/ThemeData
+              .colorScheme (m/ColorScheme.light
+                            .surface m/Colors.white
+                            .background m/Colors.white)
+              .textTheme (gf/GoogleFonts.getTextTheme "Dekko")))
+   .home
+   (m/AnnotatedRegion
+    .value (services/SystemUiOverlayStyle
+            ;;android settings
+            .systemNavigationBarColor m/Colors.transparent
+            .systemNavigationBarIconBrightness services/Brightness.dark
+            .systemNavigationBarContrastEnforced false
+            .statusBarColor m/Colors.transparent
+            .statusBarIconBrightness services/Brightness.dark))
+   (m/Scaffold
+    .backgroundColor (m/Color 0xFFE8F5E9)
+    .resizeToAvoidBottomInset false) ;;we handle this manually by scrolling to make our text fields visible
+   .body
+   (f/widget
+    ;;We wait for futures and show a loading screen
+    :watch [db (initialize-resources! handle-network-data!)]
+    :bypass (when-not db
+              (f/widget
+               (m/SafeArea)
+               (m/Text "Loading...")))
+    (m/SafeArea ;;we handle the top and bottom manually for edge to edge rendering
+     .bottom false
+     .top false)
+    (build-widgets! db handle-ui-event!))))

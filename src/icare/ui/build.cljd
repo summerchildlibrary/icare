@@ -65,13 +65,20 @@
        (f/widget
         (m/Stack
          .children
-         [(f/widget
-           :let [{:keys [reorderable-list]} @(get-ast-atom)]
+         [
+          (f/widget
+           :let [{:keys [reorderable-list on-toggle-wobble wobble?]} @(get-ast-atom)
+                 wobble? (atom wobble?)] ;;I don't want a watch here because I don't want the whole screen to rebuild when we toggle wobble, this adds some complexity but I think it's worth it
            (m/GestureDetector
             .behavior m/HitTestBehavior.opaque
             .onLongPress (fn []
                            (haptics/Haptics.vibrate haptics/HapticsType.heavy)
-                           nil))
+                           (swap! wobble? not)
+                           ((on-toggle-wobble handle-ui-event!)))
+            .onTap (fn []
+                     (when @wobble?
+                       (swap! wobble? not)
+                       ((on-toggle-wobble handle-ui-event!)))))
            (recursive-call reorderable-list))
           (f/widget
            :context ctx
@@ -91,6 +98,14 @@
                                      .end m/Alignment.bottomCenter
                                      .colors [(m/Colors.white.withOpacity 1)
                                               (m/Colors.white.withOpacity 0)])))])]))
+          ;; (f/widget
+          ;;  (m/Positioned
+          ;;   .top 40
+          ;;   .left 0
+          ;;   .right 0)
+          ;;  (m/Container
+          ;;   .height 100
+          ;;   .color m/Colors.black))]))
 
        :reorderable-list
        (f/widget
@@ -130,7 +145,7 @@
               phone-size (m/MediaQuery.sizeOf ctx)
               phone-height (.-height phone-size)
               notch-height (.-top phone-padding)
-              relative-start (/ notch-height phone-height)]
+              relative-start (/ (+ notch-height 200) phone-height)]
         (m/ReorderableListView
          .anchor relative-start
          ;; .physics (m/BouncingScrollPhysics) ;;TODO this is like ios style for android, i think i prefer it but maybe we should keep the default android physics for android
@@ -146,86 +161,132 @@
        :task-card
        (f/widget
         :key key
-        :watch [{:keys [expanded? idx title has-alert? tasks]} (get-ast-atom)]
+        :watch [{:keys [expanded? idx title has-alert? tasks wobble?]} (get-ast-atom)]
         :vsync clock
-        :managed [animation-controller (m/AnimationController
-                                         .duration (Duration .milliseconds 500)
-                                         .vsync clock)
+        :managed [expand-controller (m/AnimationController
+                                      .duration (Duration .milliseconds 500)
+                                      .vsync clock)
+                  wobble-controller (m/AnimationController
+                                      .duration (Duration .milliseconds 700)
+                                      .vsync clock)
                   text-controller (m/TextEditingController .text (str title))]
-        :let [{:keys [on-expand on-rename-title]} @(get-ast-atom)
+        :let [{:keys [on-expand on-rename-title on-delete]} @(get-ast-atom)
+              wobble-start (.nextDouble (math/Random))
               _ (if expanded?
-                  (.forward animation-controller)
-                  (.reverse animation-controller))
+                  (.forward expand-controller)
+                  (.reverse expand-controller))
+              _ (if (and wobble? (not expanded?))
+                  (when-not (.-isAnimating wobble-controller)
+                    (.repeat wobble-controller))
+                  (do (.stop wobble-controller)
+                      (.reset wobble-controller)
+                      nil))
+              wobble-angle 0.02 ;; radians, ~1 degree
+              wobble-phase (* 2.0 math/pi wobble-start) ;; random phase offset
               r 12.0
               glass-border (glass-border-painter r)]
         :padding {:vertical 12}
-        (m/CustomPaint .foregroundPainter (when-not has-alert? glass-border))
-        (m/Material
-         .type m/MaterialType.transparency
-         .elevation 0
-         .borderRadius (m/BorderRadius.circular 12))
         (m/AnimatedBuilder
-         .animation animation-controller
+         .animation wobble-controller
          .builder (fn [ctx child]
-                    (m/Container
-                     .decoration (m/BoxDecoration
-                                  .color (m/Color.lerp (m/Color 0x00FFFFFF) m/Colors.white (.-value animation-controller))
-                                  .border (m/Border.all .color (if has-alert?
-                                                                 (m/Colors.orange.withOpacity 1)
-                                                                 (m/Colors.transparent))
-                                                        .width 1)
-                                  .borderRadius (m/BorderRadius.circular 12))
-                     .child child)))
-        (m/Column
-         .crossAxisAlignment m/CrossAxisAlignment.start)
+                    (let [wrapped (if (and wobble? (not expanded?))
+                                    (m/ReorderableDragStartListener .index idx .child child)
+                                    child)]
+                      (m/Transform.rotate
+                       .angle (if (and wobble? (not expanded?))
+                                (* wobble-angle (math/sin (+ (* (.-value wobble-controller) 2.0 math/pi) wobble-phase)))
+                                0.0)
+                       .child wrapped))))
+        (m/Stack
+         .clipBehavior m/Clip.none)
         .children
-        [;; Header row with tap to expand
-         (f/widget
-          (m/GestureDetector
-           .behavior m/HitTestBehavior.opaque
-           .onTap (on-expand handle-ui-event!))
-          :padding {:horizontal 16 :vertical 6}
-          (m/Row
-           .mainAxisAlignment m/MainAxisAlignment.start)
-          .children
-          [(f/widget
-            :watch [text-value text-controller]
-            :let [text-style (m/TextStyle
-                              .fontSize 22
-                              .fontWeight m/FontWeight.normal
-                              .color m/Colors.black)
-                  current-text (.-text text-value)
-                  text-painter (doto (m/TextPainter
-                                      .text (m/TextSpan .text current-text .style text-style)
-                                      .textDirection ui/TextDirection.ltr)
-                                 (.layout))
-                  text-width (-> (+ (.-width (.-size text-painter)) 24)
-                                 (max 50)
-                                 (min 300))]
-            (m/SizedBox .width text-width)
-            (m/IgnorePointer
-             .ignoring (not expanded?))
-            (m/TextField
-             .readOnly (not expanded?)
-             .style text-style
-             .onSubmitted (on-rename-title handle-ui-event!)
-             .decoration (m/InputDecoration
-                          .contentPadding (m/EdgeInsets.only .bottom 0)
-                          .border m/InputBorder.none)
-             .strutStyle (m/StrutStyle
-                          .fontSize 16
-                          .height 1.9
-                          .forceStrutHeight true)
-             .controller text-controller))])
-         ;; Expandable content
-         (f/widget
-          (m/SizeTransition
-           .sizeFactor animation-controller
-           .axisAlignment -1.0)
-          :padding {:left 16 :right 16 :bottom 20}
+        [(f/widget
+          (m/CustomPaint .foregroundPainter (when-not has-alert? glass-border))
+          (m/Material
+           .type m/MaterialType.transparency
+           .elevation 0
+           .borderRadius (m/BorderRadius.circular 12))
+          (m/AnimatedBuilder
+           .animation expand-controller
+           .builder (fn [ctx child]
+                      (m/Container
+                       .decoration (m/BoxDecoration
+                                    .color (m/Color.lerp (m/Color 0x30FFFFFF) (m/Color 0x30FFFFFF) (.-value expand-controller))
+                                    .border (m/Border.all .color (if has-alert?
+                                                                   (m/Colors.orange.withOpacity 1)
+                                                                   (m/Colors.transparent))
+                                                          .width 1)
+                                    .borderRadius (m/BorderRadius.circular 12))
+                       .child child)))
           (m/Column
-           .crossAxisAlignment m/CrossAxisAlignment.start
-           .children (mapv recursive-call tasks)))])
+           .crossAxisAlignment m/CrossAxisAlignment.start)
+          .children
+          [;; Header row with tap to expand
+           (f/widget
+            (m/GestureDetector
+             .behavior m/HitTestBehavior.opaque
+             .onTap (when-not wobble?
+                      (on-expand handle-ui-event!)))
+            :padding {:left 26 :right 16 :vertical 6}
+            (m/Row
+             .mainAxisAlignment m/MainAxisAlignment.start)
+            .children
+            [(f/widget
+              :watch [text-value text-controller]
+              :let [text-style (m/TextStyle
+                                .fontSize 22
+                                .fontWeight m/FontWeight.normal
+                                .color m/Colors.black)
+                    current-text (.-text text-value)
+                    text-painter (doto (m/TextPainter
+                                        .text (m/TextSpan .text current-text .style text-style)
+                                        .textDirection ui/TextDirection.ltr)
+                                   (.layout))
+                    text-width (-> (+ (.-width (.-size text-painter)) 24)
+                                   (max 50)
+                                   (min 300))]
+              :padding {:left 10}
+              (m/SizedBox .width text-width)
+              (m/IgnorePointer
+               .ignoring (not expanded?))
+              (m/TextField
+               .readOnly (not expanded?)
+               .style text-style
+               .onSubmitted (on-rename-title handle-ui-event!)
+               .decoration (m/InputDecoration
+                            .contentPadding (m/EdgeInsets.only .bottom 0)
+                            .border m/InputBorder.none)
+               .strutStyle (m/StrutStyle
+                            .fontSize 16
+                            .height 1.9
+                            .forceStrutHeight true)
+               .controller text-controller))])
+           ;; Expandable content
+           (f/widget
+            (m/SizeTransition
+             .sizeFactor expand-controller
+             .axisAlignment -1.0)
+            :padding {:left 16 :right 16 :bottom 20}
+            (m/Column
+             .crossAxisAlignment m/CrossAxisAlignment.start)
+            .children (mapv recursive-call tasks))])
+         ;; Remove button (iOS style)
+         (f/widget
+          :when (and wobble? (not expanded?))
+          (m/Positioned
+           .top -20
+           .right -20)
+          (m/IconButton
+           .onPressed (on-delete handle-ui-event!)
+           .icon (m/Container
+                  .width 40
+                  .height 40
+                  .decoration (m/BoxDecoration
+                               .color m/Colors.red
+                               .shape m/BoxShape.circle)
+                  .child (m/Icon m/Icons.remove
+                                 .size 26
+                                 .color m/Colors.white))))])
 
        :uninitialized-person-card
        (f/widget

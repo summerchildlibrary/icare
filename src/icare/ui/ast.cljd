@@ -1,8 +1,5 @@
-(ns icare.ui.ast
-  (:require ["package:flutter/material.dart" :as m]
-            ["package:uuid/uuid.dart" :refer [Uuid]]))
+(ns icare.ui.ast)
 
-(def uuid-generator (.-v4 (Uuid)))
 ;;Build an AST from our state
 
 (defn task-subitems->ast [derived-state subitem-idx subitem]
@@ -78,13 +75,14 @@
                                          :title value}))))})
 
 (defn person->ast [derived-state reorderable-item-idx person]
-  (let [{:keys [user? name tasks pub-key expanded? notify?]} person
+  (let [{:keys [user? name tasks pub-key expanded? notify? wobble?]} person
         id (str "card-" pub-key)
         tasks (mapv #(conj % {:reorderable-item-idx reorderable-item-idx :creator-pub-key pub-key :card-expanded? expanded?}) tasks)
         new-task-idx (count tasks)]
     {:id id
      :ui-type :task-card
      :expanded? expanded?
+     :wobble? wobble?
      :has-alert? (some :notify? tasks)
      :key pub-key
      :idx reorderable-item-idx
@@ -104,18 +102,23 @@
                              (handle-ui-event! {:type :rename-card
                                                 :card-idx reorderable-item-idx
                                                 :name value}))))
+     :on-delete (fn [handle-ui-event!]
+                  (fn []
+                    (handle-ui-event! {:type :delete-card
+                                       :card-idx reorderable-item-idx})))
      :tasks (if user?
               (conj (mapv (partial user-task->ast derived-state) (range) tasks)
                     (add-tasks->ast derived-state new-task-idx reorderable-item-idx pub-key))
               (mapv (partial friend-task->ast derived-state) (range) tasks))}))
 
 (defn uninitialized-person->ast [derived-state reorderable-item-idx item]
-  (let [{:keys [self friend uuid]} item
+  (let [{:keys [self friend uuid wobble?]} item
         id (str "uninit-" uuid)]
     {:id id
      :ui-type :uninitialized-person-card
      :key uuid
      :idx reorderable-item-idx
+     :wobble? wobble?
      :on-rename-from (fn [handle-ui-event!]
                        (fn [value]
                          (handle-ui-event! {:type :rename-uninitialized-card-self
@@ -167,18 +170,20 @@
       (throw (Exception (str "list-item->ast was given a list item with unknown type: " type))))))
 
 (defn reorderable-list->ast [derived-state reorderable-items]
-  {:id "reorderable-list"
-   :ui-type :reorderable-list
-   :on-reorder (fn [handle-ui-event!]
-                 (fn [from-index to-index]
-                   (let [[from-index to-index] (if (< from-index to-index)
-                                                 [from-index (dec to-index)]
-                                                 [from-index to-index])]
-                     (handle-ui-event! {:type :reorder-items
-                                        :from-index from-index
-                                        :to-index to-index}))))
-   :friend-search (friend-search->ast)
-   :items (mapv (partial list-item->ast derived-state) (range) reorderable-items)})
+  (let [{:keys [items wobble?]} reorderable-items
+        items (mapv #(conj % [:wobble? wobble?]) items)]
+    {:id "reorderable-list"
+     :ui-type :reorderable-list
+     :on-reorder (fn [handle-ui-event!]
+                   (fn [from-index to-index]
+                     (let [[from-index to-index] (if (< from-index to-index)
+                                                   [from-index (dec to-index)]
+                                                   [from-index to-index])]
+                       (handle-ui-event! {:type :reorder-items
+                                          :from-index from-index
+                                          :to-index to-index}))))
+     :friend-search (conj (friend-search->ast) [:wobble? wobble?])
+     :items (mapv (partial list-item->ast derived-state) (range) items)}))
 
 (defn top-level-screen->ast [derived-state state]
   (let [{:keys [reorderable-items show-qr?]} state
@@ -191,6 +196,10 @@
                             (fn []
                               (handle-ui-event! {:type :toggle-handshake-qr})))}
       :else {:id "screen-base"
+             :wobble? (:wobble? reorderable-items)
+             :on-toggle-wobble (fn [handle-ui-event!]
+                                (fn []
+                                  (handle-ui-event! {:type :toggle-wobble})))
              :ui-type :screen-base
              :reorderable-list (reorderable-list->ast derived-state reorderable-items)})))
 
@@ -199,6 +208,3 @@
     {:id "root"
      :ui-type :root
      :screen (top-level-screen->ast derived-state state)}))
-
-;;for the sake of performance, we should write this flattened to remove the overhead of flattening the AST to update our atoms
-;;honestly though, performane isn't that bad with the actual compiled app

@@ -1,0 +1,23 @@
+(ns icare.ui.screens.pages.glue
+  (:require ["package:flutter/material.dart" :as m]
+            [icare.ui.screens.pages.home
+             :refer [state->ast ast-store->widget]
+             :rename {state->ast home-state->ast
+                      ast-store->widget home-ast-store->widget}]
+            [icare.ui.screens.pages.todo-list
+             :refer [state->ast ast-store->widget]
+             :rename {state->ast todo-list-state->ast
+                      ast-store->widget todo-list-ast-store->widget}]
+            [cljd.flutter :as f]))
+
+(defn state->ast [db]
+  {:id "pages"
+   :ui-type ::base
+   :home-page      (home-state->ast db)
+   :todo-list-page (todo-list-state->ast db)})
+
+(defn ast-store->widget [ast-store handle-ui-event!]
+  (f/widget
+   (m/PageView
+    .children [(todo-list-ast-store->widget ast-store handle-ui-event!)
+               (home-ast-store->widget ast-store handle-ui-event!)])))

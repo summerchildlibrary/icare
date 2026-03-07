@@ -1,8 +1,54 @@
 (ns icare.ui.glue
-  (:require [icare.benchmarks :refer [dart-time]]
-            [icare.ui.ast :refer [state->ast]]
-            [icare.ui.normalized-ast :refer [ast->ast-store]]
-            [icare.ui.build :refer [ast-store->widget]]))
+  (:require ["package:flutter/material.dart" :as m]
+            ;; [icare.benchmarks :refer [dart-time]]
+            [icare.ui.shared :refer [scale-down-fade-animation]]
+            [cljd.flutter :as f]
+            [icare.ui.screens.qr
+             :refer [state->ast ast-store->widget]
+             :rename {state->ast qr-state->ast
+                      ast-store->widget qr-ast-store->widget}]
+            [icare.ui.screens.pages.glue
+             :refer [state->ast ast-store->widget]
+             :rename {state->ast pages-state->ast
+                      ast-store->widget pages-ast-store->widget}]
+            [icare.ui.normalized-ast :refer [ast->ast-store]]))
+
+;;first we transform the application state into an abstract syntax tree (AST) which represents the entire UI. This is a pure function with no side effects.
+(defn state->ast [{:keys [state] :as db}]
+  {:id "root"
+   :ui-type ::root
+   :screen (condp = (:current-screen state)
+             :qr        (qr-state->ast db)
+             :pages     (pages-state->ast db)
+             (throw (Exception (str "Unknown screen while deriving ast: " (:current-screen state)))))})
+
+;;then we take this AST and normalize it into a flat map of id to AST node, where each node is stored in an atom.
+;;in each AST we replace their AST children with just their ids to make diffing with old asts easier.
+;;In other words, we take {id "root" :ui-type :root :screen {:id "whatever" :more-stuf ...}} and transform it into
+;;{"root" atom{id "root" :ui-type :root :screen "whatever"} "whatever" atom{:id "whatever" :more-stuff ...}}
+;;and we do all this before passing it to the ast-store->widget.
+;;Because of this, each widget can watch the specific atom that corresponds to its AST node.
+(defn ast-store->widget [ast-store handle-ui-event!]
+  (f/widget
+   :vsync clock
+   :managed [transition-controller (m/AnimationController
+                                    .duration (Duration .milliseconds 220)
+                                    .vsync clock)]
+   :let     [build-screen          (atom (:screen @(get @ast-store "root")))
+             screen-widget         (f/widget
+                                    :watch [screen build-screen]
+                                    (condp = screen ;;screen is the id of the root node for each screen
+                                      "pages"           (pages-ast-store->widget ast-store handle-ui-event!)
+                                      "qr-base"         (qr-ast-store->widget ast-store handle-ui-event!)
+                                      (throw (Exception (str "Unknown screen id while deriving widgets: " screen)))))]
+   :watch   [{new-screen :screen}  (get @ast-store "root")]
+   (do
+     (when (not= new-screen @build-screen)
+       (.then (.forward transition-controller)
+              (fn [_]
+                (reset! build-screen new-screen)
+                (.reverse transition-controller))))
+     (scale-down-fade-animation transition-controller screen-widget))))
 
 (defonce widgets-built? (atom false))
 

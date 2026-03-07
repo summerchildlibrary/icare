@@ -13,49 +13,179 @@
 (defonce initialized? (atom false))
 
 (def default-state
-  {:reorderable-items [{:type :user
-                        :name "You"
-                        :expanded? true
-                        :pub-key nil
-                        :tasks [{:title "wake up"
-                                 :uuid "test-task-uuid-1234"
-                                 :completed false
-                                 :notify? false
-                                 :subitems []}
-                                {:title "go to monkey bars"
-                                 :uuid (uuid-generator)
-                                 :completed true
-                                 :notify? false
-                                 :subitems [{:type :time :value "2026-01-06 09:18:04Z"}]}]}
-                                            ;; {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
-                       {:type :friend
-                        :name "Example 🎸🎸"
-                        :expanded? false
-                        :pub-key "b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b"
-                        :tasks [{:title "Defeated bear"
-                                 :uuid (uuid-generator)
-                                 :liked false
-                                 :notify? false
-                                 :completed false
-                                 :subitems []}
-                                {:title "go to sleep"
-                                 :uuid (uuid-generator)
-                                 :liked false
-                                 :notify? true
-                                 :completed true
-                                 :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-                                {:title "went for walk"
-                                 :uuid (uuid-generator)
-                                 :liked false
-                                 :notify? false
-                                 :completed true
-                                 :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                            {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}]
-                                          ;; {:type :uninitialized-person
-                                          ;;  :name "Jun before jun"
-                                          ;;  :uuid (uuid-generator)}
-   :show-qr? false
+  {:user {:pub-key nil
+          :tasks [{:title "wake up"
+                   :uuid "test-task-uuid-1234"
+                   :completed false
+                   :notify? false
+                   :subitems []}
+                  {:title "go to monkey bars"
+                   :uuid (uuid-generator)
+                   :completed true
+                   :notify? false
+                   :subitems [{:type :time :value "2026-01-06 09:18:04Z"}]}
+                  {:is-add-task-task? true}]}
+   :company [{:type :company
+              :name "Char"
+              :asset "penguin.webp"
+              :expanded? false
+              :pub-key "b5bff73132049a564cb588dad9862acc31fa52c07bbecd991237b8cb9c2fa3b"
+              :tasks [{:title "Defeated bear"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? false
+                       :completed false
+                       :subitems []}
+                      {:title "go to sleep"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? true
+                       :completed true
+                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                      {:title "went for walk"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? false
+                       :completed true
+                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
+             {:type :company
+              :name "Example 🎸🎸"
+              :expanded? false
+              :pub-key "b5bff73132049a564cb588dad9862acc31fa52c07bbecd991237b8cb9c2fa"
+              :tasks [{:title "Defeated bear"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? false
+                       :completed false
+                       :subitems []}
+                      {:title "go to sleep"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? true
+                       :completed true
+                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                      {:title "went for walk"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? false
+                       :completed true
+                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
+             {:type :company
+              :name "Example 🎸🎸"
+              :expanded? false
+              :pub-key "b5bff132049a564cb588dad9862acc31fa52c07bbecd991237b8cb9c2fa3b"
+              :tasks [{:title "Defeated bear"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? false
+                       :completed false
+                       :subitems []}
+                      {:title "go to sleep"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? true
+                       :completed true
+                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                      {:title "went for walk"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? false
+                       :completed true
+                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
+             {:type :company
+              :name "Example 🎸🎸"
+              :expanded? false
+              :pub-key "b5bff73324a564cb588dad9862acc31fa52c07bbecd991237b8cb9c2fa3b"
+              :tasks [{:title "Defeated bear"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? false
+                       :completed false
+                       :subitems []}
+                      {:title "go to sleep"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? true
+                       :completed true
+                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                      {:title "went for walk"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? false
+                       :completed true
+                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
+             {:type :company
+              :name "Jun"
+              :asset "fish.webp"
+              :expanded? false
+              :pub-key "b5bff7313249a6cb58dad9862acc31fa52c07bbecd991237b8cb9c2fa3b"
+              :tasks [{:title "Defeated bear"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? false
+                       :completed false
+                       :subitems []}
+                      {:title "go to sleep"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? true
+                       :completed true
+                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                      {:title "went for walk"
+                       :uuid (uuid-generator)
+                       :liked false
+                       :notify? false
+                       :completed true
+                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}]
+   :current-screen :pages
    :device-token nil})
+  ;; {:reorderable-items {:wobble? false
+  ;;                      :items
+  ;;                      [{:type :user
+  ;;                        :name "You"
+  ;;                        :expanded? true
+  ;;                        :pub-key nil
+  ;;                        :tasks [{:title "wake up"
+  ;;                                 :uuid "test-task-uuid-1234"
+  ;;                                 :completed false
+  ;;                                 :notify? false
+  ;;                                 :subitems []}
+  ;;                                {:title "go to monkey bars"
+  ;;                                 :uuid (uuid-generator)
+  ;;                                 :completed true
+  ;;                                 :notify? false
+  ;;                                 :subitems [{:type :time :value "2026-01-06 09:18:04Z"}]}]}
+  ;;                                           ;; {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
+  ;;                       {:type :friend
+  ;;                        :name "Example 🎸🎸"
+  ;;                        :expanded? false
+  ;;                        :pub-key "b5bff73132049a564cb588dad986a2acc352c07bbecd991237b8cb9c2fa3b"
+  ;;                        :tasks [{:title "Defeated bear"
+  ;;                                 :uuid (uuid-generator)
+  ;;                                 :liked false
+  ;;                                 :notify? false
+  ;;                                 :completed false
+  ;;                                 :subitems []}
+  ;;                                {:title "go to sleep"
+  ;;                                 :uuid (uuid-generator)
+  ;;                                 :liked false
+  ;;                                 :notify? true
+  ;;                                 :completed true
+  ;;                                 :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+  ;;                                {:title "went for walk"
+  ;;                                 :uuid (uuid-generator)
+  ;;                                 :liked false
+  ;;                                 :notify? false
+  ;;                                 :completed true
+  ;;                                 :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+  ;;                                            {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
+  ;;  :show-qr? false
+  ;;  :device-token nil})
 
 (def default-derived-state
   {:pub-key-to-name {}
@@ -69,6 +199,14 @@
                       :derived-state default-derived-state
                       :notify-receipts default-notify-receipts}))
 
+(defn get-updated-task
+  ([task-index] (get-updated-task @store task-index))
+  ([db task-index] (get-in db [:state :user :tasks task-index])))
+
+(defn get-new-task
+  ([add-task-task-index] (get-new-task @store add-task-task-index))
+  ([db add-task-task-index] (get-in db [:state :user :tasks (if (zero? add-task-task-index) 1 add-task-task-index)])))
+;;
 ;;Helper functions. Read only operations.
 ;;Note: These functions work with the :state slice, not the full store
 
@@ -78,7 +216,7 @@
 
 (defn get-people-cards
   ([] (get-people-cards (:state @store)))
-  ([state] (filterv #(#{:friend :user} (:type %)) (:reorderable-items state))))
+  ([state] (filterv #(#{:friend :user} (:type %)) (-> state :reorderable-items :items))))
 
 (defn get-pub-to-name-map
   ([] (get-pub-to-name-map (:state @store)))
@@ -90,7 +228,7 @@
 
 (defn get-task-by-indexes
   ([user-card-idx task-idx] (get-task-by-indexes (:state @store) user-card-idx task-idx))
-  ([state user-card-idx task-idx] (get-in state [:reorderable-items user-card-idx :tasks task-idx])))
+  ([state user-card-idx task-idx] (get-in state [:reorderable-items :items user-card-idx :tasks task-idx])))
 
 (defn get-person-task-uuids [person]
   (let [{:keys [tasks]} person]
@@ -98,7 +236,7 @@
 
 (defn gather-pub-keys-and-uuids
   ([] (gather-pub-keys-and-uuids (:state @store)))
-  ([state] (let [reorderable-items (:reorderable-items state)]
+  ([state] (let [reorderable-items (-> state :reorderable-items :items)]
              (reduce
               (fn [acc reorderable-item]
                 (condp = (:type reorderable-item)
@@ -111,7 +249,7 @@
 
 (defn get-user-pub-key
   ([] (get-user-pub-key (:state @store)))
-  ([state] (let [reorderable-items (:reorderable-items state)]
+  ([state] (let [reorderable-items (-> state :reorderable-items :items)]
              (->> reorderable-items
                   (filter #(= :user (:type %)))
                   first
@@ -119,7 +257,7 @@
 
 (defn get-reorderable-item-by-idx
   ([reorderable-item-idx] (get-reorderable-item-by-idx (:state @store) reorderable-item-idx))
-  ([state reorderable-item-idx] (get-in state [:reorderable-items reorderable-item-idx])))
+  ([state reorderable-item-idx] (get-in state [:reorderable-items :items reorderable-item-idx])))
 
 (defn get-reorderable-item-idx-by-predicate [reorderable-items predicate]
   (->> reorderable-items
@@ -152,8 +290,18 @@
   (let [expanded? (:expanded? (get-reorderable-item-by-idx state card-idx))]
     (if expanded?
       state
-      (assoc-in state [:reorderable-items card-idx :tasks task-idx :notify?] true))))
+      (assoc-in state [:reorderable-items :items card-idx :tasks task-idx :notify?] true))))
 
+(defn reorder-vector [v from-index to-index]
+  (vec (if (< from-index to-index)
+         (concat (subvec v 0 from-index)
+                 (subvec v (inc from-index) to-index)
+                 [(nth v from-index)]
+                 (subvec v to-index))
+         (concat (subvec v 0 to-index)
+                 [(nth v from-index)]
+                 (subvec v to-index from-index)
+                 (subvec v (inc from-index))))))
 ;;
 ;; DERIVED STATE LOGIC
 ;; Computes derived values from state (pub-key-to-name mapping, user-pub-key)
@@ -210,25 +358,25 @@
           state (:state db)
           task-uuid (:uuid task)
           deleted? (:deleted task)
-          card-idx (pub-key->reorderable-item-idx (:reorderable-items state) creator-pub-key)
+          card-idx (pub-key->reorderable-item-idx (-> state :reorderable-items :items) creator-pub-key)
           task-idx (when card-idx
-                     (uuid->task-idx (get-in state [:reorderable-items card-idx :tasks]) task-uuid))
+                     (uuid->task-idx (get-in state [:reorderable-items :items card-idx :tasks]) task-uuid))
           user-pub-key (get-user-pub-key state)
           task (conj task [:liked (contains? (:liked-by task) user-pub-key)])]
       (or
        ;; Delete existing task
        (when (and card-idx task-idx deleted?)
-         (update-in db [:state :reorderable-items card-idx :tasks]
+         (update-in db [:state :reorderable-items :items card-idx :tasks]
                     (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
                                              (subvec tasks (inc task-idx)))))))
        ;; Add new task
        (when (and card-idx (nil? task-idx) (not deleted?))
-         (update-in db [:state :reorderable-items card-idx :tasks]
+         (update-in db [:state :reorderable-items :items card-idx :tasks]
                     conj (conj task [:notify? true])))
        ;; Update existing task
        (when (and card-idx task-idx (not deleted?))
          (-> db
-             (assoc-in [:state :reorderable-items card-idx :tasks task-idx] task)
+             (assoc-in [:state :reorderable-items :items card-idx :tasks task-idx] task)
              (update :state notify-task card-idx task-idx)))
        ;; Default: ignore nonsensical events
        db))
@@ -237,7 +385,7 @@
 
     :complete-user-task
     (let [{:keys [user-card-idx task-idx completed]} event]
-      (update-in db [:state :reorderable-items user-card-idx :tasks task-idx]
+      (update-in db [:state :reorderable-items :items user-card-idx :tasks task-idx]
                  (fn [task]
                    (let [new-task (assoc task :completed completed)]
                      (cond
@@ -254,17 +402,17 @@
 
     :delete-user-task
     (let [{:keys [user-card-idx task-idx]} event]
-      (update-in db [:state :reorderable-items user-card-idx :tasks]
+      (update-in db [:state :reorderable-items :items user-card-idx :tasks]
                  (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
                                           (subvec tasks (inc task-idx)))))))
 
     :rename-user-task
     (let [{:keys [user-card-idx task-idx title]} event]
-      (assoc-in db [:state :reorderable-items user-card-idx :tasks task-idx :title] title))
+      (assoc-in db [:state :reorderable-items :items user-card-idx :tasks task-idx :title] title))
 
     :like-friend-task
     (let [{:keys [friend-card-idx task-idx liked]} event]
-      (assoc-in db [:state :reorderable-items friend-card-idx :tasks task-idx :liked] liked))
+      (assoc-in db [:state :reorderable-items :items friend-card-idx :tasks task-idx :liked] liked))
 
     :add-user-task
     (let [{:keys [user-card-idx title]} event
@@ -272,12 +420,12 @@
                     :uuid (uuid-generator)
                     :completed false
                     :subitems []}]
-      (update-in db [:state :reorderable-items user-card-idx :tasks] conj new-task))
+      (update-in db [:state :reorderable-items :items user-card-idx :tasks] conj new-task))
 
     :delete-card
     (let [{:keys [card-idx]} event]
       (-> db
-          (update-in [:state :reorderable-items]
+          (update-in [:state :reorderable-items :items]
                      (fn [items] (vec (concat (subvec items 0 card-idx)
                                               (subvec items (inc card-idx))))))
           derive-db))
@@ -285,14 +433,14 @@
     :rename-card
     (let [{:keys [card-idx name]} event]
       (-> db
-          (assoc-in [:state :reorderable-items card-idx :name] name)
+          (assoc-in [:state :reorderable-items :items card-idx :name] name)
           derive-db))
 
     :add-friend
     (let [{:keys [name]} event]
       (if (empty? name)
         db
-        (update-in db [:state :reorderable-items]
+        (update-in db [:state :reorderable-items :items]
                    (fn [items]
                      (let [new-friend {:type :uninitialized-person
                                        :uuid (uuid-generator)
@@ -305,7 +453,7 @@
       (if (empty? public-key)
         db
         (-> db
-            (update-in [:state :reorderable-items card-idx]
+            (update-in [:state :reorderable-items :items card-idx]
                        conj {:pub-key public-key
                              :type :friend
                              :expanded? false
@@ -315,7 +463,7 @@
 
     :reorder-items
     (let [{:keys [from-index to-index]} event]
-      (update-in db [:state :reorderable-items]
+      (update-in db [:state :reorderable-items :items]
                  (fn [items]
                    (vec (if (< from-index to-index)
                           (concat (subvec items 0 from-index)
@@ -331,22 +479,25 @@
     (let [{:keys [card-idx expanded?]} event]
       (-> db
           (cond-> expanded?
-            (update-in [:state :reorderable-items]
+            (update-in [:state :reorderable-items :items]
                        #(mapv (fn [item]
                                 (if (contains? item :expanded?)
                                   (assoc item :expanded? false)
                                   item))
                               %)))
-          (assoc-in [:state :reorderable-items card-idx :expanded?] expanded?)))
+          (assoc-in [:state :reorderable-items :items card-idx :expanded?] expanded?)))
 
     :task-notification-finishes
     (let [{:keys [card-idx]} event]
-      (update-in db [:state :reorderable-items card-idx :tasks]
+      (update-in db [:state :reorderable-items :items card-idx :tasks]
                  #(mapv (fn [task]
                           (if (contains? task :notify?)
                             (assoc task :notify? false)
                             task))
                         %)))
+
+    :toggle-wobble
+    (update-in db [:state :reorderable-items :wobble?] not)
 
     :toggle-handshake-qr
     (update-in db [:state :show-qr?] not)
@@ -356,21 +507,75 @@
 
     :delete-uninitialized-card
     (let [{:keys [card-idx]} event]
-      (update-in db [:state :reorderable-items]
+      (update-in db [:state :reorderable-items :items]
                  (fn [items] (vec (concat (subvec items 0 card-idx)
                                           (subvec items (inc card-idx)))))))
 
     :rename-uninitialized-card-friend
     (let [{:keys [card-idx name]} event]
-      (assoc-in db [:state :reorderable-items card-idx :friend] name))
+      (assoc-in db [:state :reorderable-items :items card-idx :friend] name))
 
     :rename-uninitialized-card-self
     (let [{:keys [card-idx name]} event]
-      (assoc-in db [:state :reorderable-items card-idx :self] name))
+      (assoc-in db [:state :reorderable-items :items card-idx :self] name))
 
     :update-device-token
     (let [{:keys [device-token]} event]
       (assoc-in db [:state :device-token] device-token))
+
+    :navigate
+    (let [{:keys [screen]} event]
+      (assoc-in db [:state :current-screen] screen))
+
+    ;;--- Home page events ---
+    :reorder-icons
+    (let [{:keys [from-index to-index]} event]
+      (update-in db [:state :company] reorder-vector from-index to-index))
+
+    ;;--- Todo-list page events ---
+    :reorder-tasks
+    (let [{:keys [from-index to-index]} event]
+      (update-in db [:state :user :tasks] reorder-vector from-index to-index))
+
+    :complete-task
+    (let [{:keys [task-idx completed]} event]
+      (update-in db [:state :user :tasks task-idx]
+                 (fn [task]
+                   (let [new-task (assoc task :completed completed)]
+                     (cond
+                       (and (not completed)
+                            (seq (:subitems new-task))
+                            (= :time (-> new-task :subitems first :type)))
+                       (update new-task :subitems subvec 1) ;;remove timestamp
+
+                       completed ;;add timestamp
+                       (update new-task :subitems
+                               #(apply vector {:type :time :value (.toIso8601String (DateTime/now))} %))
+
+                       :else new-task)))))
+
+    :delete-task
+    (let [{:keys [task-idx]} event]
+      (update-in db [:state :user :tasks]
+                 (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
+                                          (subvec tasks (inc task-idx)))))))
+
+    :rename-task
+    (let [{:keys [task-idx title]} event]
+      (assoc-in db [:state :user :tasks task-idx :title] title))
+
+    :add-task
+    (let [{:keys [task-idx title]} event
+          new-task {:title (or title "")
+                    :uuid (uuid-generator)
+                    :completed false
+                    :subitems []}]
+      (update-in db [:state :user :tasks]
+                 (fn [tasks] (if (zero? task-idx)
+                               (apply vector (nth tasks 0) new-task (next tasks))
+                               (vec (concat (subvec tasks 0 task-idx)
+                                            [new-task]
+                                            (subvec tasks task-idx)))))))
 
     ;;TODO we need to figure out the logic of this
     :send-friend-request
@@ -383,10 +588,7 @@
   (swap! store apply-db-event event))
 
 (defn update-user-pub-key! [pub-key]
-  (swap! store update :state
-         (fn [state]
-           (let [user-idx (get-user-reorderable-item-idx (:reorderable-items state))]
-             (assoc-in state [:reorderable-items user-idx :pub-key] pub-key)))))
+  (swap! store assoc-in [:state :user :pub-key] pub-key))
 
 ;;
 ;; GETTERS for each state slice
@@ -407,9 +609,9 @@
       (when-some [receipts persisted-receipts]
         (swap! store assoc :notify-receipts receipts)))
     (reset! initialized? true)
-    (update-user-pub-key! pub-key)
+    (update-user-pub-key! pub-key))
     ;; Derive initial state
-    (swap! store (fn [db]
-                   (assoc db :derived-state
-                          (derive-from-state (:derived-state db) (:state db))))))
+    ;; (swap! store (fn [db]
+    ;;                (assoc db :derived-state
+    ;;                       (derive-from-state (:derived-state db) (:state db))))))
   store)

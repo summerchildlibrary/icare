@@ -1,0 +1,167 @@
+(ns icare.ui.screens.pages.home
+  (:require ["package:flutter/material.dart" :as m]
+            ["package:reorderable_grid/reorderable_grid.dart" :as reorderable-grid]
+            ["package:flutter_svg/flutter_svg.dart" :as svg]
+            ["dart:ui" :as ui]
+            [icare.ui.shared :refer [navigation-button glass-border-painter]]
+            [cljd.flutter :as f]))
+
+(defn icon [derived-state icon-index company]
+  (let [{:keys [pub-key name asset]} company]
+    {:ui-type ::icon
+     :idx icon-index
+     :asset asset
+     :key pub-key
+     :id (str "home-icon-" pub-key)
+     :title name}))
+
+(defn state->ast [db]
+  (let [{:keys [derived-state state]} db]
+    {:id "home-base"
+     :ui-type ::base
+     :on-reorder-icons (fn [handle-ui-event!]
+                         (fn [old-idx new-idx]
+                           (let [[old-idx new-idx] (if (< old-idx new-idx) ;;strangely, there doesn't seem to be a standard for what old and new mean when reordering
+                                                     [old-idx (inc new-idx)]
+                                                     [old-idx new-idx])]
+                             (handle-ui-event! {:type :reorder-icons
+                                                :from-index old-idx
+                                                :to-index new-idx}))))
+     :icons (mapv (partial icon derived-state) (range) (:company state))}))
+
+(def icon-radius 20)
+
+(defn get-icon-coords [^m/BuildContext context]
+  (let [box ^m/RenderBox (.findRenderObject context)
+        position (.localToGlobal box m/Offset.zero)
+        size (.-size box)]
+    {:position position :size size}))
+
+(defn expand-icon-animation
+  [controller {:keys [^m/Offset position ^m/Size size]} end-rect]
+  (f/widget
+   :managed [begin-rect        (m/Rect.fromLTWH (.-dx position) (.-dy position) (.-width size) (.-height size)) :dispose nil
+             curved            (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut) :dispose nil
+             rect-animation    (.drive curved (m/RectTween .begin begin-rect .end end-rect))    :dispose nil]
+   (m/AnimatedBuilder
+    .animation controller
+    .builder (fn [_ child]
+               (m/Positioned.fromRect
+                .rect (.-value rect-animation)
+                .child (m/ClipRRect
+                        .borderRadius (m/BorderRadius.circular icon-radius)
+                        .child child)))
+    .child (m/Container
+            .color m/Colors.white))))
+
+(defn background-blur-animation
+  [controller child]
+  (f/widget
+   :managed [curved          (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut) :dispose nil
+             blur-animation  (.drive curved (m/Tween .begin 0.0 .end 12.0))                   :dispose nil]
+   (m/AnimatedBuilder
+    .animation controller
+    .builder (fn [_ child]
+               (m/Positioned.fill
+                .child (m/BackdropFilter
+                        .filter (ui/ImageFilter.blur
+                                 .sigmaX (.-value blur-animation)
+                                 .sigmaY (.-value blur-animation))
+                        .child child)))
+    .child child)))
+
+
+(defn ast-store->widget
+  ([ast-store handle-ui-event!] (ast-store->widget handle-ui-event! ast-store @(get @ast-store "home-base")))
+  ([handle-ui-event! ast-store {:keys [ui-type id] :as ast}]
+   (let [recursive-call (fn [ast-id]
+                          ;; (prn "ast-store->widget called with ast-id: " ast-id)
+                          (ast-store->widget handle-ui-event! ast-store @(get @ast-store ast-id)))
+         get-ast-atom #(get @ast-store id)
+         {:keys [key]} @(get-ast-atom)]
+     (condp = ui-type
+       ::base
+       (f/widget
+        :keep-alive true
+        :key key
+        :context ctx
+        :vsync clock
+        :let [phone-padding (m/MediaQuery.viewPaddingOf ctx)
+              notch-height (.-top phone-padding)
+              phone-size (m/MediaQuery.sizeOf ctx)
+              phone-length (.-height phone-size)
+              content-start (/ (+ notch-height 40) phone-length)
+              end-rect (m/Rect.fromLTWH 20 300 (- (.-width phone-size) 40) 200)]
+        :managed [icon-transition-controller (m/AnimationController
+                                              .vsync clock
+                                              .duration (Duration .milliseconds 300))
+                  expanded-icon-atom (atom nil) :dispose nil]
+        :bind {:expanded-icon-atom expanded-icon-atom}
+        m/Stack
+        .children
+        [(f/widget
+          :let [{:keys [on-reorder-icons]} @(get-ast-atom)]
+          :watch [{:keys [icons]} (get-ast-atom)]
+          (reorderable-grid/ReorderableGridView.count
+           .anchor content-start
+           .crossAxisCount 4
+           .childAspectRatio 0.8
+           .proxyDecorator (fn [child _ _] child)
+           .onReorder (on-reorder-icons handle-ui-event!)
+           .children (mapv recursive-call icons)))
+         (f/widget
+          :watch [expanded-icon expanded-icon-atom]
+          :when expanded-icon
+          (background-blur-animation
+           icon-transition-controller
+           (m/GestureDetector
+            .onTap (fn [] (.then (.reverse icon-transition-controller)
+                                 (fn [_] (reset! expanded-icon-atom nil))) nil)
+            .onHorizontalDragUpdate (fn [_] (.then (.reverse icon-transition-controller)
+                                                   (fn [_] (reset! expanded-icon-atom nil))) nil)
+            .child (m/Container .color (m/Colors.transparent)))))
+         (f/widget
+          :watch [expanded-icon expanded-icon-atom]
+          :bypass (when-not expanded-icon
+                    (m/SizedBox.shrink))
+          (do
+            (.forward icon-transition-controller)
+            (expand-icon-animation icon-transition-controller expanded-icon end-rect)))])
+
+       ::icon
+       (f/widget
+        :key key
+        :let [{:keys [idx]} @(get-ast-atom)]
+        :watch [{:keys [title asset]} (get-ast-atom)]
+        :padding {:all 8}
+        m/Column
+        .children
+        [(f/widget
+          :context ctx
+          :get [:expanded-icon-atom]
+          (m/GestureDetector
+           .onTap (fn []
+                    (reset! expanded-icon-atom (conj (get-icon-coords ctx) [:icon-idx idx]))))
+          (m/CustomPaint
+           .foregroundPainter (glass-border-painter icon-radius))
+          (m/Container
+           .decoration (m/BoxDecoration
+                        .borderRadius (m/BorderRadius.circular icon-radius)))
+          :padding {:vertical 16 :horizontal 16}
+          (if asset
+            (m/Image.asset (str "assets/animated/" asset)
+                           .fit m/BoxFit.contain
+                           .width 40
+                           .height 40)
+            (svg/SvgPicture.asset
+             "assets/icons/fluent--person-24-filled.svg"
+             .colorFilter (m/ColorFilter.mode m/Colors.black m/BlendMode.srcIn)
+             .width 40
+             .height 40)))
+         (m/Text title
+                 .style (m/TextStyle
+                         .color m/Colors.black
+                         .fontSize 14)
+                 .textAlign m/TextAlign.center)])
+
+       (throw (Exception (str "Unknown ui-type in home ast-store->widget: " ast)))))))

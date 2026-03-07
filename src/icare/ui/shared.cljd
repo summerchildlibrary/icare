@@ -1,0 +1,127 @@
+(ns icare.ui.shared
+  (:require ["package:flutter/material.dart" :as m]
+            ["dart:ui" :as ui]
+            ["dart:math" :refer [pi]]
+            [cljd.flutter :as f]))
+
+(defn hsv
+  ([hue saturation value] (.toColor (m/HSVColor.fromAHSV 1 hue saturation value)))
+  ([alpha hue saturation value] (.toColor (m/HSVColor.fromAHSV alpha hue saturation value))))
+
+(defn glass-border-painter [r]
+  (reify :extends m/CustomPainter
+    (paint [_ canvas size]
+      (let [hi 0.9
+            mid 0.7
+            lo 0.4
+            stroke 1.35
+            half (/ stroke 2.0)
+            rect (ui/Rect.fromLTWH half half
+                   (- (.-width size) stroke)
+                   (- (.-height size) stroke))
+            rrect (ui/RRect.fromRectAndRadius rect
+                    (ui/Radius.circular (- r half)))
+            grad (m/SweepGradient
+                  .startAngle 0.0
+                  .endAngle (* 2.0 pi)
+                  .colors [(m/Colors.white.withOpacity lo) (m/Colors.white.withOpacity lo)
+                           (m/Colors.white.withOpacity hi) (m/Colors.white.withOpacity hi)
+                           (m/Colors.white.withOpacity mid)
+                           (m/Colors.white.withOpacity lo) (m/Colors.white.withOpacity lo)
+                           (m/Colors.white.withOpacity hi) (m/Colors.white.withOpacity hi)
+                           (m/Colors.white.withOpacity mid)
+                           (m/Colors.white.withOpacity lo) (m/Colors.white.withOpacity lo)]
+                  .stops [0.00 0.02
+                          0.035 0.336
+                          0.37 0.414
+                          0.561 0.585
+                          0.811 0.86
+                          0.914 1.00])
+            p (doto (m/Paint)
+                (.-style! ui/PaintingStyle.stroke)
+                (.-strokeWidth! stroke)
+                (.-strokeJoin! ui/StrokeJoin.round)
+                (.-isAntiAlias! true)
+                (.-blendMode! m/BlendMode.hardLight)
+                (.-shader! (.createShader grad rect)))]
+        (.drawRRect canvas rrect p)))
+    (shouldRepaint [_ _] true)))
+
+(defn navigation-button
+  "creates a default styled navigation button, content is a list of widgets given to a row,
+  on-tap is the callback for when the button is tapped"
+  [content on-tap]
+  (f/widget
+   :let [radius 12]
+   (m/DefaultTextStyle.merge
+    .style (m/TextStyle
+            .color m/Colors.black
+            .fontSize 16))
+   (m/IconTheme
+    .data (m/IconThemeData
+           .color m/Colors.black
+           .size 14))
+   (m/GestureDetector
+    .onTap on-tap)
+   (m/CustomPaint
+    .foregroundPainter (glass-border-painter radius))
+   (m/Container
+    .decoration (m/BoxDecoration
+                 .color (hsv 0.2 0 0 1)
+                 .borderRadius (m/BorderRadius.circular radius)))
+   :padding {:vertical 6 :horizontal 12}
+   (m/Row
+    .mainAxisSize m/MainAxisSize.min)
+   .children
+   content))
+
+(defn autoscroll-away-from-keyboard
+  "given a scroll controller and a scrollable child returns the scrollable child
+  that will automatically scroll up when a focused item is covered by the keyboard"
+  [^m/ScrollController scroll-controller scrollable-child]
+  (f/widget
+   :context ctx
+   :managed [focus-callback (fn []
+                              (when-let [focused (.-primaryFocus m/FocusManager.instance)]
+                                (Future.delayed
+                                 (Duration .milliseconds 300)
+                                 (fn []
+                                   (let [phone-insets (m/MediaQuery.viewInsetsOf ctx)
+                                         keyboard-to-bottom (.-bottom phone-insets)
+                                         phone-size (m/MediaQuery.sizeOf ctx)
+                                         phone-length (.-height phone-size)
+                                         focused-to-top (.-dy (.-offset focused))
+                                         focused-to-bottom (- phone-length focused-to-top)
+                                         extra-height 60
+                                         focus-scroll-delta (max
+                                                             0
+                                                             (+ extra-height
+                                                                (- keyboard-to-bottom focused-to-bottom)))
+                                         scroll-offset (.-offset scroll-controller)
+                                         focus-scroll (+ scroll-offset focus-scroll-delta)]
+                                     (when (pos? keyboard-to-bottom)
+                                       (.animateTo scroll-controller
+                                                   focus-scroll
+                                                   .duration (Duration .milliseconds 300)
+                                                   .curve m/Curves.linear)))))))
+             :dispose nil
+             _ (doto m/FocusManager.instance (.addListener focus-callback))
+             :dispose (.removeListener focus-callback)]
+   scrollable-child))
+
+(defn scale-down-fade-animation
+  "Scale down and fade animation"
+  [controller child]
+  (f/widget
+   :managed [curved            (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut) :dispose nil
+             scale-animation   (.drive curved (m/Tween .begin 1.0 .end 0.85))                   :dispose nil
+             opacity-animation (.drive curved (m/Tween .begin 1.0 .end 0.0))                    :dispose nil]
+   (m/AnimatedBuilder
+    .animation controller
+    .builder (fn [_ child]
+               (m/Transform.scale
+                .scale (.-value scale-animation)
+                .child (m/Opacity
+                        .opacity (.-value opacity-animation)
+                        .child child)))
+    .child child)))

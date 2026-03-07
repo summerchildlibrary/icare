@@ -2,7 +2,7 @@
   (:require [icare.resources.network :refer [dispatch!] :rename {dispatch! network-dispatch!}]
             [icare.resources.storage :refer [dispatch!] :rename {dispatch! storage-dispatch!}]
             [icare.resources.state
-             :refer [dispatch! get-state get-derived-state get-task-by-indexes gather-pub-keys-and-uuids get-device-token]
+             :refer [dispatch! get-task-by-indexes gather-pub-keys-and-uuids get-device-token get-new-task get-updated-task]
              :rename {dispatch! state-dispatch!}]
             [icare.resources.glue :refer [update-state-and-persist!]]
             [icare.ui.glue :refer [render-ui!]]
@@ -67,6 +67,7 @@
                      .provisional false
                      .sound true)))
         ;;sometimes we fail to get token on startup. This could also return nil so maybe we want to handle that case better
+        (prn (get-device-token))
         (when-not (get-device-token)
           (let [token (await (-> (.getToken messaging)
                                  (.catchError (fn [e]
@@ -143,6 +144,10 @@
      :send-friend-request
      (update-state-render-and-persist! event)
 
+     :toggle-wobble
+     (let [db (state-dispatch! event)]
+       (render-ui! db))
+
      :toggle-handshake-qr ;;just showing a qr code, no need to persist state
      (let [db (state-dispatch! event)]
        (render-ui! db))
@@ -150,5 +155,52 @@
      :toggle-handshake-network
      (let [db (state-dispatch! event)]
        (render-ui! db))
+
+     ;;shared ui-events
+     :navigate
+     (update-state-render-and-persist! event)
+
+     ;;--- Home page events
+     :reorder-icons
+     (update-state-render-and-persist! event)
+
+     ;;--- Todo-list page events ---
+     :reorder-tasks
+     (update-state-render-and-persist! event)
+
+     :complete-task
+     (let [db (update-state-render-and-persist! event)
+           updated-task (get-updated-task db (:task-idx event))
+           task-uuid (:uuid updated-task)
+           receipts (get-in db [:notify-receipts task-uuid])]
+       (network-dispatch! {:type :send-updated-task
+                           :task updated-task
+                           :deleted false})
+       (when (and (:completed event) receipts)
+         (doseq [[requester-pub-key event-json] receipts]
+           (network-dispatch! {:type :fulfill-notify
+                               :to-pub-key requester-pub-key
+                               :notify-receipt event-json
+                               :notification-content {:title (:title updated-task)
+                                                      :body "Was completed"}}))))
+
+     :delete-task
+     (do
+       (update-state-render-and-persist! event)
+       (network-dispatch! {:type :send-updated-task
+                           :deleted true
+                           :task (:task event)}))
+
+     :rename-task
+     (let [db (update-state-render-and-persist! event)]
+       (network-dispatch! {:type :send-updated-task
+                           :deleted false
+                           :task (get-updated-task db (:task-idx event))}))
+
+     :add-task
+     (let [db (update-state-render-and-persist! event)]
+       (network-dispatch! {:type :send-updated-task
+                           :deleted false
+                           :task (get-new-task db (:task-idx event))}))
 
      (throw (Exception (str "Unknown event type in ui-events dispatch: " event))))))
