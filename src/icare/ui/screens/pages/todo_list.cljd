@@ -84,6 +84,7 @@
            (m/ReorderableListView
             ;; .itemBuilder (fn [_ idx] (recursive-call (nth tasks idx)))
             ;; .itemCount (count tasks)
+            .physics (m/AlwaysScrollableScrollPhysics)
             .children (mapv recursive-call tasks)
             .onReorder (on-reorder-tasks handle-ui-event!)
             .anchor content-start
@@ -97,7 +98,7 @@
         :managed [text-controller (m/TextEditingController .text title)]
         :let [{:keys [on-complete on-edit-task-title]} @(get-ast-atom)]
         :padding task-padding
-        (m/Row)
+        m/Row
         .children
         [(f/widget
           :padding {:top 2}

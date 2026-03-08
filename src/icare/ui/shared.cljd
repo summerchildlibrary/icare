@@ -45,7 +45,7 @@
                 (.-blendMode! m/BlendMode.hardLight)
                 (.-shader! (.createShader grad rect)))]
         (.drawRRect canvas rrect p)))
-    (shouldRepaint [_ _] true)))
+    (shouldRepaint [_ _] false)))
 
 (defn navigation-button
   "creates a default styled navigation button, content is a list of widgets given to a row,

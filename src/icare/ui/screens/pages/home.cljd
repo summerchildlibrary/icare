@@ -3,7 +3,7 @@
             ["package:reorderable_grid/reorderable_grid.dart" :as reorderable-grid]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["dart:ui" :as ui]
-            [icare.ui.shared :refer [navigation-button glass-border-painter]]
+            [icare.ui.shared :refer [hsv navigation-button glass-border-painter]]
             [cljd.flutter :as f]))
 
 (defn icon [derived-state icon-index company]
@@ -30,46 +30,108 @@
      :icons (mapv (partial icon derived-state) (range) (:company state))}))
 
 (def icon-radius 20)
+(def number-of-columns 4)
+(def ^m/Offset image-destination (m/Offset 50 100))
+(def title-style (m/TextStyle
+                   .color m/Colors.black
+                   .fontSize 14))
 
-(defn get-icon-coords [^m/BuildContext context]
+(defn ctx->coords [^m/BuildContext context]
   (let [box ^m/RenderBox (.findRenderObject context)
         position (.localToGlobal box m/Offset.zero)
         size (.-size box)]
     {:position position :size size}))
 
-(defn expand-icon-animation
-  [controller {:keys [^m/Offset position ^m/Size size]} end-rect]
+(defn key->coords [^m/GlobalKey key]
+  (let [box ^m/RenderBox (.findRenderObject (.-currentContext key))
+        position (.localToGlobal box m/Offset.zero)
+        size (.-size box)]
+    {:position position :size size}))
+
+(defn animated-asset
+  [^m/ImageStream stream width height]
   (f/widget
-   :managed [begin-rect        (m/Rect.fromLTWH (.-dx position) (.-dy position) (.-width size) (.-height size)) :dispose nil
-             curved            (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut) :dispose nil
-             rect-animation    (.drive curved (m/RectTween .begin begin-rect .end end-rect))    :dispose nil]
-   (m/AnimatedBuilder
-    .animation controller
-    .builder (fn [_ child]
-               (m/Positioned.fromRect
-                .rect (.-value rect-animation)
-                .child (m/ClipRRect
-                        .borderRadius (m/BorderRadius.circular icon-radius)
-                        .child child)))
-    .child (m/Container
-            .color m/Colors.white))))
+   :managed [image-info-atom (atom nil)                                         :dispose nil
+             listener        (m/ImageStreamListener
+                               (fn [^m/ImageInfo info _]
+                                 (let [^m/ImageInfo? old @image-info-atom]
+                                   (reset! image-info-atom info)
+                                   (when old (.dispose old)))))                 :dispose nil
+             _               (doto stream (.addListener listener))
+                             :dispose ((fn [^m/ImageStream s]
+                                         (when-let [info ^m/ImageInfo @image-info-atom]
+                                           (.dispose info))
+                                         (.removeListener s listener)))]
+   :watch [^m/ImageInfo? info image-info-atom]
+   (m/RawImage
+     .image  (when info (.-image info))
+     .scale  (if (and info (.-scale info)) (.-scale info) 1.0)
+     .width  width
+     .height height
+     .fit    m/BoxFit.contain)))
+
+(defn animated-title-expansion
+  [controller {:keys [text-key title] :as expanded-icon}]
+  (let [{:keys [^m/Offset position ^m/Size size]} (key->coords text-key)
+         text-destination                         (.+ image-destination (m/Offset 100 0))
+         text-destination (m/Offset 150 100)
+         text                                     (f/widget
+                                                   (m/Container
+                                                    .decoration (m/BoxDecoration
+                                                                 .border (m/Border.all
+                                                                          .color (m/Colors.black.withOpacity 0.5)
+                                                                          .width 1)))
+                                                   (m/Text title .style title-style))
+         curved                                   (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut)
+         translate                                (.drive curved (m/Tween .begin 0.0 .end 1.0))
+         scale                                    (.drive curved (m/Tween .begin 1.0 .end 2.0))]
+    (f/widget
+     :watch [_ controller]
+     (m/Transform.translate
+      .offset (m/Offset.lerp position text-destination (.-value translate)))
+     (m/Transform.scale
+      .scale (.-value scale))
+     text)))
+
+(defn animated-image-expansion
+  [controller {:keys [image-key ^m/ImageStream? image-stream] :as expanded-icon}]
+  (let [{:keys [^m/Offset position ^m/Size size]} (key->coords image-key)
+         image (if image-stream
+                 (animated-asset image-stream 40 40)
+                 (svg/SvgPicture.asset "assets/icons/fluent--person-24-filled.svg"
+                  .colorFilter (m/ColorFilter.mode m/Colors.black m/BlendMode.srcIn)
+                  .width 40
+                  .height 40))
+         curved            (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut)
+         translate         (.drive curved (m/Tween .begin 0.0 .end 1.0))
+         scale       (.drive curved (m/Tween .begin 1.0 .end 3.0))]
+    (f/widget
+     :watch [_ controller]
+     (m/Transform.translate
+      .offset (m/Offset.lerp position image-destination (.-value translate)))
+     (m/Transform.scale
+      .scale (.-value scale))
+     image)))
 
 (defn background-blur-animation
   [controller child]
   (f/widget
    :managed [curved          (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut) :dispose nil
-             blur-animation  (.drive curved (m/Tween .begin 0.0 .end 12.0))                   :dispose nil]
+             blur-animation  (.drive curved (m/Tween .begin 0.0 .end 12))                   :dispose nil] ;;change end to 12 to go back to blur, blurring is pretty  expensive on older phones so maybe it's not worth it
    (m/AnimatedBuilder
     .animation controller
     .builder (fn [_ child]
                (m/Positioned.fill
-                .child (m/BackdropFilter
-                        .filter (ui/ImageFilter.blur
-                                 .sigmaX (.-value blur-animation)
-                                 .sigmaY (.-value blur-animation))
-                        .child child)))
+                .child
+                ;; .child (m/Container
+                ;;         .color (m/Colors.white.withOpacity (.-value blur-animation))
+                ;;         .child child)
+                (m/BackdropFilter
+                 .filter (ui/ImageFilter.blur
+                          .sigmaX (.-value blur-animation)
+                          .sigmaY (.-value blur-animation))
+                 .child child)))
     .child child)))
-
 
 (defn ast-store->widget
   ([ast-store handle-ui-event!] (ast-store->widget handle-ui-event! ast-store @(get @ast-store "home-base")))
@@ -90,8 +152,7 @@
               notch-height (.-top phone-padding)
               phone-size (m/MediaQuery.sizeOf ctx)
               phone-length (.-height phone-size)
-              content-start (/ (+ notch-height 40) phone-length)
-              end-rect (m/Rect.fromLTWH 20 300 (- (.-width phone-size) 40) 200)]
+              content-start (/ (+ notch-height 40) phone-length)]
         :managed [icon-transition-controller (m/AnimationController
                                               .vsync clock
                                               .duration (Duration .milliseconds 300))
@@ -104,7 +165,7 @@
           :watch [{:keys [icons]} (get-ast-atom)]
           (reorderable-grid/ReorderableGridView.count
            .anchor content-start
-           .crossAxisCount 4
+           .crossAxisCount number-of-columns
            .childAspectRatio 0.8
            .proxyDecorator (fn [child _ _] child)
            .onReorder (on-reorder-icons handle-ui-event!)
@@ -122,46 +183,56 @@
             .child (m/Container .color (m/Colors.transparent)))))
          (f/widget
           :watch [expanded-icon expanded-icon-atom]
-          :bypass (when-not expanded-icon
-                    (m/SizedBox.shrink))
+          :when expanded-icon
+          (animated-title-expansion icon-transition-controller expanded-icon))
+         (f/widget
+          :watch [expanded-icon expanded-icon-atom]
+          :when expanded-icon
           (do
             (.forward icon-transition-controller)
-            (expand-icon-animation icon-transition-controller expanded-icon end-rect)))])
+            (animated-image-expansion icon-transition-controller expanded-icon)))])
 
        ::icon
        (f/widget
         :key key
+        :get [:expanded-icon-atom]
         :let [{:keys [idx]} @(get-ast-atom)]
-        :watch [{:keys [title asset]} (get-ast-atom)]
-        :padding {:all 8}
-        m/Column
+        :watch [{:keys [title asset]} (get-ast-atom)
+                {:keys [icon-idx]} expanded-icon-atom]
+        :bypass (when (= idx icon-idx)
+                 (m/SizedBox))
+        :managed [image-global-key (m/GlobalKey)                      :dispose nil
+                  text-global-key  (m/GlobalKey)                      :dispose nil
+                  image-stream (when asset (.resolve (m/AssetImage (str "assets/animated/" asset)) m/ImageConfiguration.empty)) :dispose nil]
+        (m/GestureDetector
+         .behavior m/HitTestBehavior.opaque
+         .onTap (fn []
+                  (reset! expanded-icon-atom {:image-key image-global-key
+                                              :text-key text-global-key
+                                              :icon-idx idx
+                                              :image-stream image-stream
+                                              :title title})))
+        (m/Column
+         .crossAxisAlignment m/CrossAxisAlignment.center)
         .children
         [(f/widget
-          :context ctx
-          :get [:expanded-icon-atom]
-          (m/GestureDetector
-           .onTap (fn []
-                    (reset! expanded-icon-atom (conj (get-icon-coords ctx) [:icon-idx idx]))))
-          (m/CustomPaint
-           .foregroundPainter (glass-border-painter icon-radius))
-          (m/Container
-           .decoration (m/BoxDecoration
-                        .borderRadius (m/BorderRadius.circular icon-radius)))
+          ;; (m/CustomPaint
+          ;;  .foregroundPainter (glass-border-painter icon-radius))
+          ;; (m/Container
+          ;;  .decoration (m/BoxDecoration
+          ;;               .borderRadius (m/BorderRadius.circular icon-radius)))
           :padding {:vertical 16 :horizontal 16}
+          (m/Container
+           .key image-global-key)
           (if asset
-            (m/Image.asset (str "assets/animated/" asset)
-                           .fit m/BoxFit.contain
-                           .width 40
-                           .height 40)
+            (animated-asset image-stream 40 40)
             (svg/SvgPicture.asset
              "assets/icons/fluent--person-24-filled.svg"
              .colorFilter (m/ColorFilter.mode m/Colors.black m/BlendMode.srcIn)
              .width 40
              .height 40)))
          (m/Text title
-                 .style (m/TextStyle
-                         .color m/Colors.black
-                         .fontSize 14)
-                 .textAlign m/TextAlign.center)])
+                 .key text-global-key
+                 .style title-style)])
 
        (throw (Exception (str "Unknown ui-type in home ast-store->widget: " ast)))))))
