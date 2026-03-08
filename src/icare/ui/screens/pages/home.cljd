@@ -3,7 +3,7 @@
             ["package:reorderable_grid/reorderable_grid.dart" :as reorderable-grid]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["dart:ui" :as ui]
-            [icare.ui.shared :refer [hsv navigation-button glass-border-painter]]
+            [icare.ui.shared :refer [hsv navigation-button glass-border-painter get-polar-lerp-from-offsets]]
             [cljd.flutter :as f]))
 
 (defn icon [derived-state icon-index company]
@@ -73,22 +73,16 @@
 (defn animated-title-expansion
   [controller {:keys [text-key title] :as expanded-icon}]
   (let [{:keys [^m/Offset position ^m/Size size]} (key->coords text-key)
-         text-destination                         (.+ image-destination (m/Offset 100 0))
-         text-destination (m/Offset 150 100)
-         text                                     (f/widget
-                                                   (m/Container
-                                                    .decoration (m/BoxDecoration
-                                                                 .border (m/Border.all
-                                                                          .color (m/Colors.black.withOpacity 0.5)
-                                                                          .width 1)))
-                                                   (m/Text title .style title-style))
-         curved                                   (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut)
-         translate                                (.drive curved (m/Tween .begin 0.0 .end 1.0))
-         scale                                    (.drive curved (m/Tween .begin 1.0 .end 2.0))]
+        text-destination                         (.+ image-destination (m/Offset (+ (* 0.5 (.-width size)) 100) 0))
+        circle-lerp                              (get-polar-lerp-from-offsets position text-destination)
+        text                                     (m/Text title .style title-style)
+        curved                                   (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut)
+        translate                                (.drive curved (m/Tween .begin 0.0 .end 1.0))
+        scale                                    (.drive curved (m/Tween .begin 1.0 .end 2.0))]
     (f/widget
      :watch [_ controller]
      (m/Transform.translate
-      .offset (m/Offset.lerp position text-destination (.-value translate)))
+      .offset (circle-lerp (.-value translate)))
      (m/Transform.scale
       .scale (.-value scale))
      text)))
