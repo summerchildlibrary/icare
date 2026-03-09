@@ -98,7 +98,8 @@
 
 (defn start-listening! [ws user-task-uuids friend-pub-keys user-pub-key handle-network-data!]
   (.listen ^WebSocket ws
-           handle-network-data!
+           (fn [data]
+             (handle-network-data! data))
            .onError (fn [error] ;;TODO reconnection logic
                       (prn "WebSocket error:" error)
                       (reset! web-socket nil))
