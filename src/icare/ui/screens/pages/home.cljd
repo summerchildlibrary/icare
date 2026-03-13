@@ -3,13 +3,13 @@
             ["package:reorderable_grid/reorderable_grid.dart" :as reorderable-grid]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["dart:ui" :as ui]
-            ["package:flutter/rendering.dart" :as rendering]
             [icare.ui.shared :refer [hsv navigation-button glass-border-painter
                                      get-polar-lerp-from-offsets
                                      lerp-polar-offsets
                                      animated-blur
                                      animated-fade
-                                     add-fade-gradient]]
+                                     add-fade-gradient
+                                     fade-sliver]]
             [cljd.flutter :as f]))
 
 (defn expanded-icon-task [derived-state pub-key task] ;;having a separate task ast allows us to have updates which only affect specific tasks, this isn't so important unless we start making tasks really fancy and people have a lot of tasks
@@ -27,8 +27,8 @@
      :id (str "home-expanded-icon-" pub-key)
      :tasks (mapv (partial expanded-icon-task derived-state pub-key) tasks)})
 
-(defn icon [derived-state icon-index company]
-  (let [{:keys [pub-key name asset tasks]} company] ;;TODO i was trying something out with company, I think friend is the better word here
+(defn icon [derived-state icon-index list-item]
+  (let [{:keys [pub-key name asset tasks]} list-item]
     {:ui-type ::icon
      :id (str "home-icon-" pub-key)
      :idx icon-index
@@ -49,7 +49,7 @@
                              (handle-ui-event! {:type :reorder-icons
                                                 :from-index old-idx
                                                 :to-index new-idx}))))
-     :icons (mapv (partial icon derived-state) (range) (:company state))}))
+     :icons (mapv (partial icon derived-state) (range) (:lists state))}))
 
 ;; Widget stuff
 
@@ -231,7 +231,7 @@
               {image-origin :position image-size :size} image-coords
               {title-origin :position ^m/Size title-size :size} text-coords
               title-destination                         (.+ image-destination (m/Offset (+ (* 0.5 (.-width title-size)) 100) 0))
-              curved                                   (m/CurvedAnimation .parent icon-transition-controller .curve m/Curves.easeInOut)
+              curved                                   (m/CurvedAnimation .parent icon-transition-controller .curve m/Curves.linear)
               t                                        (.drive curved (m/Tween .begin 0.0 .end 1.0))
               title                                     (m/Text title .style title-style)
               image (if image-stream
@@ -328,48 +328,3 @@
            (m/Spacer .flex 1)])])
 
        (throw (Exception (str "Unknown ui-type in home ast-store->widget: " ast)))))))
-
-(deftype RenderFadeSliver [^:mutable ^double fadeStart
-                           ^:mutable ^double fadeExtent]
-  :extends rendering/RenderProxySliver
-  (paint [this ^m/PaintingContext context ^m/Offset offset]
-   (let [constraints  ^rendering/SliverConstraints (.-constraints this)
-         sliver-top   (- (.-viewportMainAxisExtent constraints)
-                         (.-remainingPaintExtent constraints))
-         cross        (.-crossAxisExtent constraints)
-         paint-extent (.-paintExtent (.-geometry this))
-         fade-end     (+ fadeStart fadeExtent)
-         rect         (.& offset (m/Size cross paint-extent))]
-     (if (>= sliver-top fade-end)
-       ;; sliver is entirely below the fade zone, paint normally
-       (.paintChild context (.-child this) offset)
-       (let [;; opacity at the very top of this sliver's paint area
-             start-opacity             (.clamp (/ (- sliver-top fadeStart) fadeExtent) 0.0 1.0)
-             start-stop                (.clamp (/ (- fadeStart sliver-top) paint-extent) 0.0 1.0)
-             full-opacity-stop         (.clamp (/ (- fade-end sliver-top) paint-extent) 0.0 1.0)
-             shader        (.createShader
-                            (m/LinearGradient
-                             .begin  m/Alignment.topCenter
-                             .end    m/Alignment.bottomCenter
-                             .colors [(m/Colors.black.withOpacity
-                                       start-opacity)
-                                      m/Colors.black]
-                             .stops  [start-stop full-opacity-stop])
-                            rect)]
-         (.pushLayer context
-                     (doto (rendering/ShaderMaskLayer)
-                       (.-shader!    shader)
-                       (.-maskRect!  rect)
-                       (.-blendMode! m/BlendMode.dstIn))
-                     (fn [^m/PaintingContext ctx ^m/Offset off]
-                       (.paintChild ctx (.-child this) off))
-                     offset))))))
-
-(defn fade-sliver [.child .fadeExtent .fadeStart]
-  (reify :extends (m/SingleChildRenderObjectWidget .child child)
-    (createRenderObject [this ^m/BuildContext _ctx]
-      (RenderFadeSliver fadeStart fadeExtent))
-    (updateRenderObject [this ^m/BuildContext _ctx ^RenderFadeSliver ro]
-      (.-fadeStart!  ro fadeStart)
-      (.-fadeExtent! ro fadeExtent)
-      nil)))
