@@ -1,6 +1,7 @@
 (ns icare.ui.shared
   (:require ["package:flutter/material.dart" :as m]
             ["dart:ui" :as ui]
+            ["package:flutter/rendering.dart" :as rendering]
             ["dart:math" :refer [pi sqrt atan2 cos sin]]
             [cljd.flutter :as f]))
 
@@ -262,3 +263,53 @@
      (m/Opacity
       .opacity (.-value opacity))
      content)))
+
+;; render element used with fade-sliver"
+(deftype RenderFadeSliver
+  [^:mutable ^double fadeStart
+   ^:mutable ^double fadeExtent]
+  :extends rendering/RenderProxySliver
+  (paint [this ^m/PaintingContext context ^m/Offset offset]
+   (let [constraints  ^rendering/SliverConstraints (.-constraints this)
+         sliver-top   (- (.-viewportMainAxisExtent constraints)
+                         (.-remainingPaintExtent constraints))
+         cross        (.-crossAxisExtent constraints)
+         paint-extent (.-paintExtent (.-geometry this))
+         fade-end     (+ fadeStart fadeExtent)
+         rect         (.& offset (m/Size cross paint-extent))]
+     (if (>= sliver-top fade-end)
+       (.paintChild context (.-child this) offset)
+       ;;don't ask me about the math for this
+       (let [start-opacity             (.clamp (/ (- sliver-top fadeStart) fadeExtent) 0.0 1.0)
+             start-stop                (.clamp (/ (- fadeStart sliver-top) paint-extent) 0.0 1.0)
+             full-opacity-stop         (.clamp (/ (- fade-end sliver-top) paint-extent) 0.0 1.0)
+             shader        (.createShader
+                            (m/LinearGradient
+                             .begin  m/Alignment.topCenter
+                             .end    m/Alignment.bottomCenter
+                             .colors [(m/Colors.black.withOpacity
+                                       start-opacity)
+                                      m/Colors.black]
+                             .stops  [start-stop full-opacity-stop])
+                            rect)]
+         (.pushLayer context
+                     (doto (rendering/ShaderMaskLayer)
+                       (.-shader!    shader)
+                       (.-maskRect!  rect)
+                       (.-blendMode! m/BlendMode.dstIn))
+                     (fn [^m/PaintingContext ctx ^m/Offset off]
+                       (.paintChild ctx (.-child this) off))
+                     offset))))))
+
+(defn fade-sliver
+  "takes a sliver child and applies a fade out gradient from the top of the screen to fadeStart + fadeExtent pixels down
+  useful for making a sliver list fade out as it scrolls up.
+  This should only be used with slivers. On regular widgets simply apply a shader mask."
+  [.child .fadeExtent .fadeStart]
+  (reify :extends (m/SingleChildRenderObjectWidget .child child)
+    (createRenderObject [this ^m/BuildContext _ctx]
+      (RenderFadeSliver fadeStart fadeExtent))
+    (updateRenderObject [this ^m/BuildContext _ctx ^RenderFadeSliver ro]
+      (.-fadeStart!  ro fadeStart)
+      (.-fadeExtent! ro fadeExtent)
+      nil)))
