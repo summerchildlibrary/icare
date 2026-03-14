@@ -63,12 +63,12 @@
 (def ^m/Offset image-destination (m/Offset 50 100))
 
 (defn ast-store->widget
-  ([handle-ui-event! ast-store {:keys [ui-type id] :as ast}]
+  ([handle-ui-event! ast-store id]
    (let [recursive-call (fn [ast-id]
                           ;; (prn "ast-store->widget called with ast-id: " ast-id)
-                          (ast-store->widget handle-ui-event! ast-store @(get @ast-store ast-id)))
+                          (ast-store->widget handle-ui-event! ast-store ast-id))
          get-ast-atom #(get @ast-store id)
-         {:keys [key]} @(get-ast-atom)]
+         {:keys [key ui-type]} @(get-ast-atom)]
      (condp = ui-type
        ::list
        (f/widget
@@ -199,4 +199,4 @@
            .controller text-controller))])
 
 
-       (throw (Exception (str "Unknown ui-type in home page todo-list ast-store->widget: " ast)))))))
+       (throw (Exception (str "Unknown ui-type in home page todo-list ast-store->widget: " @(get-ast-atom))))))))

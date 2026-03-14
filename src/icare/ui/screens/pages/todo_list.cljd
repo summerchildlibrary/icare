@@ -57,13 +57,13 @@
                                    .fontSize 20))
 
 (defn ast-store->widget
-  ([ast-store handle-ui-event!] (ast-store->widget handle-ui-event! ast-store @(get @ast-store "todo-list-base")))
-  ([handle-ui-event! ast-store {:keys [ui-type id] :as ast}]
+  ([ast-store handle-ui-event!] (ast-store->widget handle-ui-event! ast-store "todo-list-base"))
+  ([handle-ui-event! ast-store id]
    (let [recursive-call (fn [ast-id]
                           ;; (prn "ast-store->widget called with ast-id: " ast-id)
-                          (ast-store->widget handle-ui-event! ast-store @(get @ast-store ast-id)))
+                          (ast-store->widget handle-ui-event! ast-store ast-id))
          get-ast-atom #(get @ast-store id)
-         {:keys [key]} @(get-ast-atom)]
+         {:keys [ui-type key]} @(get-ast-atom)]
      (condp = ui-type
        ::base
        (f/widget
@@ -150,4 +150,4 @@
            .controller text-controller))])
 
 
-       (throw (Exception (str "Unknown ui-type in todo-list ast-store->widget: " ast)))))))
+       (throw (Exception (str "Unknown ui-type in todo-list ast-store->widget: " @(get-ast-atom))))))))

@@ -68,13 +68,13 @@
 ;; AST -> STORE stuff
 
 (defn ast-store->widget
-  ([ast-store handle-ui-event!] (ast-store->widget handle-ui-event! ast-store @(get @ast-store "home-base")))
-  ([handle-ui-event! ast-store {:keys [ui-type id] :as ast}]
+  ([ast-store handle-ui-event!] (ast-store->widget handle-ui-event! ast-store "home-base"))
+  ([handle-ui-event! ast-store id]
    (let [recursive-call (fn [ast-id]
                           ;; (prn "ast-store->widget called with ast-id: " ast-id)
-                          (ast-store->widget handle-ui-event! ast-store @(get @ast-store ast-id)))
+                          (ast-store->widget handle-ui-event! ast-store ast-id))
          get-ast-atom #(get @ast-store id)
-         {:keys [key]} @(get-ast-atom)]
+         {:keys [key ui-type]} @(get-ast-atom)]
      (condp = ui-type
        ::base
        (f/widget
@@ -103,7 +103,6 @@
            .onReorder (on-reorder-icons handle-ui-event!)
            .children (mapv recursive-call icons)))
          (f/widget
-          :let [content-start 180]
           :watch [expanded-icon expanded-icon-atom]
           :when expanded-icon
           (do
@@ -119,7 +118,7 @@
                .onHorizontalDragUpdate (fn [_] (.then (.reverse icon-transition-controller)
                                                       (fn [_] (reset! expanded-icon-atom nil)))
                                          nil)
-               .child (expanded-icon->widget handle-ui-event! ast-store @(get @ast-store (:expanded-icon expanded-icon))))])))])
+               .child (expanded-icon->widget handle-ui-event! ast-store (:expanded-icon expanded-icon)))])))])
 
        ::icon
        (f/widget
@@ -162,4 +161,4 @@
                  .key text-global-key
                  .style title-style)])
 
-       (throw (Exception (str "Unknown ui-type in home ast-store->widget: " ast)))))))
+       (throw (Exception (str "Unknown ui-type in home ast-store->widget: " @(get-ast-atom))))))))
