@@ -25,197 +25,267 @@
                    :notify? false
                    :subitems [{:type :time :value "2026-01-06 09:18:04Z"}]}
                   {:is-add-task-task? true}]}
-   :lists [{:type :list
-              :name "Char"
-              :asset "penguin.webp"
-              :expanded? false
-              :pub-key "b5bff73132049a564cb588dad9862acc31fa52c07bbecd991237b8cb9c2fa3b"
-              :tasks [{:title "Defeated bear"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed false
-                       :subitems []}
-                      {:title "go to sleep"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? true
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
-             {:type :list
-              :name "Example"
-              :expanded? false
-              :pub-key "b5bff73132049a564cb588dad9862acc31fa52c07bbecd991237b8cb9c2fa"
-              :tasks [{:title "Defeated bear"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed false
-                       :subitems []}
-                      {:title "go to sleep"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? true
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
-             {:type :list
-              :name "Example 🎸🎸"
-              :expanded? false
-              :pub-key "b5bff132049a564cb588dad9862acc31fa52c07bbecd991237b8cb9c2fa3b"
-              :tasks [{:title "Defeated bear"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed false
-                       :subitems []}
-                      {:title "go to sleep"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? true
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
-             {:type :list
-              :name "Example 🎸🎸"
-              :expanded? false
-              :pub-key "b5bff73324a564cb588dad9862acc31fa52c07bbecd991237b8cb9c2fa3b"
-              :tasks [{:title "Defeated bear"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed false
-                       :subitems []}
-                      {:title "go to sleep"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? true
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
-             {:type :list
-              :name "Jun"
-              :asset "fish.webp"
-              :expanded? false
-              :pub-key "b5bff7313249a6cb58dad9862acc31fa52c07bbecd991237b8cb9c2fa3b"
-              :tasks [{:title "Defeated bear"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed false
-                       :subitems []}
-                      {:title "go to sleep"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? true
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-                      {:title "go to sleep"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? true
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-                      {:title "go to sleep"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? true
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-                      {:title "go to sleep"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? true
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-                      {:title "went for walk"
-                       :uuid (uuid-generator)
-                       :liked false
-                       :notify? false
-                       :completed true
-                       :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-                                  {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}]
+   :lists [
+           {:name "Char"
+            :asset "penguin.webp"
+            :expanded? false
+            :pub-key "b5bff73132049a564cb588dad9862acc31fa52c07bbecd991237b8cb9c2fa3b"
+            :tasks [{:title "Defeated bear"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed false
+                     :subitems []}
+                    {:title "go to sleep"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? true
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                    {:title "went for walk"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+                    {:is-add-task-task? true}]}
+           {:name "Get big"
+            :asset "penguin.webp"
+            :expanded? false
+            :tasks [{:title "Defeated bear"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed false
+                     :subitems []}
+                    {:title "go to sleep"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? true
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                    {:title "went for walk"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+                    {:is-add-task-task? true}]}
+           {:name "Eat well"
+            :asset "penguin.webp"
+            :expanded? false
+            :tasks [{:title "Defeated bear"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed false
+                     :subitems []}
+                    {:title "go to sleep"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? true
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                    {:title "went for walk"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+                    {:is-add-task-task? true}]}
+           {:name "Love"
+            :asset "penguin.webp"
+            :expanded? false
+            :tasks [{:title "Defeated bear"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed false
+                     :subitems []}
+                    {:title "go to sleep"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? true
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                    {:title "went for walk"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+                    {:is-add-task-task? true}]}
+           {:name "Things that I like"
+            :asset "penguin.webp"
+            :expanded? false
+            :tasks [{:title "Defeated bear"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed false
+                     :subitems []}
+                    {:title "go to sleep"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? true
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                    {:title "went for walk"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+                    {:is-add-task-task? true}]}
+           {:name "Good movies"
+            :asset "penguin.webp"
+            :expanded? false
+            :tasks [{:title "Defeated bear"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed false
+                     :subitems []}
+                    {:title "go to sleep"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? true
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                    {:title "went for walk"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+                    {:is-add-task-task? true}]}
+           {:name "Contacts"
+            :asset "penguin.webp"
+            :expanded? false
+            :tasks [{:title "Defeated bear"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed false
+                     :subitems []}
+                    {:title "go to sleep"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? true
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+                    {:title "went for walk"
+                     :uuid (uuid-generator)
+                     :liked false
+                     :notify? false
+                     :completed true
+                     :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+                                {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+                    {:is-add-task-task? true}]}]
+           ;; {:type :list
+           ;;  :name "Jun"
+           ;;  :asset "fish.webp"
+           ;;  :expanded? false
+           ;;  :pub-key "b5bff7313249a6cb58dad9862acc31fa52c07bbecd991237b8cb9c2fa3b"
+           ;;  :tasks [{:title "Defeated bear"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? false
+           ;;           :completed false
+           ;;           :subitems []}
+           ;;          {:title "go to sleep"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? true
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+           ;;          {:title "went for walk"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? false
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+           ;;          {:title "went for walk"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? false
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+           ;;          {:title "went for walk"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? false
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+           ;;          {:title "went for walk"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? false
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+           ;;          {:title "went for walk"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? false
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+           ;;          {:title "went for walk"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? false
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+           ;;          {:title "go to sleep"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? true
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+           ;;          {:title "went for walk"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? false
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+           ;;          {:title "go to sleep"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? true
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+           ;;          {:title "went for walk"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? false
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
+           ;;          {:title "go to sleep"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? true
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
+           ;;          {:title "went for walk"
+           ;;           :uuid (uuid-generator)
+           ;;           :liked false
+           ;;           :notify? false
+           ;;           :completed true
+           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
+           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}]
    :current-screen :pages
    :device-token nil})
   ;; {:reorderable-items {:wobble? false
