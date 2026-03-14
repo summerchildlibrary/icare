@@ -1,0 +1,202 @@
+(ns icare.ui.screens.pages.home-components.todo-list
+  (:require ["package:flutter/material.dart" :as m]
+            ["package:flutter_svg/flutter_svg.dart" :as svg]
+            ["dart:ui" :as ui]
+            [icare.ui.shared.paint :refer [hsv fade-sliver]]
+            [icare.ui.shared.utils :refer [lerp-polar-offsets get-phone-measurements]]
+            [icare.ui.shared.animations :refer [animated-asset animated-sliver-fade]]
+            [cljd.flutter :as f]))
+
+(defn task [derived-state name task-idx task]
+  (let [{:keys [uuid title completed is-add-task-task?]} task]
+    (if is-add-task-task?
+      {:ui-type ::add-task-task
+       :key "add-task-task"
+       :id (str "add-task-task-" name)
+       :on-add-task (fn [handle-ui-event!]
+                      (fn [title]
+                        (when-not (empty? title)
+                          (handle-ui-event! {:type :add-task
+                                             :title title
+                                             :task-idx task-idx}))))}
+      {:ui-type ::task
+       :key uuid
+       :id (str name "-task-" uuid)
+       :title title
+       :on-complete (fn [handle-ui-event!]
+                      (fn []
+                        (handle-ui-event! {:type :complete-task
+                                           :task-idx task-idx
+                                           :completed (not completed)})))
+       :on-edit-task-title (fn [handle-ui-event!]
+                             (fn [title]
+                               (if (empty? title)
+                                 (handle-ui-event! {:type :delete-task
+                                                    :task-idx task-idx
+                                                    :task task})
+                                 (handle-ui-event! {:type :rename-task
+                                                    :task-idx task-idx
+                                                    :title title}))))
+       :completed completed})))
+
+(defn list [derived-state tasks name]
+  {:id (str "list-base-" name)
+   :ui-type ::list
+   :on-reorder-tasks (fn [handle-ui-event!]
+                       (fn [old-idx new-idx]
+                         (handle-ui-event! {:type :reorder-tasks
+                                            :from-index old-idx
+                                            :to-index new-idx})))
+   :tasks (mapv (partial task derived-state name) (range) tasks)})
+
+(def task-padding {:left 30 :bottom 5})
+
+(def ^m/TextStyle task-text-style (m/TextStyle
+                                   .color m/Colors.black
+                                   .fontFamily "Inter"
+                                   .fontWeight m/FontWeight.normal
+                                   .fontSize 20))
+
+(def title-style (m/TextStyle
+                   .color m/Colors.black
+                   .fontSize 14))
+(def ^m/Offset image-destination (m/Offset 50 100))
+
+(defn ast-store->widget
+  ([handle-ui-event! ast-store {:keys [ui-type id] :as ast}]
+   (let [recursive-call (fn [ast-id]
+                          ;; (prn "ast-store->widget called with ast-id: " ast-id)
+                          (ast-store->widget handle-ui-event! ast-store @(get @ast-store ast-id)))
+         get-ast-atom #(get @ast-store id)
+         {:keys [key]} @(get-ast-atom)]
+     (condp = ui-type
+       ::list
+       (f/widget
+        :context ctx
+        :get [:icon-transition-controller :expanded-icon-atom]
+        :let [{:keys [notch-height phone-height phone-width]} (get-phone-measurements ctx)
+              content-start (/ (+ notch-height 150) phone-height)
+              {:keys [^m/ImageStream? image-stream image-coords title text-coords]} @expanded-icon-atom
+              {image-origin :position image-size :size} image-coords
+              {title-origin :position ^m/Size title-size :size} text-coords
+              title-destination                         (.+ image-destination (m/Offset (+ (* 0.5 (.-width title-size)) 100) 0))
+              curved                                   (m/CurvedAnimation .parent icon-transition-controller .curve m/Curves.easeInSine)
+              t                                        (.drive curved (m/Tween .begin 0.0 .end 1.0))
+              title                                     (m/Text title .style title-style)
+              image (if image-stream
+                      (animated-asset image-stream 40 40)
+                      (svg/SvgPicture.asset "assets/icons/fluent--person-24-filled.svg"
+                       .colorFilter (m/ColorFilter.mode m/Colors.black m/BlendMode.srcIn)
+                       .width 40
+                       .height 40))]
+        :watch [{:keys [tasks]} (get-ast-atom)]
+        (m/CustomScrollView
+         ;; .anchor content-start
+         .physics (m/AlwaysScrollableScrollPhysics)
+         .slivers [(m/SliverPersistentHeader
+                    .pinned true
+                    .delegate (reify :extends m/SliverPersistentHeaderDelegate
+                                (build [this context shrink-offset overlaps-content?]
+                                  (let [current-size (max (.-minExtent this) (- (.-maxExtent this) shrink-offset))
+                                        percent (.clamp (/ shrink-offset 100) 0.0 1.0)
+                                        scaled-title-offset (m/Offset -40 -30)
+                                        scaled-image-offset (m/Offset 0 -30)
+                                        scaledown (- 1.0 (/ shrink-offset (.-maxExtent this)))
+                                        image-scale (max 0.5 scaledown)
+                                        text-scale (max 0.8 scaledown)]
+                                    (f/widget
+                                     (m/Container
+                                      .height current-size)
+                                     (m/Stack
+                                      .children
+                                      [(f/widget
+                                        :watch [_ icon-transition-controller]
+                                        (m/Transform.translate
+                                         .offset (m/Offset.lerp (m/Offset.lerp image-origin image-destination (.-value t))
+                                                                (.+ image-destination scaled-image-offset)
+                                                                (* percent (.-value t))))
+                                        (m/Transform.scale
+                                         .scale (ui/lerpDouble 1.0 (* image-scale 3.0) (.-value t)))
+                                        image)
+                                       (f/widget
+                                        :watch [_ icon-transition-controller]
+                                        (m/Transform.translate
+                                         .offset (lerp-polar-offsets (lerp-polar-offsets title-origin title-destination (.-value t))
+                                                                     (.+ title-destination scaled-title-offset)
+                                                                     (* percent (.-value t))))
+                                        (m/Transform.scale
+                                         .scale (ui/lerpDouble 1.0 (* text-scale 2.0) (.-value t)))
+                                        title)]))))
+                                (maxExtent [_] 170)
+                                (minExtent [_] 170)
+                                (shouldRebuild [_ old-delegate] false)))
+                   (f/widget
+                    (animated-sliver-fade
+                     .controller icon-transition-controller)
+                    (fade-sliver
+                     .child (m/SliverReorderableList
+                             .itemBuilder (fn [_ idx] (recursive-call (nth tasks idx)))
+                             .itemCount (count tasks)
+                             .onReorder (fn [old-idx new-idx] nil))
+                     .fadeStart 100
+                     .fadeExtent 100))]))
+
+       ::task
+       (f/widget
+        :key key
+        :watch [{:keys [title completed subitems]} (get-ast-atom)]
+        :managed [text-controller (m/TextEditingController .text title)]
+        :let [{:keys [on-complete on-edit-task-title]} @(get-ast-atom)]
+        :padding task-padding
+        m/Row
+        .children
+        [(f/widget
+          :padding {:top 2}
+          (m/IconButton
+           .icon (m/Icon (if completed
+                           m/Icons.check_box
+                           m/Icons.check_box_outline_blank)
+                         .size 26
+                         .color m.Colors/red)
+           .onPressed (on-complete handle-ui-event!)))
+         (f/widget
+          (m/SizedBox .width 200)
+          (m/TextField
+           .keyboardType m/TextInputType.text
+           .autocorrect false
+           .maxLines nil
+           .style (.copyWith task-text-style .color (if completed (hsv 0 0 0.5) m/Colors.black))
+           .onSubmitted (on-edit-task-title handle-ui-event!)
+           .decoration (m/InputDecoration
+                        .border m/InputBorder.none)
+           .controller text-controller))])
+
+       ::add-task-task
+       (f/widget
+        :key key
+        :let [{:keys [on-add-task]} @(get-ast-atom)]
+        :padding task-padding
+        (m/Row)
+        .children
+        [(f/widget
+          :padding {:top 2}
+          (m/IconButton
+           .icon (m/Icon m/Icons.check_box_outline_blank
+                         .size 26
+                         .color m/Colors.grey)
+           .onPressed nil))
+         (f/widget
+          :managed [text-controller (m/TextEditingController)]
+          (m/SizedBox .width 200)
+          (m/TextField
+           .style task-text-style
+           .textInputAction m.TextInputAction/done
+           .cursorHeight 38
+           .onSubmitted (fn [new-task-title]
+                          (.clear text-controller)
+                          ((on-add-task handle-ui-event!) new-task-title))
+           .decoration (m/InputDecoration .border m/InputBorder.none)
+           .controller text-controller))])
+
+
+       (throw (Exception (str "Unknown ui-type in home page todo-list ast-store->widget: " ast)))))))

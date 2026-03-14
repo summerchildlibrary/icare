@@ -1,6 +1,7 @@
 (ns icare.ui.screens.pages.todo-list
   (:require ["package:flutter/material.dart" :as m]
-            [icare.ui.shared :refer [hsv navigation-button autoscroll-away-from-keyboard]]
+            [icare.ui.shared.paint :refer [hsv]]
+            [icare.ui.shared.animations :refer [autoscroll-away-from-keyboard]]
             [cljd.flutter :as f]))
 
 (defn task [derived-state task-idx task]
@@ -80,16 +81,16 @@
           :let [{:keys [on-reorder-tasks]} @(get-ast-atom)]
           :watch [{:keys [tasks]} (get-ast-atom)]
           (autoscroll-away-from-keyboard
-           scroll-controller
-           (m/ReorderableListView
-            ;; .itemBuilder (fn [_ idx] (recursive-call (nth tasks idx)))
-            ;; .itemCount (count tasks)
-            .physics (m/AlwaysScrollableScrollPhysics)
-            .children (mapv recursive-call tasks)
-            .onReorder (on-reorder-tasks handle-ui-event!)
-            .anchor content-start
-            .scrollController scroll-controller
-            .footer (m/SizedBox .height 400))))])
+           .scrollController scroll-controller)
+          (m/ReorderableListView
+           ;; .itemBuilder (fn [_ idx] (recursive-call (nth tasks idx)))
+           ;; .itemCount (count tasks)
+           .physics (m/AlwaysScrollableScrollPhysics)
+           .children (mapv recursive-call tasks)
+           .onReorder (on-reorder-tasks handle-ui-event!)
+           .anchor content-start
+           .scrollController scroll-controller
+           .footer (m/SizedBox .height 400)))])
 
        ::task
        (f/widget

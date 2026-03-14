@@ -3,38 +3,21 @@
             ["package:reorderable_grid/reorderable_grid.dart" :as reorderable-grid]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["dart:ui" :as ui]
-            [icare.ui.shared :refer [hsv navigation-button glass-border-painter
-                                     get-polar-lerp-from-offsets
-                                     lerp-polar-offsets
-                                     animated-blur
-                                     animated-fade
-                                     add-fade-gradient
-                                     fade-sliver]]
+            [icare.ui.screens.pages.home-components.todo-list
+             :refer [list ast-store->widget]
+             :rename {ast-store->widget expanded-icon->widget}]
+            [icare.ui.shared.utils :refer [get-phone-measurements]]
+            [icare.ui.shared.animations :refer [animated-blur animated-asset]]
             [cljd.flutter :as f]))
 
-(defn expanded-icon-task [derived-state pub-key task] ;;having a separate task ast allows us to have updates which only affect specific tasks, this isn't so important unless we start making tasks really fancy and people have a lot of tasks
-  (let [{:keys [title completed liked subitems uuid notify?]} task]
-    {:ui-type ::expanded-icon-task
-     :id (str "home-task-" uuid)
-     :title title
-     :completed completed
-     :liked liked
-     :subitems subitems
-     :notify? notify?}))
-
-(defn expanded-icon [derived-state tasks pub-key]
-    {:ui-type ::expanded-icon
-     :id (str "home-expanded-icon-" pub-key)
-     :tasks (mapv (partial expanded-icon-task derived-state pub-key) tasks)})
-
 (defn icon [derived-state icon-index list-item]
-  (let [{:keys [pub-key name asset tasks]} list-item]
+  (let [{:keys [name asset tasks]} list-item]
     {:ui-type ::icon
-     :id (str "home-icon-" pub-key)
+     :id (str "home-icon-" name) ;;TODO we need to disallow duplicate namings
      :idx icon-index
      :asset asset
-     :expanded-icon (expanded-icon derived-state tasks pub-key)
-     :key pub-key
+     :expanded-icon (list derived-state tasks name)
+     :key name ;;TODO we need to disallow duplicate namings
      :title name}))
 
 (defn state->ast [db]
@@ -55,7 +38,6 @@
 
 (def icon-radius 20)
 (def number-of-columns 4)
-(def ^m/Offset image-destination (m/Offset 50 100))
 (def title-style (m/TextStyle
                    .color m/Colors.black
                    .fontSize 14))
@@ -72,28 +54,6 @@
         size (.-size box)]
     {:position position :size size}))
 
-(defn animated-asset
-  [^m/ImageStream stream width height]
-  (f/widget
-   :managed [image-info-atom (atom nil)                                         :dispose nil
-             listener        (m/ImageStreamListener
-                               (fn [^m/ImageInfo info _]
-                                 (let [^m/ImageInfo? old @image-info-atom]
-                                   (reset! image-info-atom info)
-                                   (when old (.dispose old)))))                 :dispose nil
-             _               (doto stream (.addListener listener))
-                             :dispose ((fn [^m/ImageStream s]
-                                         (when-let [info ^m/ImageInfo @image-info-atom]
-                                           (.dispose info))
-                                         (.removeListener s listener)))]
-   :watch [^m/ImageInfo? info image-info-atom]
-   (m/RawImage
-     .image  (when info (.-image info))
-     .scale  (if (and info (.-scale info)) (.-scale info) 1.0)
-     .width  width
-     .height height
-     .fit    m/BoxFit.contain)))
-
 
 ;;TODO maybe we want to scale up here also
 (defn animated-content-fade [controller content]
@@ -104,24 +64,6 @@
      (m/Opacity
       .opacity (.-value opacity))
      content)))
-
-(defn animated-sliver-fade [controller content]
-  (let [curved (m/CurvedAnimation .parent controller .curve (m/Interval 0.3 1.0 .curve m/Curves.easeInOut))
-        opacity (.drive curved (m/Tween .begin 0.0 .end 1.0))]
-    (f/widget
-     :watch [_ controller]
-     (m/SliverOpacity
-      .opacity (.-value opacity))
-     .sliver
-     content)))
-
-(defn get-phone-measurements [context]
-  (let [phone-padding (m/MediaQuery.viewPaddingOf context)
-        notch-height (.-top phone-padding)
-        {:flds [width height]} (m/MediaQuery.sizeOf context)]
-    {:notch-height notch-height
-     :phone-height height
-     :phone-width  width}))
 
 ;; AST -> STORE stuff
 
@@ -161,8 +103,7 @@
            .onReorder (on-reorder-icons handle-ui-event!)
            .children (mapv recursive-call icons)))
          (f/widget
-          :let [content-start 180
-                gradient-start (/ 10 content-start)]
+          :let [content-start 180]
           :watch [expanded-icon expanded-icon-atom]
           :when expanded-icon
           (do
@@ -178,7 +119,7 @@
                .onHorizontalDragUpdate (fn [_] (.then (.reverse icon-transition-controller)
                                                       (fn [_] (reset! expanded-icon-atom nil)))
                                          nil)
-               .child (recursive-call (:expanded-icon expanded-icon)))])))])
+               .child (expanded-icon->widget handle-ui-event! ast-store @(get @ast-store (:expanded-icon expanded-icon))))])))])
 
        ::icon
        (f/widget
@@ -220,111 +161,5 @@
          (m/Text title
                  .key text-global-key
                  .style title-style)])
-
-       ::expanded-icon
-       (f/widget
-        :context ctx
-        :get [:icon-transition-controller :expanded-icon-atom]
-        :let [{:keys [notch-height phone-height phone-width]} (get-phone-measurements ctx)
-              content-start (/ (+ notch-height 150) phone-height)
-              {:keys [^m/ImageStream? image-stream image-coords title text-coords]} @expanded-icon-atom
-              {image-origin :position image-size :size} image-coords
-              {title-origin :position ^m/Size title-size :size} text-coords
-              title-destination                         (.+ image-destination (m/Offset (+ (* 0.5 (.-width title-size)) 100) 0))
-              curved                                   (m/CurvedAnimation .parent icon-transition-controller .curve m/Curves.linear)
-              t                                        (.drive curved (m/Tween .begin 0.0 .end 1.0))
-              title                                     (m/Text title .style title-style)
-              image (if image-stream
-                      (animated-asset image-stream 40 40)
-                      (svg/SvgPicture.asset "assets/icons/fluent--person-24-filled.svg"
-                       .colorFilter (m/ColorFilter.mode m/Colors.black m/BlendMode.srcIn)
-                       .width 40
-                       .height 40))]
-        :watch [{:keys [tasks]} (get-ast-atom)]
-        (m/CustomScrollView
-         ;; .anchor content-start
-         .physics (m/AlwaysScrollableScrollPhysics)
-         .slivers [(m/SliverPersistentHeader
-                    .pinned true
-                    .delegate (reify :extends m/SliverPersistentHeaderDelegate
-                                (build [this context shrink-offset overlaps-content?]
-                                  (let [current-size (max (.-minExtent this) (- (.-maxExtent this) shrink-offset))
-                                        percent (.clamp (/ shrink-offset 100) 0.0 1.0)
-                                        scaled-title-offset (m/Offset -40 -30)
-                                        scaled-image-offset (m/Offset 0 -30)
-                                        scaledown (- 1.0 (/ shrink-offset (.-maxExtent this)))
-                                        image-scale (max 0.5 scaledown)
-                                        text-scale (max 0.8 scaledown)]
-                                    (f/widget
-                                     (m/Container
-                                      .height current-size)
-                                     (m/Stack
-                                      .children
-                                      [(f/widget
-                                        :watch [_ icon-transition-controller]
-                                        (m/Transform.translate
-                                         .offset (m/Offset.lerp (m/Offset.lerp image-origin image-destination (.-value t))
-                                                                (.+ image-destination scaled-image-offset)
-                                                                (* percent (.-value t))))
-                                        (m/Transform.scale
-                                         .scale (ui/lerpDouble 1.0 (* image-scale 3.0) (.-value t)))
-                                        image)
-                                       (f/widget
-                                        :watch [_ icon-transition-controller]
-                                        (m/Transform.translate
-                                         .offset (lerp-polar-offsets (lerp-polar-offsets title-origin title-destination (.-value t))
-                                                                     (.+ title-destination scaled-title-offset)
-                                                                     (* percent (.-value t))))
-                                        (m/Transform.scale
-                                         .scale (ui/lerpDouble 1.0 (* text-scale 2.0) (.-value t)))
-                                        title)]))))
-                                (maxExtent [_] 170)
-                                (minExtent [_] 170)
-                                (shouldRebuild [_ old-delegate] false)))
-                   (animated-sliver-fade
-                    icon-transition-controller
-                    (fade-sliver
-                     .child (m/SliverList.list
-                             .children (mapv recursive-call tasks))
-                     .fadeStart 100
-                     .fadeExtent 100))]))
-
-       ::expanded-icon-task
-       (f/widget
-        :watch [{:keys [title completed liked subitems notify?]} (get-ast-atom)]
-        :padding {:vertical 5 :horizontal 28}
-        m/Column
-        .children
-        [(m/Row
-          .children
-          [(f/widget
-            (m/IconButton
-             .icon (m/Icon (if completed
-                             m/Icons.check_box
-                             m/Icons.check_box_outline_blank)
-                           .size 26
-                           .color m/Colors.grey)
-             .onPressed nil))
-           (f/widget
-            (m/SizedBox .width 160)
-            (m/Text title
-                    .maxLines nil
-                    .style (m/TextStyle
-                            .fontSize 22
-                            .fontWeight m/FontWeight.normal
-                            .color m/Colors.black
-                            .decoration (if completed
-                                          m/TextDecoration.lineThrough
-                                          m/TextDecoration.none))))
-           (m/Spacer .flex 4)
-           (f/widget
-            (m/IconButton
-             .icon (m/Icon (if liked
-                             m/Icons.favorite
-                             m/Icons.favorite_border)
-                           .size 26
-                           .color m/Colors.red)
-             .onPressed nil))
-           (m/Spacer .flex 1)])])
 
        (throw (Exception (str "Unknown ui-type in home ast-store->widget: " ast)))))))

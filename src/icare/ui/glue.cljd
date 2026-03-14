@@ -1,7 +1,7 @@
 (ns icare.ui.glue
   (:require ["package:flutter/material.dart" :as m]
             ;; [icare.benchmarks :refer [dart-time]]
-            [icare.ui.shared :refer [scale-down-fade-animation]]
+            [icare.ui.shared.animations :refer [scale-down-fade-animation]]
             [cljd.flutter :as f]
             [icare.ui.screens.qr
              :refer [state->ast ast-store->widget]
@@ -48,7 +48,9 @@
               (fn [_]
                 (reset! build-screen new-screen)
                 (.reverse transition-controller))))
-     (scale-down-fade-animation transition-controller screen-widget))))
+     (scale-down-fade-animation
+      .controller transition-controller
+      .child screen-widget))))
 
 (defonce widgets-built? (atom false))
 

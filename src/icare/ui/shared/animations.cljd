@@ -1,0 +1,121 @@
+(ns icare.ui.shared.animations
+  (:require ["package:flutter/material.dart" :as m]
+            ["dart:ui" :as ui]
+            [cljd.flutter :as f]))
+
+(defn autoscroll-away-from-keyboard
+  "takes a scrollable widget and its scroll controller and sets up a listener
+  to automatically scroll up when the keyboard covers a focused item"
+  [^m/ScrollController .scrollController .child]
+  (f/widget
+   :context ctx
+   :managed [focus-callback (fn []
+                              (when-let [focused (.-primaryFocus m/FocusManager.instance)]
+                                (Future.delayed
+                                 (Duration .milliseconds 300)
+                                 (fn []
+                                   (let [phone-insets (m/MediaQuery.viewInsetsOf ctx)
+                                         keyboard-to-bottom (.-bottom phone-insets)
+                                         phone-size (m/MediaQuery.sizeOf ctx)
+                                         phone-length (.-height phone-size)
+                                         focused-to-top (.-dy (.-offset focused))
+                                         focused-to-bottom (- phone-length focused-to-top)
+                                         extra-height 60
+                                         focus-scroll-delta (max
+                                                             0
+                                                             (+ extra-height
+                                                                (- keyboard-to-bottom focused-to-bottom)))
+                                         scroll-offset (.-offset scrollController)
+                                         focus-scroll (+ scroll-offset focus-scroll-delta)]
+                                     (when (pos? keyboard-to-bottom)
+                                       (.animateTo scrollController
+                                                   focus-scroll
+                                                   .duration (Duration .milliseconds 300)
+                                                   .curve m/Curves.linear)))))))
+             :dispose nil
+             _ (doto m/FocusManager.instance (.addListener focus-callback))
+             :dispose (.removeListener focus-callback)]
+   child))
+
+(defn scale-down-fade-animation
+  "Scale down and fade animation"
+  [.controller .child]
+  (f/widget
+   :managed [curved            (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut) :dispose nil
+             scale-animation   (.drive curved (m/Tween .begin 1.0 .end 0.85))                   :dispose nil
+             opacity-animation (.drive curved (m/Tween .begin 1.0 .end 0.0))                    :dispose nil]
+   :watch [_ controller]
+   (m/Transform.scale
+    .scale (.-value scale-animation))
+   (m/Opacity
+    .opacity (.-value opacity-animation))
+   child))
+
+(defn animated-blur
+  ([controller] ;;this version fills the whole background
+   (f/widget
+    :managed [curved          (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut) :dispose nil
+              blur-animation  (.drive curved (m/Tween .begin 0.0 .end 12))                     :dispose nil] ;;change end to 12 to go back to blur, blurring is pretty  expensive on older phones so maybe it's not worth it
+    :let [empty-space (m/SizedBox.shrink)]
+    :watch [_ controller]
+    (m/BackdropFilter
+     .filter (ui/ImageFilter.blur .sigmaX (.-value blur-animation) .sigmaY (.-value blur-animation))
+     .child empty-space)))
+  ([controller blur-width blur-height] ;;this version fills a sized area. Can be used with a translation to blur a specific area
+   (f/widget
+    :managed [curved          (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut) :dispose nil
+              blur-animation  (.drive curved (m/Tween .begin 0.0 .end 12))                     :dispose nil] ;;change end to 12 to go back to blur, blurring is pretty  expensive on older phones so maybe it's not worth it
+    :let [sized-space (m/Container .width blur-width .height blur-height .color m/Colors.transparent)]
+    m/ClipRect
+    :watch [_ controller]
+    (m/BackdropFilter
+     .filter (ui/ImageFilter.blur .sigmaX (.-value blur-animation) .sigmaY (.-value blur-animation))
+     .child sized-space))))
+
+(defn animated-fade
+  "applies a fade in animation to a renderbox child"
+  [.controller .begin .end .child]
+  (let [curved (m/CurvedAnimation .parent controller .curve (m/Interval begin end .curve m/Curves.easeInOut))
+        opacity (.drive curved (m/Tween .begin 0.0 .end 1.0))]
+    (f/widget
+     :watch [_ controller]
+     (m/Opacity
+      .opacity (.-value opacity))
+     child)))
+
+(defn animated-sliver-fade
+  "applies a fade out animation to a sliver"
+  [.controller .child]
+  (let [curved (m/CurvedAnimation .parent controller .curve (m/Interval 0.3 1.0 .curve m/Curves.easeInOut))
+        opacity (.drive curved (m/Tween .begin 0.0 .end 1.0))]
+    (f/widget
+     :watch [_ controller]
+     (m/SliverOpacity
+      .opacity (.-value opacity))
+     .sliver
+     child)))
+
+(defn animated-asset
+  "takes an image stream  corresponding to an asset and renders it.
+  This is useful for sharing gifs between widgets without losing our
+  spot in the animation."
+  [^m/ImageStream stream width height]
+  (f/widget
+   :managed [image-info-atom (atom nil)                                         :dispose nil
+             listener        (m/ImageStreamListener
+                               (fn [^m/ImageInfo info _]
+                                 (let [^m/ImageInfo? old @image-info-atom]
+                                   (reset! image-info-atom info)
+                                   (when old (.dispose old)))))                 :dispose nil
+             _               (doto stream (.addListener listener))
+                             :dispose ((fn [^m/ImageStream s]
+                                         (when-let [info ^m/ImageInfo @image-info-atom]
+                                           (.dispose info))
+                                         (.removeListener s listener)))]
+   :watch [^m/ImageInfo? info image-info-atom]
+   (m/RawImage
+     .image  (when info (.-image info))
+     .scale  (if (and info (.-scale info)) (.-scale info) 1.0)
+     .width  width
+     .height height
+     .fit    m/BoxFit.contain)))
