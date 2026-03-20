@@ -2,7 +2,8 @@
   (:require [icare.resources.network :refer [dispatch!] :rename {dispatch! network-dispatch!}]
             [icare.resources.storage :refer [dispatch!] :rename {dispatch! storage-dispatch!}]
             [icare.resources.state
-             :refer [dispatch! get-task-by-indexes gather-pub-keys-and-uuids get-device-token get-new-task get-updated-task]
+             :refer [dispatch! get-task-by-indexes gather-pub-keys-and-uuids get-device-token get-new-task get-updated-task get-open-list
+                     diff-lists get-updated-list is-empty-list?]
              :rename {dispatch! state-dispatch!}]
             [icare.resources.glue :refer [update-state-and-persist!]]
             [icare.ui.glue :refer [render-ui!]]
@@ -16,6 +17,8 @@
   (let [db (update-state-and-persist! event)]
     (render-ui! db)
     db))
+
+(defonce list-snapshot (atom nil))
 
 (defn handle-ui-event! [event]
   (let [{:keys [type]} event]
@@ -160,17 +163,40 @@
      :navigate
      (update-state-render-and-persist! event)
 
+     ;;--- Home.todo-list page events
+     :rename-list
+     (update-state-render-and-persist! event)
+
      ;;--- Home page events
+     :icon-expansion-toggle
+     (let [db (as-> (state-dispatch! event) db
+                (or (when-let [snapshot @list-snapshot]
+                      (reset! list-snapshot nil)
+                      (let [{:keys [added removed modified new-title new-asset]} (diff-lists snapshot (get-updated-list db (:list-idx event)))]
+                        (when (or (seq added) (seq removed) (seq modified) new-title new-asset)
+                          ;;we want to send batched network events here and count the number of changes to keep track of commit logs
+                          (when (is-empty-list? snapshot)
+                            (prn "Modified an empty-list")
+                            (state-dispatch! {:type :add-list
+                                              :list-idx (:list-idx event)})))))
+                    db))]
+       (when-let [expanded-list (get-open-list db)]
+         (reset! list-snapshot expanded-list))
+       (storage-dispatch! {:type :state-change-event :new-state (:state db)})
+       (render-ui! db))
+
+     :add-list
+     (update-state-render-and-persist! event)
+
      :reorder-icons
      (update-state-render-and-persist! event)
 
-     ;;--- Todo-list page events ---
      :reorder-tasks
      (update-state-render-and-persist! event)
 
      :complete-task
      (let [db (update-state-render-and-persist! event)
-           updated-task (get-updated-task db (:task-idx event))
+           updated-task (get-updated-task db (:task-idx event) (:list-idx event))
            task-uuid (:uuid updated-task)
            receipts (get-in db [:notify-receipts task-uuid])]
        (network-dispatch! {:type :send-updated-task
@@ -195,12 +221,12 @@
      (let [db (update-state-render-and-persist! event)]
        (network-dispatch! {:type :send-updated-task
                            :deleted false
-                           :task (get-updated-task db (:task-idx event))}))
+                           :task (get-updated-task db (:task-idx event) (:list-idx event))}))
 
      :add-task
      (let [db (update-state-render-and-persist! event)]
        (network-dispatch! {:type :send-updated-task
                            :deleted false
-                           :task (get-new-task db (:task-idx event))}))
+                           :task (get-new-task db (:task-idx event) (:list-idx event))}))
 
      (throw (Exception (str "Unknown event type in ui-events dispatch: " event))))))

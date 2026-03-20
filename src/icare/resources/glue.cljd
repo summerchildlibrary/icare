@@ -4,7 +4,6 @@
              :rename {dispatch! state-dispatch!}]
             [icare.resources.storage :refer [initialize-storage! dispatch!] :rename {dispatch! storage-dispatch!}]
             [icare.resources.network :refer [initialize-network!]]
-            ["package:flutter/foundation.dart" :as foundation] ;;for push notifications / we need to get the device id to send to our pnotification server
             ["package:firebase_messaging/firebase_messaging.dart" :as firebase-messaging]))
 
 (defn update-state-and-persist! [event]

@@ -181,6 +181,6 @@
     (createRenderObject [this ^m/BuildContext _ctx]
       (RenderFadeSliver fadeStart fadeExtent))
     (updateRenderObject [this ^m/BuildContext _ctx ^RenderFadeSliver ro]
-      (.-fadeStart!  ro fadeStart)
-      (.-fadeExtent! ro fadeExtent)
+      (.-fadeStart!  ro (double fadeStart))
+      (.-fadeExtent! ro (double fadeExtent))
       nil)))

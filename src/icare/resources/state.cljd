@@ -13,23 +13,15 @@
 (defonce initialized? (atom false))
 
 (def default-state
-  {:user {:pub-key nil
-          :tasks [{:title "wake up"
-                   :uuid "test-task-uuid-1234"
-                   :completed false
-                   :notify? false
-                   :subitems []}
-                  {:title "go to monkey bars"
-                   :uuid (uuid-generator)
-                   :completed true
-                   :notify? false
-                   :subitems [{:type :time :value "2026-01-06 09:18:04Z"}]}
-                  {:is-add-task-task? true}]}
-   :lists [
-           {:name "Char"
+  {:bookmarks [{:name "Char"
+                :pub-key "test-pub-key-1234"
+                :notify? false}
+               {:name "Jun"
+                :pub-key "test-pub-key-5678"
+                :notify? false}]
+   :lists [{:name "Char"
             :asset "penguin.webp"
-            :expanded? false
-            :pub-key "b5bff73132049a564cb588dad9862acc31fa52c07bbecd991237b8cb9c2fa3b"
+            :uuid (uuid-generator)
             :tasks [{:title "Defeated bear"
                      :uuid (uuid-generator)
                      :liked false
@@ -52,7 +44,7 @@
                     {:is-add-task-task? true}]}
            {:name "Get big"
             :asset "penguin.webp"
-            :expanded? false
+            :uuid (uuid-generator)
             :tasks [{:title "Defeated bear"
                      :uuid (uuid-generator)
                      :liked false
@@ -74,8 +66,8 @@
                                 {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
                     {:is-add-task-task? true}]}
            {:name "Eat well"
-            :asset "penguin.webp"
-            :expanded? false
+            :asset "fish.webp"
+            :uuid (uuid-generator)
             :tasks [{:title "Defeated bear"
                      :uuid (uuid-generator)
                      :liked false
@@ -97,8 +89,8 @@
                                 {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
                     {:is-add-task-task? true}]}
            {:name "Love"
-            :asset "penguin.webp"
-            :expanded? false
+            :asset "heart.gif"
+            :uuid (uuid-generator)
             :tasks [{:title "Defeated bear"
                      :uuid (uuid-generator)
                      :liked false
@@ -120,8 +112,8 @@
                                 {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
                     {:is-add-task-task? true}]}
            {:name "Things that I like"
-            :asset "penguin.webp"
-            :expanded? false
+            :asset "star.gif"
+            :uuid (uuid-generator)
             :tasks [{:title "Defeated bear"
                      :uuid (uuid-generator)
                      :liked false
@@ -143,8 +135,8 @@
                                 {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
                     {:is-add-task-task? true}]}
            {:name "Good movies"
-            :asset "penguin.webp"
-            :expanded? false
+            :asset "movies.gif"
+            :uuid (uuid-generator)
             :tasks [{:title "Defeated bear"
                      :uuid (uuid-generator)
                      :liked false
@@ -167,7 +159,7 @@
                     {:is-add-task-task? true}]}
            {:name "Contacts"
             :asset "penguin.webp"
-            :expanded? false
+            :uuid (uuid-generator)
             :tasks [{:title "Defeated bear"
                      :uuid (uuid-generator)
                      :liked false
@@ -187,149 +179,11 @@
                      :completed true
                      :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
                                 {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-                    {:is-add-task-task? true}]}]
-           ;; {:type :list
-           ;;  :name "Jun"
-           ;;  :asset "fish.webp"
-           ;;  :expanded? false
-           ;;  :pub-key "b5bff7313249a6cb58dad9862acc31fa52c07bbecd991237b8cb9c2fa3b"
-           ;;  :tasks [{:title "Defeated bear"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? false
-           ;;           :completed false
-           ;;           :subitems []}
-           ;;          {:title "go to sleep"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? true
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-           ;;          {:title "went for walk"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? false
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-           ;;          {:title "went for walk"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? false
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-           ;;          {:title "went for walk"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? false
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-           ;;          {:title "went for walk"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? false
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-           ;;          {:title "went for walk"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? false
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-           ;;          {:title "went for walk"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? false
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-           ;;          {:title "go to sleep"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? true
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-           ;;          {:title "went for walk"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? false
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-           ;;          {:title "go to sleep"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? true
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-           ;;          {:title "went for walk"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? false
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
-           ;;          {:title "go to sleep"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? true
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-           ;;          {:title "went for walk"
-           ;;           :uuid (uuid-generator)
-           ;;           :liked false
-           ;;           :notify? false
-           ;;           :completed true
-           ;;           :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-           ;;                      {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}]
+                    {:is-add-task-task? true}]}
+           (make-empty-list)]
+   :expanded-list-idx nil
    :current-screen :pages
    :device-token nil})
-  ;; {:reorderable-items {:wobble? false
-  ;;                      :items
-  ;;                      [{:type :user
-  ;;                        :name "You"
-  ;;                        :expanded? true
-  ;;                        :pub-key nil
-  ;;                        :tasks [{:title "wake up"
-  ;;                                 :uuid "test-task-uuid-1234"
-  ;;                                 :completed false
-  ;;                                 :notify? false
-  ;;                                 :subitems []}
-  ;;                                {:title "go to monkey bars"
-  ;;                                 :uuid (uuid-generator)
-  ;;                                 :completed true
-  ;;                                 :notify? false
-  ;;                                 :subitems [{:type :time :value "2026-01-06 09:18:04Z"}]}]}
-  ;;                                           ;; {:type :image :value "https://www.adventuretoys.co.uk/images/product/27695monkeybarattach.jpg"}]}]}
-  ;;                       {:type :friend
-  ;;                        :name "Example 🎸🎸"
-  ;;                        :expanded? false
-  ;;                        :pub-key "b5bff73132049a564cb588dad986a2acc352c07bbecd991237b8cb9c2fa3b"
-  ;;                        :tasks [{:title "Defeated bear"
-  ;;                                 :uuid (uuid-generator)
-  ;;                                 :liked false
-  ;;                                 :notify? false
-  ;;                                 :completed false
-  ;;                                 :subitems []}
-  ;;                                {:title "go to sleep"
-  ;;                                 :uuid (uuid-generator)
-  ;;                                 :liked false
-  ;;                                 :notify? true
-  ;;                                 :completed true
-  ;;                                 :subitems [{:type :time :value "2026-01-06 21:18:04Z"}]}
-  ;;                                {:title "went for walk"
-  ;;                                 :uuid (uuid-generator)
-  ;;                                 :liked false
-  ;;                                 :notify? false
-  ;;                                 :completed true
-  ;;                                 :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
-  ;;                                            {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}]}
-  ;;  :show-qr? false
-  ;;  :device-token nil})
 
 (def default-derived-state
   {:pub-key-to-name {}
@@ -343,13 +197,44 @@
                       :derived-state default-derived-state
                       :notify-receipts default-notify-receipts}))
 
+(defn diff-lists [old-list new-list]
+  (let [before   (into {} (mapv (juxt :uuid identity) (filter :uuid (:tasks old-list))))
+        after    (into {} (mapv (juxt :uuid identity) (filter :uuid (:tasks new-list))))
+        added    (vals (apply dissoc after (keys before)))
+        removed  (vals (apply dissoc before (keys after)))
+        modified (map second (filter (fn [[uuid new-item]]
+                                       (when-let [old-item (get before uuid)] (not= old-item new-item)))
+                                     after))]
+    {:new-title (when-not (= (:name old-list) (:name new-list)) (:name new-list))
+     :new-asset (when-not (= (:asset old-list) (:asset new-list)) (:asset new-list))
+     :added added
+     :removed removed
+     :modified modified}))
+
+(defn is-empty-list? [list]
+  (= (:tasks list) [{:is-add-task-task? true}]))
+
+(defn make-empty-list []
+  {:name ""
+   :asset "star.gif" ;;we would like to choose a random asset and a random name for new lists
+   :uuid (uuid-generator)
+   :tasks [{:is-add-task-task? true}]})
+
+(defn get-updated-list
+  ([list-index] (get-updated-list @store list-index))
+  ([db list-index] (get-in db [:state :lists list-index])))
+
+(defn get-open-list
+  ([] (get-open-list @store))
+  ([db] (when-let [idx (:expanded-list-idx (:state db))] (get-in db [:state :lists idx]))))
+
 (defn get-updated-task
-  ([task-index] (get-updated-task @store task-index))
-  ([db task-index] (get-in db [:state :user :tasks task-index])))
+  ([task-index list-index] (get-updated-task @store task-index list-index))
+  ([db task-index list-index] (get-in db [:state :lists list-index :tasks task-index])))
 
 (defn get-new-task
-  ([add-task-task-index] (get-new-task @store add-task-task-index))
-  ([db add-task-task-index] (get-in db [:state :user :tasks (if (zero? add-task-task-index) 1 add-task-task-index)])))
+  ([add-task-task-index list-index] (get-new-task @store add-task-task-index list-index))
+  ([db add-task-task-index list-index] (get-in db [:state :lists list-index :tasks (if (zero? add-task-task-index) 1 add-task-task-index)])))
 ;;
 ;;Helper functions. Read only operations.
 ;;Note: These functions work with the :state slice, not the full store
@@ -671,19 +556,36 @@
     (let [{:keys [screen]} event]
       (assoc-in db [:state :current-screen] screen))
 
+    ;;Home.todo-list events
+    :rename-list
+    (let [{:keys [list-idx name]} event]
+      (assoc-in db [:state :lists list-idx :name] name))
+
     ;;--- Home page events ---
+    :icon-expansion-toggle
+    (let [{:keys [list-idx]} event]
+      (update-in db [:state :expanded-list-idx] #(if (= % list-idx) nil list-idx)))
+
+    :add-list
+    (let [{:keys [list-idx]} event]
+      (update-in db [:state :lists]
+                 (fn [lists] (if (zero? list-idx)
+                               (apply vector (make-empty-list) lists)
+                               (vec (concat (subvec lists 0 (inc list-idx))
+                                            [(make-empty-list)]
+                                            (subvec lists (inc list-idx))))))))
+
     :reorder-icons
     (let [{:keys [from-index to-index]} event]
       (update-in db [:state :lists] reorder-vector from-index to-index))
 
-    ;;--- Todo-list page events ---
     :reorder-tasks
-    (let [{:keys [from-index to-index]} event]
-      (update-in db [:state :user :tasks] reorder-vector from-index to-index))
+    (let [{:keys [from-index to-index list-idx]} event]
+      (update-in db [:state :lists list-idx :tasks] reorder-vector from-index to-index))
 
     :complete-task
-    (let [{:keys [task-idx completed]} event]
-      (update-in db [:state :user :tasks task-idx]
+    (let [{:keys [task-idx completed list-idx]} event]
+      (update-in db [:state :lists list-idx :tasks task-idx]
                  (fn [task]
                    (let [new-task (assoc task :completed completed)]
                      (cond
@@ -699,22 +601,22 @@
                        :else new-task)))))
 
     :delete-task
-    (let [{:keys [task-idx]} event]
-      (update-in db [:state :user :tasks]
+    (let [{:keys [task-idx list-idx]} event]
+      (update-in db [:state :lists list-idx :tasks]
                  (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
                                           (subvec tasks (inc task-idx)))))))
 
     :rename-task
-    (let [{:keys [task-idx title]} event]
-      (assoc-in db [:state :user :tasks task-idx :title] title))
+    (let [{:keys [task-idx title list-idx]} event]
+      (assoc-in db [:state :lists list-idx :tasks task-idx :title] title))
 
     :add-task
-    (let [{:keys [task-idx title]} event
+    (let [{:keys [task-idx title list-idx]} event
           new-task {:title (or title "")
                     :uuid (uuid-generator)
                     :completed false
                     :subitems []}]
-      (update-in db [:state :user :tasks]
+      (update-in db [:state :lists list-idx :tasks]
                  (fn [tasks] (if (zero? task-idx)
                                (apply vector (nth tasks 0) new-task (next tasks))
                                (vec (concat (subvec tasks 0 task-idx)

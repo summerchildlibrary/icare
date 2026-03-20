@@ -1,29 +1,46 @@
-(ns icare.ui.screens.pages.home
+(ns icare.ui.screens.pages.home.base
   (:require ["package:flutter/material.dart" :as m]
             ["package:reorderable_grid/reorderable_grid.dart" :as reorderable-grid]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["dart:ui" :as ui]
-            [icare.ui.screens.pages.home-components.todo-list
-             :refer [list ast-store->widget]
+            [icare.resources.state :refer [is-empty-list?]]
+            [icare.ui.screens.pages.home.todo-list
+             :refer [ui-list ast-store->widget]
              :rename {ast-store->widget expanded-icon->widget}]
             [icare.ui.shared.utils :refer [get-phone-measurements]]
             [icare.ui.shared.animations :refer [animated-blur animated-asset]]
             [cljd.flutter :as f]))
 
-(defn icon [derived-state icon-index list-item]
-  (let [{:keys [name asset tasks]} list-item]
-    {:ui-type ::icon
-     :id (str "home-icon-" name) ;;TODO we need to disallow duplicate namings
-     :idx icon-index
-     :asset asset
-     :expanded-icon (list derived-state tasks name)
-     :key name ;;TODO we need to disallow duplicate namings
-     :title name}))
+(defn icon [derived-state expanded-icon-index icon-index list]
+  (let [{:keys [name asset tasks uuid]} list
+        is-expanded? (= icon-index expanded-icon-index)
+        is-add-list-icon? (is-empty-list? list)]
+      {:ui-type (if is-add-list-icon? ::add-list-icon ::icon)
+       :key uuid
+       :id (str "home-icon-" uuid)
+       :idx icon-index
+       :is-expanded? is-expanded?
+       :asset asset
+       :on-expand-icon (fn [handle-ui-event!]
+                        (fn []
+                          (handle-ui-event! {:type :icon-expansion-toggle
+                                             :list-idx icon-index})))
+       :expanded-icon (ui-list derived-state tasks name icon-index uuid)
+       :title name}))
 
 (defn state->ast [db]
-  (let [{:keys [derived-state state]} db]
+  (let [{:keys [derived-state state]} db
+        {:keys [expanded-list-idx lists]} state]
     {:id "home-base"
      :ui-type ::base
+     :expanded-icon (when expanded-list-idx
+                      (let [list (nth lists expanded-list-idx)]
+                        (ui-list derived-state (:tasks list) (:name list) expanded-list-idx (:uuid list))))
+     :on-deexpand-icon (fn [handle-ui-event!]
+                         (fn [& args]
+                           (when expanded-list-idx
+                             (handle-ui-event! {:type :icon-expansion-toggle
+                                                :list-idx expanded-list-idx}))))
      :on-reorder-icons (fn [handle-ui-event!]
                          (fn [old-idx new-idx]
                            (let [[old-idx new-idx] (if (< old-idx new-idx) ;;strangely, there doesn't seem to be a standard for what old and new mean when reordering
@@ -32,7 +49,7 @@
                              (handle-ui-event! {:type :reorder-icons
                                                 :from-index old-idx
                                                 :to-index new-idx}))))
-     :icons (mapv (partial icon derived-state) (range) (:lists state))}))
+     :icons (mapv (partial icon derived-state expanded-list-idx) (range) lists)}))
 
 ;; Widget stuff
 
@@ -103,7 +120,8 @@
            .onReorder (on-reorder-icons handle-ui-event!)
            .children (mapv recursive-call icons)))
          (f/widget
-          :watch [expanded-icon expanded-icon-atom]
+          :watch [{:keys [expanded-icon]} (get-ast-atom)]
+          :let [{:keys [on-deexpand-icon]} @(get-ast-atom)]
           :when expanded-icon
           (do
             (.forward icon-transition-controller)
@@ -112,29 +130,37 @@
              [(animated-blur icon-transition-controller)
               (m/GestureDetector
                .behavior m/HitTestBehavior.opaque
-               .onTap (fn [] (.then (.reverse icon-transition-controller)
-                                    (fn [_] (reset! expanded-icon-atom nil)))
+               .onTap (fn []
+                        (.then (.reverse icon-transition-controller)
+                               (fn [_]
+                                 (reset! expanded-icon-atom nil)
+                                 ((on-deexpand-icon handle-ui-event!))))
                         nil)
-               .onHorizontalDragUpdate (fn [_] (.then (.reverse icon-transition-controller)
-                                                      (fn [_] (reset! expanded-icon-atom nil)))
-                                         nil)
-               .child (expanded-icon->widget handle-ui-event! ast-store (:expanded-icon expanded-icon)))])))])
+               .onHorizontalDragStart (fn [_]
+                                        (.then (.reverse icon-transition-controller)
+                                               (fn [_]
+                                                 (reset! expanded-icon-atom nil)
+                                                 ((on-deexpand-icon handle-ui-event!))))
+                                        nil)
+               .child (expanded-icon->widget handle-ui-event! ast-store expanded-icon))])))])
 
        ::icon
        (f/widget
         :key key
         :get [:expanded-icon-atom]
-        :let [{:keys [idx expanded-icon]} @(get-ast-atom)]
-        :watch [{:keys [title asset]} (get-ast-atom)
-                {:keys [icon-idx]} expanded-icon-atom]
-        :bypass (when (= idx icon-idx)
+        :let [{:keys [idx expanded-icon on-expand-icon]} @(get-ast-atom)]
+        :watch [{:keys [title asset is-expanded?]} (get-ast-atom)]
+        :bypass (when is-expanded?
                  (m/SizedBox))
+        ;;TODO maybe we don't want to use global keys here
         :managed [image-global-key (m/GlobalKey)                      :dispose nil
                   text-global-key  (m/GlobalKey)                      :dispose nil
-                  image-stream (when asset (.resolve (m/AssetImage (str "assets/animated/" asset)) m/ImageConfiguration.empty)) :dispose nil]
+                  image-stream (.resolve (m/AssetImage (str "assets/animated/" asset)) m/ImageConfiguration.empty) :dispose nil
+                  text-controller (m/TextEditingController .text title)]
         (m/GestureDetector
          .behavior m/HitTestBehavior.opaque
          .onTap (fn []
+                  ((on-expand-icon handle-ui-event!))
                   (reset! expanded-icon-atom {:image-coords (key->coords image-global-key)
                                               :image-key image-global-key
                                               :text-coords (key->coords text-global-key)
@@ -143,22 +169,51 @@
                                               :icon-idx idx
                                               :image-stream image-stream
                                               :title title})))
-        (m/Column
-         .crossAxisAlignment m/CrossAxisAlignment.center)
+        (m/Column)
         .children
-        [(f/widget
-          :padding {:vertical 16 :horizontal 16}
+        [(m/SizedBox .height 20)
+         (f/widget
           (m/Container
            .key image-global-key)
-          (if asset
-            (animated-asset image-stream 40 40)
-            (svg/SvgPicture.asset
-             "assets/icons/fluent--person-24-filled.svg"
-             .colorFilter (m/ColorFilter.mode m/Colors.black m/BlendMode.srcIn)
-             .width 40
-             .height 40)))
-         (m/Text title
-                 .key text-global-key
-                 .style title-style)])
+          (animated-asset image-stream 40 40))
+         (f/widget
+          (m/SizedBox
+           .key text-global-key
+           .width 95)
+          (m/TextField
+           .controller text-controller
+           .textAlign m/TextAlign.center
+           .maxLines 3
+           .style title-style
+           .enabled false
+           .decoration (m/InputDecoration
+                        .border m/InputBorder.none
+                        .contentPadding m/EdgeInsets.zero
+                        .isDense true)))])
+
+       ::add-list-icon
+       (f/widget
+        :key key
+        :get [:expanded-icon-atom]
+        :let [{:keys [idx new-list-index on-expand-icon expanded-icon]} @(get-ast-atom)]
+        :watch [{:keys [is-expanded?]} (get-ast-atom)]
+        :bypass (when is-expanded?
+                 (m/SizedBox))
+        :managed [icon-global-key (m/GlobalKey) :dispose nil]
+        (m/GestureDetector
+         .behavior m/HitTestBehavior.opaque
+         .onTap (fn []
+                  ((on-expand-icon handle-ui-event!))
+                  (reset! expanded-icon-atom {:icon-idx new-list-index
+                                              :expanded-icon expanded-icon
+                                              :icon-coords (key->coords icon-global-key)})))
+        (m/Center)
+        (m/Container
+         .key icon-global-key)
+        (svg/SvgPicture.asset
+         "assets/icons/gg--add-r.svg"
+         .colorFilter (m/ColorFilter.mode m/Colors.red m/BlendMode.srcIn)
+         .width 40
+         .height 40))
 
        (throw (Exception (str "Unknown ui-type in home ast-store->widget: " @(get-ast-atom))))))))
