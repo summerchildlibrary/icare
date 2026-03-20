@@ -95,6 +95,9 @@
      .sliver
      child)))
 
+;;this is how you get an image stream from an asset. imageconfiguration doesn't have to be empty, the dispose is there to use with :managed
+;;image-stream (.resolve (m/AssetImage (str "assets/animated/" asset)) m/ImageConfiguration.empty) :dispose nil
+;;it turns out that using Image.asset already seems to cache the underlying imagestream, so unless we want to create multiple imagestreams, this is unnecessary
 (defn animated-asset
   "takes an image stream  corresponding to an asset and renders it.
   This is useful for sharing gifs between widgets without losing our
