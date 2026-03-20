@@ -167,6 +167,12 @@
      :rename-list
      (update-state-render-and-persist! event)
 
+     :edit-list-asset
+     (update-state-render-and-persist! event)
+
+     :reorder-asset-list
+     (update-state-render-and-persist! event)
+
      ;;--- Home page events
      :icon-expansion-toggle
      (let [db (as-> (state-dispatch! event) db

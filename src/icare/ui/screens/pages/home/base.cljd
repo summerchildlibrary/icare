@@ -8,24 +8,23 @@
              :refer [ui-list ast-store->widget]
              :rename {ast-store->widget expanded-icon->widget}]
             [icare.ui.shared.utils :refer [get-phone-measurements]]
-            [icare.ui.shared.animations :refer [animated-blur animated-asset]]
+            [icare.ui.shared.animations :refer [animated-blur]]
             [cljd.flutter :as f]))
 
 (defn icon [derived-state expanded-icon-index icon-index list]
   (let [{:keys [name asset tasks uuid]} list
         is-expanded? (= icon-index expanded-icon-index)
         is-add-list-icon? (is-empty-list? list)]
-      {:ui-type (if is-add-list-icon? ::add-list-icon ::icon)
+      {:ui-type ::icon
        :key uuid
        :id (str "home-icon-" uuid)
        :idx icon-index
        :is-expanded? is-expanded?
        :asset asset
        :on-expand-icon (fn [handle-ui-event!]
-                        (fn []
-                          (handle-ui-event! {:type :icon-expansion-toggle
-                                             :list-idx icon-index})))
-       :expanded-icon (ui-list derived-state tasks name icon-index uuid)
+                         (fn []
+                           (handle-ui-event! {:type :icon-expansion-toggle
+                                              :list-idx icon-index})))
        :title name}))
 
 (defn state->ast [db]
@@ -35,7 +34,7 @@
      :ui-type ::base
      :expanded-icon (when expanded-list-idx
                       (let [list (nth lists expanded-list-idx)]
-                        (ui-list derived-state (:tasks list) (:name list) expanded-list-idx (:uuid list))))
+                        (ui-list derived-state (:tasks list) (:name list) (:asset list) expanded-list-idx (:uuid list))))
      :on-deexpand-icon (fn [handle-ui-event!]
                          (fn [& args]
                            (when expanded-list-idx
@@ -148,14 +147,13 @@
        (f/widget
         :key key
         :get [:expanded-icon-atom]
-        :let [{:keys [idx expanded-icon on-expand-icon]} @(get-ast-atom)]
+        :let [{:keys [idx on-expand-icon]} @(get-ast-atom)]
         :watch [{:keys [title asset is-expanded?]} (get-ast-atom)]
         :bypass (when is-expanded?
                  (m/SizedBox))
         ;;TODO maybe we don't want to use global keys here
         :managed [image-global-key (m/GlobalKey)                      :dispose nil
                   text-global-key  (m/GlobalKey)                      :dispose nil
-                  image-stream (.resolve (m/AssetImage (str "assets/animated/" asset)) m/ImageConfiguration.empty) :dispose nil
                   text-controller (m/TextEditingController .text title)]
         (m/GestureDetector
          .behavior m/HitTestBehavior.opaque
@@ -165,9 +163,7 @@
                                               :image-key image-global-key
                                               :text-coords (key->coords text-global-key)
                                               :text-key text-global-key
-                                              :expanded-icon expanded-icon
                                               :icon-idx idx
-                                              :image-stream image-stream
                                               :title title})))
         (m/Column)
         .children
@@ -175,45 +171,25 @@
          (f/widget
           (m/Container
            .key image-global-key)
-          (animated-asset image-stream 40 40))
+          (m/Image.asset (str "assets/animated/" asset)
+                         .fit m/BoxFit.contain
+                         .width 40
+                         .height 40))
          (f/widget
+          (m/Material
+           .type m/MaterialType.transparency)
           (m/SizedBox
            .key text-global-key
            .width 95)
           (m/TextField
            .controller text-controller
+           .enabled false
            .textAlign m/TextAlign.center
            .maxLines 3
-           .style title-style
-           .enabled false
            .decoration (m/InputDecoration
-                        .border m/InputBorder.none
                         .contentPadding m/EdgeInsets.zero
-                        .isDense true)))])
-
-       ::add-list-icon
-       (f/widget
-        :key key
-        :get [:expanded-icon-atom]
-        :let [{:keys [idx new-list-index on-expand-icon expanded-icon]} @(get-ast-atom)]
-        :watch [{:keys [is-expanded?]} (get-ast-atom)]
-        :bypass (when is-expanded?
-                 (m/SizedBox))
-        :managed [icon-global-key (m/GlobalKey) :dispose nil]
-        (m/GestureDetector
-         .behavior m/HitTestBehavior.opaque
-         .onTap (fn []
-                  ((on-expand-icon handle-ui-event!))
-                  (reset! expanded-icon-atom {:icon-idx new-list-index
-                                              :expanded-icon expanded-icon
-                                              :icon-coords (key->coords icon-global-key)})))
-        (m/Center)
-        (m/Container
-         .key icon-global-key)
-        (svg/SvgPicture.asset
-         "assets/icons/gg--add-r.svg"
-         .colorFilter (m/ColorFilter.mode m/Colors.red m/BlendMode.srcIn)
-         .width 40
-         .height 40))
+                        .isDense true
+                        .border m/InputBorder.none)
+           .style title-style))])
 
        (throw (Exception (str "Unknown ui-type in home ast-store->widget: " @(get-ast-atom))))))))

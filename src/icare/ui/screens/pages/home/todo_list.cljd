@@ -1,10 +1,12 @@
 (ns icare.ui.screens.pages.home.todo-list
   (:require ["package:flutter/material.dart" :as m]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
+            ["package:reorderable_grid/reorderable_grid.dart" :as reorderable-grid]
             ["dart:ui" :as ui]
+            [icare.resources.state :refer [get-animated-assets]]
             [icare.ui.shared.paint :refer [hsv fade-sliver]]
             [icare.ui.shared.utils :refer [lerp-polar-offsets get-phone-measurements]]
-            [icare.ui.shared.animations :refer [animated-asset animated-sliver-fade animated-fade autoscroll-away-from-keyboard]]
+            [icare.ui.shared.animations :refer [animated-sliver-fade animated-fade autoscroll-away-from-keyboard]]
             [cljd.flutter :as f]))
 
 (defn task [derived-state name list-idx task-idx task]
@@ -49,27 +51,46 @@
                                                     :title title}))))
        :completed completed})))
 
-(defn ui-list [derived-state tasks name icon-idx uuid]
-   {:id (str "list-base-" uuid)
-    :ui-type ::list
-    :on-reorder-tasks (fn [handle-ui-event!]
-                        (fn [old-idx new-idx]
-                          (handle-ui-event! {:type :reorder-tasks
-                                             :list-index icon-idx
-                                             :from-index old-idx
-                                             :to-index new-idx})))
-    :on-edit-list-title (fn [handle-ui-event!]
+(defn ui-list [derived-state tasks name asset icon-idx uuid]
+  {:id (str "list-base-" uuid)
+   :ui-type ::list
+   :on-reorder-tasks (fn [handle-ui-event!]
+                       (fn [old-idx new-idx]
+                         (handle-ui-event! {:type :reorder-tasks
+                                            :list-index icon-idx
+                                            :from-index old-idx
+                                            :to-index new-idx})))
+   :on-edit-list-title (fn [handle-ui-event!]
                          (fn [name]
                            (handle-ui-event! {:type :rename-list
                                               :list-idx icon-idx
                                               :name name})))
-    :on-edit-asset (fn [handle-ui-event!]
-                     (fn [asset]
-                       (handle-ui-event! {:type :edit-list-asset
-                                          :list-idx icon-idx
-                                          :asset asset})))
-    :title name
-    :tasks (mapv (partial task derived-state name icon-idx) (range) tasks)})
+   :on-edit-asset (fn [handle-ui-event!]
+                    (fn [asset]
+                      (handle-ui-event! {:type :edit-list-asset
+                                         :list-idx icon-idx
+                                         :asset asset})))
+   :asset-picker {:ui-type ::asset-picker ;;we share one asset picker across all lists, since only one list is opened at a time, no need to have multiple copies
+                  :id "asset-picker"
+                  :current-asset asset
+                  :on-reorder-assets (fn [handle-ui-event!]
+                                       (fn [old-idx new-idx]
+                                         (let [[old-idx new-idx] (if (< old-idx new-idx) ;;strangely, there doesn't seem to be a standard for what old and new mean when reordering
+                                                                   [old-idx (inc new-idx)]
+                                                                   [old-idx new-idx])]
+                                           (handle-ui-event! {:type :reorder-asset-list
+                                                              :from-index old-idx
+                                                              :to-index new-idx}))))
+                  :on-select-asset (fn [handle-ui-event!]
+                                     (fn [asset]
+                                       (handle-ui-event! {:type :edit-list-asset
+                                                          :list-idx icon-idx
+                                                          :asset asset})))
+                  :asset-list (get-animated-assets)}
+   :list-idx icon-idx
+   :asset asset
+   :title name
+   :tasks (mapv (partial task derived-state name icon-idx) (range) tasks)})
 
 (def task-padding {:left 30 :bottom 0})
 
@@ -107,10 +128,9 @@
        (f/widget
         :context ctx
         :get [:icon-transition-controller :expanded-icon-atom]
-        :let [{:keys [on-reorder-tasks on-edit-list-title title]} @(get-ast-atom)
+        :let [{:keys [on-reorder-tasks on-edit-list-title title asset-list]} @(get-ast-atom)
               {:keys [notch-height phone-height phone-width]} (get-phone-measurements ctx)
               content-start (/ (+ notch-height 150) phone-height)
-              {:keys [^m/ImageStream? image-stream]} @expanded-icon-atom
               {:keys [^m/Offset image-origin ^m/Size image-size
                       ^m/Offset title-origin ^m/Size title-size]} (normalize-expansion-coords @expanded-icon-atom)
               title-destination                        (.+ image-destination (m/Offset (+ (* 0.5 (.-width title-size)) 140) -20))
@@ -132,15 +152,15 @@
                   list-title-controller (m/TextEditingController .text title)]
         :watch [{:keys [tasks]} (get-ast-atom)]
         :let [title (f/widget
-                     (m/Container
-                      .decoration (m/BoxDecoration
-                                   .border (m/Border.all .color m/Colors.red .width 2)))
+                     ;; (m/Container
+                     ;;  .decoration (m/BoxDecoration
+                     ;;               .border (m/Border.all .color m/Colors.red .width 2)))
                      (m/SizedBox .width 95)
                      (m/TextField
                       .keyboardType m/TextInputType.text
                       .textAlign m/TextAlign.center
                       .autocorrect false
-                      .maxLines nil
+                      .maxLines 3
                       .style title-style
                       .onSubmitted (on-edit-list-title handle-ui-event!)
                       .onChanged (on-edit-list-title handle-ui-event!)
@@ -149,19 +169,22 @@
                                    .isDense true
                                    .border m/InputBorder.none)
                       .controller list-title-controller))
-              image (if image-stream
-                      (f/widget
-                       (m/GestureDetector
-                        .behavior m/HitTestBehavior.opaque
-                        .onTap (fn [] (prn "image tapped")))
-                       (m/Container
-                        .decoration (m/BoxDecoration
-                                     .border (m/Border.all .color m/Colors.red .width 2))
-                        .child (animated-asset image-stream 40 40)))
-                      (svg/SvgPicture.asset "assets/icons/gg--add-r.svg"
-                       .colorFilter (m/ColorFilter.mode m/Colors.red m/BlendMode.srcIn)
-                       .width 40
-                       .height 40))]
+              image (f/widget
+                     :watch [{:keys [asset]} (get-ast-atom)]
+                     :let [_ (prn "current asset: " asset)]
+                     (m/GestureDetector
+                      .behavior m/HitTestBehavior.opaque
+                      .onTap (fn []
+                               (m/showModalBottomSheet
+                                .showDragHandle true
+                                .context ctx
+                                .builder (fn [_] (recursive-call "asset-picker")))
+                               nil))
+                     (m/Image.asset (str "assets/animated/" asset)
+                                    .fit m/BoxFit.contain
+                                    .width 40
+                                    .height 40))]
+
         (m/CustomScrollView
          ;; .anchor content-start
          .controller scroll-controller
@@ -290,5 +313,45 @@
            .decoration (m/InputDecoration .border m/InputBorder.none)
            .controller text-controller))])
 
+       ::asset-picker
+       (f/widget
+        :watch [{:keys [asset-list current-asset]} (get-ast-atom)]
+        :let [{:keys [on-select-asset on-reorder-assets]} @(get-ast-atom)
+              asset-icon (fn [asset-name]
+                           (f/widget
+                            :key asset-name
+                            (m/Container
+                             .decoration (m/BoxDecoration
+                                          .border (m/Border.all .color (if (= current-asset asset-name) m/Colors.blue m/Colors.transparent) .width 2)))
+                            (m/GestureDetector
+                             .behavior m/HitTestBehavior.opaque
+                             .onTap (fn []
+                                      ((on-select-asset handle-ui-event!) asset-name)))
+                            (m/Column)
+                            .children
+                            [(m/SizedBox .height 20)
+                             (m/Image.asset
+                              (str "assets/animated/" asset-name)
+                              .fit m/BoxFit.contain
+                              .width 40
+                              .height 40)
+                             (f/widget
+                              (m/SizedBox .width 95)
+                              (m/Text
+                               asset-name
+                               .textAlign m/TextAlign.center
+                               .maxLines 3
+                               .style title-style))]))]
+        (m/Container
+         .color m/Colors.white
+         .height 400)
+        (reorderable-grid/ReorderableGridView.count
+         .scrollDirection m/Axis.horizontal
+         .physics (m/AlwaysScrollableScrollPhysics)
+         .crossAxisCount 4
+         .childAspectRatio 0.8
+         .proxyDecorator (fn [child _ _] child)
+         .onReorder (on-reorder-assets handle-ui-event!)
+         .children (mapv asset-icon asset-list)))
 
        (throw (Exception (str "Unknown ui-type in home page todo-list ast-store->widget: " @(get-ast-atom))))))))

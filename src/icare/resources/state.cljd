@@ -13,7 +13,12 @@
 (defonce initialized? (atom false))
 
 (def default-state
-  {:bookmarks [{:name "Char"
+  {:animated-assets ["penguin.webp"
+                     "fish.webp"
+                     "heart.gif"
+                     "star.gif"
+                     "movies.gif"]
+   :bookmarks [{:name "Char"
                 :pub-key "test-pub-key-1234"
                 :notify? false}
                {:name "Jun"
@@ -180,7 +185,10 @@
                      :subitems [{:type :time :value "2026-01-06 14:25:04Z"}
                                 {:type :image :value "https://media.bizj.us/view/img/10481361/ext-nw-corner-building-copy*900xx3840-2160-0-0.jpg"}]}
                     {:is-add-task-task? true}]}
-           (make-empty-list)]
+           {:name ""
+            :asset "penguin.webp"
+            :uuid (uuid-generator)
+            :tasks [{:is-add-task-task? true}]}]
    :expanded-list-idx nil
    :current-screen :pages
    :device-token nil})
@@ -212,13 +220,18 @@
      :modified modified}))
 
 (defn is-empty-list? [list]
-  (= (:tasks list) [{:is-add-task-task? true}]))
+  (and (= (:tasks list) [{:is-add-task-task? true}])
+       (empty? (:name list))))
 
 (defn make-empty-list []
   {:name ""
-   :asset "star.gif" ;;we would like to choose a random asset and a random name for new lists
+   :asset (rand-nth (get-animated-assets))
    :uuid (uuid-generator)
    :tasks [{:is-add-task-task? true}]})
+
+(defn get-animated-assets
+  ([] (get-animated-assets @store))
+  ([db] (get-in db [:state :animated-assets])))
 
 (defn get-updated-list
   ([list-index] (get-updated-list @store list-index))
@@ -552,6 +565,8 @@
     (let [{:keys [device-token]} event]
       (assoc-in db [:state :device-token] device-token))
 
+    ;;events from the refactor:
+
     :navigate
     (let [{:keys [screen]} event]
       (assoc-in db [:state :current-screen] screen))
@@ -560,6 +575,14 @@
     :rename-list
     (let [{:keys [list-idx name]} event]
       (assoc-in db [:state :lists list-idx :name] name))
+
+    :edit-list-asset
+    (let [{:keys [list-idx asset]} event]
+      (assoc-in db [:state :lists list-idx :asset] asset))
+
+    :reorder-asset-list
+    (let [{:keys [from-index to-index]} event]
+      (update-in db [:state :animated-assets] reorder-vector from-index to-index))
 
     ;;--- Home page events ---
     :icon-expansion-toggle
