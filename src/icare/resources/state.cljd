@@ -2,7 +2,7 @@
   (:require ["package:uuid/uuid.dart" :refer [Uuid]]))
 
 (def uuid-generator (.-v4 (Uuid)))
-(def use-persistent-storage? false)
+(def use-persistent-storage? true)
 
 ;;This namespace manages all application state in one place
 ;;The store contains three top-level keys:

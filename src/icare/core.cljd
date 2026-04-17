@@ -35,7 +35,7 @@
             .statusBarColor m/Colors.transparent
             .statusBarIconBrightness services/Brightness.dark))
    (m/Scaffold
-    .backgroundColor (m/Color 0xFFE8F5E9)
+    ;; .backgroundColor (m/Color 0xFFE8F5E9)
     .resizeToAvoidBottomInset false) ;;we handle this manually by scrolling to make our text fields visible
    .body
    (f/widget

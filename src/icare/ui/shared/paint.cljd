@@ -9,6 +9,12 @@
   ([hue saturation value] (.toColor (m/HSVColor.fromAHSV 1 hue saturation value)))
   ([alpha hue saturation value] (.toColor (m/HSVColor.fromAHSV alpha hue saturation value))))
 
+(defn debug-border [.child .color]
+  (m/Container
+   .decoration (m/BoxDecoration
+                .border (m/Border.all .color (if color color m/Colors.red) .width 2))
+   .child child))
+
 (defn glass-border-painter [r]
   (reify :extends m/CustomPainter
     (paint [_ canvas size]
