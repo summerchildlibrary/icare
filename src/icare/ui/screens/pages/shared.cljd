@@ -1,0 +1,55 @@
+(ns icare.ui.screens.pages.shared
+  (:require ["package:flutter/material.dart" :as m]
+            [cljd.flutter :as f]))
+
+(defn hsv
+  ([hue saturation value] (.toColor (m/HSVColor.fromAHSV 1 hue saturation value)))
+  ([alpha hue saturation value] (.toColor (m/HSVColor.fromAHSV alpha hue saturation value))))
+
+(defn get-phone-measurements
+  "gets phone measurements from context
+  usually using mediaquery will cause
+  the calling widget to rebuild when
+  the mediaquery object changes, I'm not sure
+  if this is true when accessing mediaquery like this"
+  [context]
+  (let [phone-padding (m/MediaQuery.viewPaddingOf context)
+        notch-height (.-top phone-padding)
+        {:flds [width height]} (m/MediaQuery.sizeOf context)]
+    {:notch-height notch-height
+     :phone-height height
+     :phone-width  width}))
+
+(defn autoscroll-away-from-keyboard
+  "takes a scrollable widget and its scroll controller and sets up a listener
+  to automatically scroll up when the keyboard covers a focused item"
+  [^m/ScrollController .scrollController .child]
+  (f/widget
+   :context ctx
+   :managed [focus-callback (fn []
+                              (when-let [focused (.-primaryFocus m/FocusManager.instance)]
+                                (Future.delayed
+                                 (Duration .milliseconds 300)
+                                 (fn []
+                                   (let [phone-insets (m/MediaQuery.viewInsetsOf ctx)
+                                         keyboard-to-bottom (.-bottom phone-insets)
+                                         phone-size (m/MediaQuery.sizeOf ctx)
+                                         phone-length (.-height phone-size)
+                                         focused-to-top (.-dy (.-offset focused))
+                                         focused-to-bottom (- phone-length focused-to-top)
+                                         extra-height 60
+                                         focus-scroll-delta (max
+                                                             0
+                                                             (+ extra-height
+                                                                (- keyboard-to-bottom focused-to-bottom)))
+                                         scroll-offset (.-offset scrollController)
+                                         focus-scroll (+ scroll-offset focus-scroll-delta)]
+                                     (when (pos? keyboard-to-bottom)
+                                       (.animateTo scrollController
+                                                   focus-scroll
+                                                   .duration (Duration .milliseconds 300)
+                                                   .curve m/Curves.linear)))))))
+             :dispose nil
+             _ (doto m/FocusManager.instance (.addListener focus-callback))
+             :dispose (.removeListener focus-callback)]
+   child))

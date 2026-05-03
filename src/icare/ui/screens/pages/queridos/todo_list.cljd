@@ -1,0 +1,307 @@
+(ns icare.ui.screens.pages.queridos.todo-list
+  (:require ["package:flutter/material.dart" :as m]
+            ["package:flutter_svg/flutter_svg.dart" :as svg]
+            ["package:reorderable_grid/reorderable_grid.dart" :as reorderable-grid]
+            ["dart:ui" :as ui]
+            ["dart:math" :refer [sqrt]]
+            [icare.resources.state :refer [get-animated-assets]]
+            [icare.ui.screens.pages.shared :refer [hsv get-phone-measurements autoscroll-away-from-keyboard]]
+            [icare.ui.screens.pages.queridos.shared :refer [home-icon-asset home-icon-title
+                                                            animated-sliver-fade animated-fade
+                                                            lerp-polar-offsets ctx->coords]]
+            [cljd.flutter :as f]))
+
+(defn task [derived-state name list-idx pub-key task-idx task]
+  (let [{:keys [uuid title completed liked is-add-task-task?]} task]
+    (if is-add-task-task?
+      {:ui-type ::add-task-task
+       :key list-idx
+       :id (str "add-task-task-" list-idx)
+       :on-add-task (fn [handle-ui-event!]
+                      (fn [title]
+                        (when-not (empty? title)
+                          (handle-ui-event! {:type :add-task
+                                             :title title
+                                             :list-idx list-idx
+                                             :task-idx task-idx}))))}
+      {:ui-type ::task
+       :key uuid
+       :id (str name "-task-" uuid)
+       :title title
+       :liked liked
+       :on-like (fn [handle-ui-event!]
+                  (fn []
+                    (handle-ui-event! {:type :like-querido-task
+                                       :list-idx list-idx
+                                       :task-idx task-idx
+                                       :creator-pub-key pub-key
+                                       :task-uuid uuid
+                                       :liked (not liked)})))
+       :completed completed})))
+
+(defn ui-list [derived-state tasks name asset icon-idx uuid pub-key]
+  {:id (str "list-base-" uuid)
+   :ui-type ::list
+   :on-reorder-tasks (fn [handle-ui-event!]
+                       (fn [old-idx new-idx]
+                         (handle-ui-event! {:type :reorder-tasks
+                                            :list-idx icon-idx
+                                            :from-index old-idx
+                                            :to-index new-idx})))
+   :on-edit-list-title (fn [handle-ui-event!]
+                         (fn [name]
+                           (handle-ui-event! {:type :rename-list
+                                              :list-idx icon-idx
+                                              :name name})))
+   :on-edit-asset (fn [handle-ui-event!]
+                    (fn [asset]
+                      (handle-ui-event! {:type :edit-list-asset
+                                         :list-idx icon-idx
+                                         :asset asset})))
+   :asset-picker {:ui-type ::asset-picker ;;we share one asset picker across all lists, since only one list is opened at a time, no need to have multiple copies
+                  :id "asset-picker"
+                  :current-asset asset
+                  :on-reorder-assets (fn [handle-ui-event!]
+                                       (fn [old-idx new-idx]
+                                         (let [[old-idx new-idx] (if (< old-idx new-idx) ;;strangely, there doesn't seem to be a standard for what old and new mean when reordering
+                                                                   [old-idx (inc new-idx)]
+                                                                   [old-idx new-idx])]
+                                           (handle-ui-event! {:type :reorder-asset-list
+                                                              :from-index old-idx
+                                                              :to-index new-idx}))))
+                  :on-select-asset (fn [handle-ui-event!]
+                                     (fn [asset]
+                                       (handle-ui-event! {:type :edit-list-asset
+                                                          :list-idx icon-idx
+                                                          :asset asset})))
+                  :asset-list (get-animated-assets)}
+   :list-idx icon-idx
+   :asset asset
+   :title name
+   :tasks (mapv (partial task derived-state name icon-idx pub-key) (range) tasks)})
+
+(defn icon-repulsion [ctx image-coords text-coords]
+  (if-let [{:keys [position size]} (ctx->coords ctx)]
+    (let [clearance   20.0
+          ;; combined icon+title bounding box
+          i-left      (min (.-dx (:position image-coords))
+                           (.-dx (:position text-coords)))
+          i-right     (max (+ (.-dx (:position image-coords)) (.-width (:size image-coords)))
+                           (+ (.-dx (:position text-coords)) (.-width (:size text-coords))))
+          i-top       (.-dy (:position image-coords))
+          i-bottom    (+ (.-dy (:position text-coords)) (.-height (:size text-coords)))
+          i-cx        (/ (+ i-left i-right) 2)
+          i-cy        (/ (+ i-top i-bottom) 2)
+          i-half-h    (/ (- i-bottom i-top) 2)
+          ;; item
+          item-left   (.-dx position)
+          item-right  (+ item-left (.-width size))
+          item-cy     (+ (.-dy position) (/ (.-height size) 2))
+          item-half-h (/ (.-height size) 2)
+          item-cx     (+ item-left (/ (.-width size) 2))
+          ;; vertical proximity: fades push as item moves above/below icon
+          dy          (- item-cy i-cy)
+          v-range     (+ i-half-h item-half-h clearance)
+          v-strength  (* 0.5 (max 0.0 (- 1 (/ (if (< dy 0) (- dy) dy) v-range))))
+          ;; x push: move item away from icon horizontally to clear icon bbox
+          push-x      (if (>= item-cx i-cx)
+                        (* v-strength (max 0.0 (- (+ i-right clearance) item-left)))
+                        (* v-strength (- (max 0.0 (- item-right (- i-left clearance))))))]
+      {:push-x push-x
+       :push-y 0.0
+       :scale  (- 1.0 (* v-strength 0.5))})
+    {:push-x 0.0 :push-y 0.0 :scale 1.0}))
+
+(def task-padding {:left 30 :bottom 0})
+
+(def ^m/TextStyle task-text-style (m/TextStyle
+                                   .color m/Colors.grey
+                                   .fontFamily "Inter"
+                                   .fontWeight m/FontWeight.normal
+                                   .fontSize 20))
+
+(def title-style (m/TextStyle
+                   .color m/Colors.black
+                   .fontSize 22))
+
+(defn ast-store->widget
+  ([handle-ui-event! ast-store id]
+   (let [recursive-call (fn [ast-id]
+                          ;; (prn "ast-store->widget called with ast-id: " ast-id)
+                          (ast-store->widget handle-ui-event! ast-store ast-id))
+         get-ast-atom #(get @ast-store id)
+         {:keys [key ui-type]} @(get-ast-atom)]
+     (condp = ui-type
+       ::list
+       (f/widget
+        :context ctx
+        :get [:icon-transition-controller :expanded-icon-atom]
+        :let [{:keys [on-reorder-tasks on-edit-list-title title asset-list]} @(get-ast-atom)
+              {:keys [notch-height phone-height phone-width]} (get-phone-measurements ctx)
+              content-start (/ (+ notch-height 150) phone-height)
+              {:keys [image-coords text-coords]} @expanded-icon-atom
+              image-destination ^m/Offset (:position image-coords)
+              image-size        ^m/Size   (:size image-coords)
+              title-destination ^m/Offset (:position text-coords)
+              title-size        ^m/Size   (:size text-coords)
+              curved                                   (m/CurvedAnimation .parent icon-transition-controller .curve m/Curves.easeInSine)
+              t                                        (.drive curved (m/Tween .begin 0.0 .end 1.0))]
+        :managed [scroll-controller (m/ScrollController)
+                  list-title-controller (m/TextEditingController .text title)]
+        :bind {:scroll-controller scroll-controller
+               :image-coords image-coords
+               :text-coords text-coords}
+        :watch [{:keys [tasks]} (get-ast-atom)]
+        :let [title (f/widget
+                     (m/SizedBox .width (.-width title-size) .height (.-height title-size))
+                     (home-icon-title .controller list-title-controller
+                                       .enabled true
+                                       .onSubmitted (on-edit-list-title handle-ui-event!)
+                                       .onChanged (on-edit-list-title handle-ui-event!)))
+              image (f/widget
+                     :watch [{:keys [asset]} (get-ast-atom)]
+                     (m/GestureDetector
+                      .behavior m/HitTestBehavior.opaque
+                      .onTap (fn []
+                               (m/showModalBottomSheet
+                                .showDragHandle true
+                                .context ctx
+                                .builder (fn [_] (recursive-call "asset-picker")))
+                               nil))
+                     (home-icon-asset asset))]
+        (m/Stack
+         .children
+         [(m/CustomScrollView
+           .anchor content-start
+           .controller scroll-controller
+           .physics (m/AlwaysScrollableScrollPhysics)
+           .slivers [(f/widget
+                      (animated-sliver-fade
+                       .controller icon-transition-controller)
+                      (f/widget
+                       (autoscroll-away-from-keyboard
+                        .scrollController scroll-controller)
+                       (m/SliverReorderableList
+                        .itemBuilder (fn [_ idx] (recursive-call (nth tasks idx)))
+                        .itemCount (count tasks)
+                        .onReorder (on-reorder-tasks handle-ui-event!))))
+                     (m/SliverToBoxAdapter
+                      .child (m/SizedBox .height 400))])
+          (m/Transform.translate
+           .offset title-destination
+           .child title)
+          (m/Transform.translate
+           .offset image-destination
+           .child image)]))
+
+       ::task
+       (f/widget
+        :key key
+        :get [:scroll-controller :image-coords :text-coords]
+        :context ctx
+        :watch [_ scroll-controller
+                {:keys [completed liked title]} (get-ast-atom)]
+        :let [{:keys [on-like]} @(get-ast-atom)
+              {:keys [push-x scale]} (icon-repulsion ctx image-coords text-coords)]
+        (m/Transform.translate .offset (m/Offset push-x 0.0))
+        (m/Transform.scale .scale scale .alignment m/Alignment.center)
+        :padding task-padding
+        m/Row
+        .children
+        [(f/widget
+          :padding {:top 2}
+          (m/IconButton
+           .icon (m/Icon (if completed
+                           m/Icons.check_box
+                           m/Icons.check_box_outline_blank)
+                         .size 26
+                         .color m.Colors/grey)
+           .onPressed nil))
+         (f/widget
+          (m/SizedBox .width 200)
+          (m/Text title
+                  .maxLines nil
+           .style task-text-style))
+         (m/IconButton
+          .icon (m/Icon (if liked m/Icons.favorite m/Icons.favorite_border)
+                        .size 26
+                        .color (if liked m/Colors.pink m/Colors.grey))
+          .onPressed (on-like handle-ui-event!))])
+
+       ::add-task-task
+       (f/widget
+        :key key
+        :get [:scroll-controller :image-coords :text-coords]
+        :context ctx
+        :watch [_ scroll-controller]
+        :let [{:keys [on-add-task]} @(get-ast-atom)
+              {:keys [push-x scale]} (icon-repulsion ctx image-coords text-coords)]
+        (m/Transform.translate .offset (m/Offset push-x 0.0))
+        (m/Transform.scale .scale scale .alignment m/Alignment.center)
+        :padding task-padding
+        (m/Row)
+        .children
+        [(f/widget
+          :padding {:top 2}
+          (m/IconButton
+           .icon (m/Icon m/Icons.check_box_outline_blank
+                         .size 26
+                         .color m/Colors.grey)
+           .onPressed nil))
+         (f/widget
+          :managed [text-controller (m/TextEditingController)]
+          (m/SizedBox .width 200)
+          (m/TextField
+           .style task-text-style
+           .textInputAction m.TextInputAction/done
+           .cursorHeight 38
+           .onSubmitted (fn [new-task-title]
+                          (.clear text-controller)
+                          ((on-add-task handle-ui-event!) new-task-title))
+           .decoration (m/InputDecoration .border m/InputBorder.none)
+           .controller text-controller))])
+
+       ::asset-picker
+       (f/widget
+        :watch [{:keys [asset-list current-asset]} (get-ast-atom)]
+        :let [{:keys [on-select-asset on-reorder-assets]} @(get-ast-atom)
+              asset-icon (fn [asset-name]
+                           (f/widget
+                            :key asset-name
+                            (m/Container
+                             .decoration (m/BoxDecoration
+                                          .border (m/Border.all .color (if (= current-asset asset-name) m/Colors.blue m/Colors.transparent) .width 2)))
+                            (m/GestureDetector
+                             .behavior m/HitTestBehavior.opaque
+                             .onTap (fn []
+                                      ((on-select-asset handle-ui-event!) asset-name)))
+                            (m/Column)
+                            .children
+                            [(m/SizedBox .height 20)
+                             (m/Image.asset
+                              (str "assets/animated/" asset-name)
+                              .fit m/BoxFit.contain
+                              .width 40
+                              .height 40)
+                             (f/widget
+                              (m/SizedBox .width 120)
+                              (m/Text
+                               asset-name
+                               .textAlign m/TextAlign.center
+                               .maxLines 3
+                               .style (m/TextStyle
+                                       .color m/Colors.black
+                                       .fontSize 16)))]))]
+        (m/Container
+         .color m/Colors.white
+         .height 400)
+        (reorderable-grid/ReorderableGridView.count
+         .scrollDirection m/Axis.horizontal
+         .physics (m/AlwaysScrollableScrollPhysics)
+         .crossAxisCount 4
+         .childAspectRatio 0.7
+         .proxyDecorator (fn [child _ _] child)
+         .onReorder (on-reorder-assets handle-ui-event!)
+         .children (mapv asset-icon asset-list)))
+
+       (throw (Exception (str "Unknown ui-type in home page todo-list ast-store->widget: " @(get-ast-atom))))))))

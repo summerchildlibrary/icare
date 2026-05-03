@@ -13,12 +13,11 @@
 (defonce web-socket (atom nil))
 
 (def send-updated-task-kind 39505)
-(def liked-event-kind 39506)
+;; (def liked-event-kind 39506)
 (def update-request-to-notify-kind 39507)
 (def fulfill-notify-kind 29508) ;;a 2 here is a nostr convention that means that this kind is ephemeral and should not be stored by the relay
 
-(def relay-url "ws://localhost:8080")
-;; (def relay-url "wss://relay.damus.io")
+(def relay-url "wss://relay.summerchildlibrary.com") ;;this is our digital ocean droplet just for testing, need to configure proper security later on
 
 ;;we want to support offline first workflows
 ;;that means that the first time we connect to the websocket
@@ -28,6 +27,7 @@
 
 (defn create-message [event]
   (condp = (:type event)
+    ;; Send message to x that task y has been completed, the notify-receipt is the original message from y asking us to notify them when we complete the task.
     :fulfill-notify
     (let [{:keys [to-pub-key notify-receipt notification-content]} event]
       (-> (.from Event
@@ -39,6 +39,7 @@
                  .privkey @private-key)
           .serialize))
 
+    ;; Send message to x saying notify (or don't notify me) about task y
     :update-request-to-notify
     (let [{:keys [to-pub-key task-uuid want-notifications?]} event
           device-token (get-device-token)]
@@ -65,7 +66,7 @@
                  .privkey @private-key)
           .serialize))
 
-    ;;we request all add-or-remove-notify-events that relate to our tasks and originate from our friends
+    ;;request all update-requests-to-notify events from our friends that are relevant to our tasks
     :update-notify-requests-subscription
     (let [{:keys [user-pub-key user-task-uuids friend-pub-keys]} event
           a-tags (or (mapv (fn [task-uuid]
@@ -78,7 +79,7 @@
                      .kinds [update-request-to-notify-kind]
                      .a a-tags)])
           .serialize))
-
+    ;;request all update task messages sent from our friends
     :update-friend-tasks-subscription
     (let [{:keys [friend-pub-keys]} event]
       (-> (Request "tasks from friends"

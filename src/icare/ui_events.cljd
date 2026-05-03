@@ -2,8 +2,9 @@
   (:require [icare.resources.network :refer [dispatch!] :rename {dispatch! network-dispatch!}]
             [icare.resources.storage :refer [dispatch!] :rename {dispatch! storage-dispatch!}]
             [icare.resources.state
-             :refer [dispatch! get-task-by-indexes gather-pub-keys-and-uuids get-device-token get-new-task get-updated-task get-open-list
-                     diff-lists get-updated-list is-empty-list?]
+             :refer [dispatch! gather-pub-keys-and-uuids get-device-token get-new-task get-updated-task
+                     diff-lists]
+                     ;; get-updated-list is-empty-list?]
              :rename {dispatch! state-dispatch!}]
             [icare.resources.glue :refer [update-state-and-persist!]]
             [icare.ui.glue :refer [render-ui!]]
@@ -23,22 +24,6 @@
 (defn handle-ui-event! [event]
   (let [{:keys [type]} event]
     (condp = type
-     :complete-user-task
-     (let [db (update-state-render-and-persist! event)
-           updated-task (get-task-by-indexes (:state db) (:user-card-idx event) (:task-idx event))
-           task-uuid (:uuid updated-task)
-           receipts (get-in db [:notify-receipts task-uuid])]
-       (network-dispatch! {:type :send-updated-task
-                           :task updated-task
-                           :deleted false})
-       (when (and (:completed event) receipts)
-         (doseq [[requester-pub-key event-json] receipts]
-           (network-dispatch! {:type :fulfill-notify
-                               :to-pub-key requester-pub-key
-                               :notify-receipt event-json
-                               :notification-content {:title (:title updated-task)
-                                                      :body "Was completed"}})))) ;;TODO we want better messages such as x completed y, for this we want the notification receipt to include the task title and the user name
-
      :delete-user-task
      (do
        (update-state-render-and-persist! event)
@@ -46,14 +31,7 @@
                            :deleted true
                            :task (:task event)}))
 
-     :rename-user-task
-     (let [db (update-state-render-and-persist! event)
-           updated-task (get-task-by-indexes (:state db) (:user-card-idx event) (:task-idx event))]
-       (network-dispatch! {:type :send-updated-task
-                           :deleted false
-                           :task updated-task}))
-
-     :like-friend-task
+     :like-querido-task
      (do
        (let [messaging (firebase-messaging/FirebaseMessaging.instance)
              settings (await (.getNotificationSettings messaging))
@@ -78,25 +56,11 @@
                                                 nil))))
                 db (state-dispatch! {:type :update-device-token :device-token token})]
             (storage-dispatch! {:type :state-change-event :new-state (:state db)}))))
-       ;;this breaks atomicity, but I don't think there can be a race condition because of how flutter handles ui callbacks on the same thread.
        (update-state-render-and-persist! event)
        (network-dispatch! {:type :update-request-to-notify
-                           :want-notifications? (:want-notifications? event)
+                           :want-notifications? (:liked event)
                            :to-pub-key (:creator-pub-key event)
                            :task-uuid (:task-uuid event)}))
-
-     :add-user-task
-     (let [db (update-state-render-and-persist! event)
-           new-task (get-task-by-indexes (:state db) (:user-card-idx event) (:task-idx event))
-           {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids (:state db))
-           user-pub-key (:user-pub-key (:derived-state db))]
-       (network-dispatch! {:type :send-updated-task
-                           :deleted false
-                           :task new-task})
-       (network-dispatch! {:type :update-notify-requests-subscription
-                           :user-pub-key user-pub-key
-                           :user-task-uuids user-task-uuids
-                           :friend-pub-keys friend-pub-keys}))
 
      :delete-card
      (let [db (update-state-render-and-persist! event)
@@ -175,21 +139,7 @@
 
      ;;--- Home page events
      :icon-expansion-toggle
-     (let [db (as-> (state-dispatch! event) db
-                (or (when-let [snapshot @list-snapshot]
-                      (reset! list-snapshot nil)
-                      (let [{:keys [added removed modified new-title new-asset]} (diff-lists snapshot (get-updated-list db (:list-idx event)))]
-                        (when (or (seq added) (seq removed) (seq modified) new-title new-asset)
-                          ;;we want to send batched network events here and count the number of changes to keep track of commit logs
-                          (when (is-empty-list? snapshot)
-                            (prn "Modified an empty-list")
-                            (state-dispatch! {:type :add-list
-                                              :list-idx (:list-idx event)})))))
-                    db))]
-       (when-let [expanded-list (get-open-list db)]
-         (reset! list-snapshot expanded-list))
-       (storage-dispatch! {:type :state-change-event :new-state (:state db)})
-       (render-ui! db))
+     (update-state-render-and-persist! event)
 
      :add-list
      (update-state-render-and-persist! event)
@@ -197,12 +147,21 @@
      :reorder-icons
      (update-state-render-and-persist! event)
 
-     :reorder-tasks
-     (update-state-render-and-persist! event)
-
-     :complete-task
+     ;;--- List page events ---
+     :add-pubkey
      (let [db (update-state-render-and-persist! event)
-           updated-task (get-updated-task db (:task-idx event) (:list-idx event))
+           {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids (:state db))
+           user-pub-key (:user-pub-key (:derived-state db))]
+       (network-dispatch! {:type :update-friend-tasks-subscription
+                           :friend-pub-keys friend-pub-keys})
+       (network-dispatch! {:type :update-notify-requests-subscription
+                           :user-pub-key user-pub-key
+                           :user-task-uuids user-task-uuids
+                           :friend-pub-keys friend-pub-keys}))
+
+     :list-complete-task
+     (let [db (update-state-render-and-persist! event)
+           updated-task (get-updated-task db (:task-idx event))
            task-uuid (:uuid updated-task)
            receipts (get-in db [:notify-receipts task-uuid])]
        (network-dispatch! {:type :send-updated-task
@@ -216,23 +175,37 @@
                                :notification-content {:title (:title updated-task)
                                                       :body "Was completed"}}))))
 
-     :delete-task
-     (do
-       (update-state-render-and-persist! event)
+     :list-rename-task
+     (let [db (update-state-render-and-persist! event)]
+       (network-dispatch! {:type :send-updated-task
+                           :deleted false
+                           :task (get-updated-task db (:task-idx event))}))
+
+     :list-delete-task
+     (let [db (update-state-render-and-persist! event)
+           {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids (:state db))
+           user-pub-key (:user-pub-key (:derived-state db))]
        (network-dispatch! {:type :send-updated-task
                            :deleted true
-                           :task (:task event)}))
+                           :task {:uuid (:uuid event)}}) ;;all we need to send to delete a task is its uuid
+       (network-dispatch! {:type :update-notify-requests-subscription
+                           :user-pub-key user-pub-key
+                           :user-task-uuids user-task-uuids
+                           :friend-pub-keys friend-pub-keys}))
 
-     :rename-task
-     (let [db (update-state-render-and-persist! event)]
+     :list-add-task
+     (let [db (update-state-render-and-persist! event)
+           {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids (:state db))
+           user-pub-key (:user-pub-key (:derived-state db))]
        (network-dispatch! {:type :send-updated-task
                            :deleted false
-                           :task (get-updated-task db (:task-idx event) (:list-idx event))}))
+                           :task (get-new-task db (:task-idx event))})
+       (network-dispatch! {:type :update-notify-requests-subscription
+                           :user-pub-key user-pub-key
+                           :user-task-uuids user-task-uuids
+                           :friend-pub-keys friend-pub-keys}))
 
-     :add-task
-     (let [db (update-state-render-and-persist! event)]
-       (network-dispatch! {:type :send-updated-task
-                           :deleted false
-                           :task (get-new-task db (:task-idx event) (:list-idx event))}))
+     :list-reorder-tasks
+     (update-state-render-and-persist! event)
 
      (throw (Exception (str "Unknown event type in ui-events dispatch: " event))))))

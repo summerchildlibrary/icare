@@ -1,23 +1,23 @@
 (ns icare.ui.screens.pages.glue
   (:require ["package:flutter/material.dart" :as m]
-            [icare.ui.screens.pages.home.base
+            [icare.ui.screens.pages.queridos.base
              :refer [state->ast ast-store->widget]
-             :rename {state->ast home-state->ast
-                      ast-store->widget home-ast-store->widget}]
-            [icare.ui.screens.pages.bookmarks.base
+             :rename {state->ast queridos-state->ast
+                      ast-store->widget queridos-ast-store->widget}]
+            [icare.ui.screens.pages.list.base
              :refer [state->ast ast-store->widget]
-             :rename {state->ast bookmarks-state->ast
-                      ast-store->widget bookmarks-ast-store->widget}]
+             :rename {state->ast list-state->ast
+                      ast-store->widget list-ast-store->widget}]
             [cljd.flutter :as f]))
 
 (defn state->ast [db]
   {:id "pages"
    :ui-type ::base
-   :home-page      (home-state->ast db)
-   :bookmarks-page (bookmarks-state->ast db)})
+   :home-page      (queridos-state->ast db)
+   :bookmarks-page (list-state->ast db)})
 
 (defn ast-store->widget [ast-store handle-ui-event!]
   (f/widget
    (m/PageView
-    .children [(bookmarks-ast-store->widget ast-store handle-ui-event!)
-               (home-ast-store->widget ast-store handle-ui-event!)])))
+    .children [(queridos-ast-store->widget ast-store handle-ui-event!)
+               (list-ast-store->widget ast-store handle-ui-event!)])))

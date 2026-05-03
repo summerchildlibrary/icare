@@ -1,0 +1,147 @@
+(ns icare.ui.screens.pages.list.base
+  (:require ["package:flutter/material.dart" :as m]
+            [icare.ui.screens.pages.shared :refer [hsv get-phone-measurements autoscroll-away-from-keyboard]]
+            [cljd.flutter :as f]))
+
+(defn task [derived-state task-idx task]
+  (let [{:keys [uuid title completed is-add-task-task?]} task]
+    (if is-add-task-task?
+      {:ui-type ::add-task-task
+       :key "add-task-task"
+       :id "add-task-task"
+       :on-add-task (fn [handle-ui-event!]
+                      (fn [title]
+                        (when-not (empty? title)
+                          (handle-ui-event! {:type :list-add-task
+                                             :title title
+                                             :task-idx task-idx}))))}
+      {:ui-type ::task
+       :key uuid
+       :id (str "task-" uuid)
+       :title title
+       :on-complete (fn [handle-ui-event!]
+                      (fn []
+                        (handle-ui-event! {:type :list-complete-task
+                                           :task-idx task-idx
+                                           :completed (not completed)})))
+       :on-edit-task-title (fn [handle-ui-event!]
+                             (fn [title]
+                               (if (empty? title)
+                                 (handle-ui-event! {:type :list-delete-task
+                                                    :task-idx task-idx
+                                                    :uuid uuid})
+                                 (handle-ui-event! {:type :list-rename-task
+                                                    :task-idx task-idx
+                                                    :title title}))))
+       :completed completed})))
+
+(defn state->ast [db]
+  (let [{:keys [derived-state state]} db
+        tasks (:list state)]
+    {:id "list-base"
+     :ui-type ::base
+     :on-reorder-tasks (fn [handle-ui-event!]
+                         (fn [old-idx new-idx]
+                           (handle-ui-event! {:type :list-reorder-tasks
+                                              :from-index old-idx
+                                              :to-index new-idx})))
+     :tasks (mapv (partial task derived-state) (range) tasks)}))
+
+(def task-padding {:left 40 :bottom 30})
+
+(def ^m/TextStyle task-text-style (m/TextStyle
+                                   .color m/Colors.black
+                                   .fontFamily "Roboto"
+                                   .fontWeight m/FontWeight.normal
+                                   .fontSize 20))
+
+(defn ast-store->widget
+  ([ast-store handle-ui-event!] (ast-store->widget handle-ui-event! ast-store "list-base"))
+  ([handle-ui-event! ast-store id]
+   (let [recursive-call (fn [ast-id]
+                          ;; (prn "ast-store->widget called with ast-id: " ast-id)
+                          (ast-store->widget handle-ui-event! ast-store ast-id))
+         get-ast-atom #(get @ast-store id)
+         {:keys [ui-type key]} @(get-ast-atom)]
+     (condp = ui-type
+       ::base
+       (f/widget
+        :keep-alive true
+        :context ctx
+        :let [{:keys [notch-height phone-height phone-width]} (get-phone-measurements ctx)
+              content-start (/ (+ notch-height 40) phone-height)]
+        m/Stack
+        .children
+        [(f/widget
+          :managed [scroll-controller (m/ScrollController)]
+          :let [{:keys [on-reorder-tasks]} @(get-ast-atom)]
+          :watch [{:keys [tasks]} (get-ast-atom)]
+          (autoscroll-away-from-keyboard
+           .scrollController scroll-controller)
+          (m/ReorderableListView
+           .physics (m/AlwaysScrollableScrollPhysics)
+           .children (mapv recursive-call tasks)
+           .onReorder (on-reorder-tasks handle-ui-event!)
+           .anchor content-start
+           .scrollController scroll-controller
+           .footer (m/SizedBox .height 400)))])
+
+       ::task
+       (f/widget
+        :key key
+        :watch [{:keys [title completed subitems]} (get-ast-atom)]
+        :managed [text-controller (m/TextEditingController .text title)]
+        :let [{:keys [on-complete on-edit-task-title]} @(get-ast-atom)]
+        :padding task-padding
+        m/Row
+        .children
+        [(f/widget
+          :padding {:top 2}
+          (m/IconButton
+           .icon (m/Icon (if completed
+                           m/Icons.check_box
+                           m/Icons.check_box_outline_blank)
+                         .size 26
+                         .color m.Colors/red)
+           .onPressed (on-complete handle-ui-event!)))
+         (f/widget
+          (m/SizedBox .width 200)
+          (m/TextField
+           .keyboardType m/TextInputType.text
+           .autocorrect false
+           .maxLines nil
+           .style (.copyWith task-text-style .color (if completed (hsv 0 0 0.5) m/Colors.black))
+           .onSubmitted (on-edit-task-title handle-ui-event!)
+           .decoration (m/InputDecoration
+                        .border m/InputBorder.none)
+           .controller text-controller))])
+
+       ::add-task-task
+       (f/widget
+        :key key
+        :let [{:keys [on-add-task]} @(get-ast-atom)]
+        :padding task-padding
+        (m/Row)
+        .children
+        [(f/widget
+          :padding {:top 2}
+          (m/IconButton
+           .icon (m/Icon m/Icons.check_box_outline_blank
+                         .size 26
+                         .color m/Colors.grey)
+           .onPressed nil))
+         (f/widget
+          :managed [text-controller (m/TextEditingController)]
+          (m/SizedBox .width 200)
+          (m/TextField
+           .style task-text-style
+           .textInputAction m.TextInputAction/done
+           .cursorHeight 38
+           .onSubmitted (fn [new-task-title]
+                          (.clear text-controller)
+                          ((on-add-task handle-ui-event!) new-task-title))
+           .decoration (m/InputDecoration .border m/InputBorder.none)
+           .controller text-controller))])
+
+
+       (throw (Exception (str "Unknown ui-type in todo-list ast-store->widget: " @(get-ast-atom))))))))

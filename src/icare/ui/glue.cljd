@@ -1,7 +1,7 @@
 (ns icare.ui.glue
   (:require ["package:flutter/material.dart" :as m]
             ;; [icare.benchmarks :refer [dart-time]]
-            [icare.ui.shared.animations :refer [scale-down-fade-animation]]
+            [icare.ui.shared :refer [scale-down-fade-animation]]
             [cljd.flutter :as f]
             [icare.ui.screens.qr
              :refer [state->ast ast-store->widget]
@@ -34,7 +34,7 @@
    :managed [transition-controller (m/AnimationController
                                     .duration (Duration .milliseconds 220)
                                     .vsync clock)]
-   :let     [build-screen          (atom (:screen @(get @ast-store "root")))
+   :let     [build-screen          (atom (:screen @(get @ast-store "root"))) ;;remember, we've just defined the ast-node with id "root" at line 19
              screen-widget         (f/widget
                                     :watch [screen build-screen]
                                     (condp = screen ;;screen is the id of the root node for each screen

@@ -1,1 +1,171 @@
+(ns icare.ui.shared
+  (:require ["package:flutter/material.dart" :as m]
+            ["package:flutter/rendering.dart" :as rendering]
+            ["dart:ui" :as ui]
+            ["dart:math" :refer [pi]]
+            [cljd.flutter :as f]))
 
+(defn scale-down-fade-animation
+  "Scale down and fade animation"
+  [.controller .child]
+  (f/widget
+   :managed [curved            (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut) :dispose nil
+             scale-animation   (.drive curved (m/Tween .begin 1.0 .end 0.85))                   :dispose nil
+             opacity-animation (.drive curved (m/Tween .begin 1.0 .end 0.0))                    :dispose nil]
+   :watch [_ controller]
+   (m/Transform.scale
+    .scale (.-value scale-animation))
+   (m/Opacity
+    .opacity (.-value opacity-animation))
+   child))
+
+(defn glass-border-painter [r]
+  (reify :extends m/CustomPainter
+    (paint [_ canvas size]
+      (let [hi 0.9
+            mid 0.7
+            lo 0.4
+            stroke 1.35
+            half (/ stroke 2.0)
+            rect (ui/Rect.fromLTWH half half
+                   (- (.-width size) stroke)
+                   (- (.-height size) stroke))
+            rrect (ui/RRect.fromRectAndRadius rect
+                    (ui/Radius.circular (- r half)))
+            grad (m/SweepGradient
+                  .startAngle 0.0
+                  .endAngle (* 2.0 pi)
+                  .colors [(m/Colors.white.withOpacity lo) (m/Colors.white.withOpacity lo)
+                           (m/Colors.white.withOpacity hi) (m/Colors.white.withOpacity hi)
+                           (m/Colors.white.withOpacity mid)
+                           (m/Colors.white.withOpacity lo) (m/Colors.white.withOpacity lo)
+                           (m/Colors.white.withOpacity hi) (m/Colors.white.withOpacity hi)
+                           (m/Colors.white.withOpacity mid)
+                           (m/Colors.white.withOpacity lo) (m/Colors.white.withOpacity lo)]
+                  .stops [0.00 0.02
+                          0.035 0.336
+                          0.37 0.414
+                          0.561 0.585
+                          0.811 0.86
+                          0.914 1.00])
+            p (doto (m/Paint)
+                (.-style! ui/PaintingStyle.stroke)
+                (.-strokeWidth! stroke)
+                (.-strokeJoin! ui/StrokeJoin.round)
+                (.-isAntiAlias! true)
+                (.-blendMode! m/BlendMode.hardLight)
+                (.-shader! (.createShader grad rect)))]
+        (.drawRRect canvas rrect p)))
+    (shouldRepaint [_ _] false)))
+
+(defn navigation-button
+  "creates a default styled navigation button, content is a list of widgets given to a row,
+  on-tap is the callback for when the button is tapped"
+  [content on-tap]
+  (f/widget
+   :let [radius 12]
+   (m/DefaultTextStyle.merge
+    .style (m/TextStyle
+            .color m/Colors.black
+            .fontSize 16))
+   (m/IconTheme
+    .data (m/IconThemeData
+           .color m/Colors.black
+           .size 14))
+   (m/GestureDetector
+    .onTap on-tap)
+   (m/CustomPaint
+    .foregroundPainter (glass-border-painter radius))
+   (m/Container
+    .decoration (m/BoxDecoration
+                 .color (.toColor (m/HSVColor.fromAHSV 0.2 0 0 1))
+                 .borderRadius (m/BorderRadius.circular radius)))
+   :padding {:vertical 6 :horizontal 12}
+   (m/Row
+    .mainAxisSize m/MainAxisSize.min)
+   .children
+   content))
+
+(defn gradient-blur-with-column
+  "defines a gradient blur along the y axis. 0 is at the top, 1 is at the bottom"
+  [width height {:keys [start-stop end-stop start-sigma end-sigma]}]
+  (let [n-steps 40
+        containers (conj (apply vector
+                                (m/Container .width width .height (* start-stop height) .color m/Colors.transparent)
+                                (map (fn [_]
+                                      (m/Container .width width
+                                                   .height (/ (abs (- (* start-stop height) (* end-stop height))) n-steps)
+                                                   .color m/Colors.transparent))
+                                     (range n-steps)))
+                         (m/Container .width width .height (* (- 1 end-stop) height) .color m/Colors.transparent))]
+    (f/widget
+     m/BackdropGroup
+     m/Column
+     .children
+     (mapv (fn [idx container]
+             (m/ClipRect
+              .child (m/BackdropFilter.grouped
+                      .filter (ui/ImageFilter.blur .sigmaX (ui/lerpDouble start-sigma end-sigma (/ idx (inc n-steps)))
+                                                   .sigmaY (ui/lerpDouble start-sigma end-sigma (/ idx (inc n-steps))))
+                      .child container)))
+          (range) containers))))
+
+(defn gradient-blur-with-stack
+  "defines a gradient blur along the y axis. 0 is at the top, 1 is at the bottom
+  uses a stack of blurs to create the gradient. This is more finicky to set up and more expensive
+  than the gradient-blur-with-column approach"
+  [height]
+  (m/Stack
+   .children
+   (mapv (fn [[frac sigma]]
+           (m/ClipRect
+            .child
+            (m/BackdropFilter
+             .filter (ui/ImageFilter.blur .sigmaX sigma .sigmaY sigma)
+             .child (m/SizedBox
+                     .height (* height frac)
+                     .width double.infinity))))
+         [[0.8 6.0]
+          [0.9 2.0]
+          [0.95 3.0]
+          [1.0 1.0]])))
+
+(defn add-fade-gradient
+  "applies a fade gradient to the child, fading from start-stop to end-stop along the y axis. 0 is at the top, 1 is at the bottom"
+  [{:keys [start-stop end-stop]} child]
+  (m/ShaderMask
+     .blendMode m/BlendMode.dstIn
+     .shaderCallback (fn [^m/Rect rect]
+                       (.createShader
+                        (m/LinearGradient
+                         .begin m/Alignment.topCenter
+                         .end m/Alignment.bottomCenter
+                         .colors [m/Colors.black (m/Color 0x00000000)]
+                         .stops [start-stop end-stop])
+                        rect))
+     .child child))
+
+(defn animated-asset
+  "takes an image stream corresponding to an asset and renders it.
+  This is useful for sharing gifs between widgets without losing our
+  spot in the animation."
+  [^m/ImageStream stream width height]
+  (f/widget
+   :managed [image-info-atom (atom nil)                                         :dispose nil
+             listener        (m/ImageStreamListener
+                               (fn [^m/ImageInfo info _]
+                                 (let [^m/ImageInfo? old @image-info-atom]
+                                   (reset! image-info-atom info)
+                                   (when old (.dispose old)))))                 :dispose nil
+             _               (doto stream (.addListener listener))
+                             :dispose ((fn [^m/ImageStream s]
+                                         (when-let [info ^m/ImageInfo @image-info-atom]
+                                           (.dispose info))
+                                         (.removeListener s listener)))]
+   :watch [^m/ImageInfo? info image-info-atom]
+   (m/RawImage
+     .image  (when info (.-image info))
+     .scale  (if (and info (.-scale info)) (.-scale info) 1.0)
+     .width  width
+     .height height
+     .fit    m/BoxFit.contain)))

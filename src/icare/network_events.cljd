@@ -1,6 +1,6 @@
 (ns icare.network-events
   (:require ["package:nostr/nostr.dart" :refer [Event]]
-            ["dart:convert" :refer [jsonDecode]]
+            ["dart:convert" :refer [jsonDecode jsonEncode]]
             [cljd.edn :refer [read-string]]
             [icare.resources.state :refer [dispatch!] :rename {dispatch! state-dispatch!}]
             [icare.resources.storage :refer [dispatch!] :rename {dispatch! storage-dispatch!}]
@@ -27,7 +27,7 @@
               notification-requester (.-pubkey event)
               db (state-dispatch! {:type :update-notify-requesters :want-notifications? want-notifications?
                                    :task-uuid task-uuid :notification-requester notification-requester
-                                   :event-json event-json})]
+                                   :event-json (jsonEncode event-json)})]
           (storage-dispatch! {:type :receipts-change-event :new-receipts (:notify-receipts db)})
           (prn "Received request to notify event:" (.-content event) "with tags:" (.-tags event)))
 

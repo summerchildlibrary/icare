@@ -51,9 +51,11 @@
       (reset! receipts-file receipts-file*)))
   (let [[private-key public-key] (await (get-secure-credentials (.-generate Keychain))) ;;this is a little ugly for the sake of development code that constantly reloads.
         serial-persisted-state (await (.readAsString ^File @store-file))
-        state (read-string serial-persisted-state)
+        state (try (when (seq serial-persisted-state) (read-string serial-persisted-state))
+                   (catch Exception e (prn "Failed to parse state, resetting:" e) nil))
         serial-persisted-receipts (await (.readAsString ^File @receipts-file))
-        receipts (read-string serial-persisted-receipts)]
+        receipts (try (when (seq serial-persisted-receipts) (read-string serial-persisted-receipts))
+                      (catch Exception e (prn "Failed to parse receipts, resetting:" e) nil))]
     [private-key public-key state receipts]))
 
 (defn dispatch! [event]

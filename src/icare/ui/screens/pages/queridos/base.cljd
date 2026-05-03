@@ -1,20 +1,29 @@
-(ns icare.ui.screens.pages.home.base
+(ns icare.ui.screens.pages.queridos.base
   (:require ["package:flutter/material.dart" :as m]
             ["package:reorderable_grid/reorderable_grid.dart" :as reorderable-grid]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
+            ["package:flutter/services.dart" :as services]
             ["dart:ui" :as ui]
-            [icare.resources.state :refer [is-empty-list?]]
-            [icare.ui.screens.pages.home.todo-list
+            [icare.ui.screens.pages.queridos.todo-list
              :refer [ui-list ast-store->widget]
              :rename {ast-store->widget expanded-icon->widget}]
-            [icare.ui.shared.utils :refer [get-phone-measurements]]
-            [icare.ui.shared.animations :refer [animated-blur]]
+            [icare.ui.screens.pages.shared :refer [get-phone-measurements autoscroll-away-from-keyboard]]
+            [icare.ui.screens.pages.queridos.shared :refer [home-icon-asset home-icon-title animated-blur animated-fade debug-border ctx->coords]]
             [cljd.flutter :as f]))
+
+(defn add-querido [derived-state]
+  {:ui-type ::add-querido
+   :id "home-add-querido"
+   :paste-content (:user-pub-key derived-state)
+   :on-add-pubkey (fn [handle-ui-event!]
+                     (fn [pubkey]
+                       (when-not (empty? pubkey)
+                         (handle-ui-event! {:type :add-pubkey
+                                            :pubkey pubkey}))))})
 
 (defn icon [derived-state expanded-icon-index icon-index list]
   (let [{:keys [name asset tasks uuid]} list
-        is-expanded? (= icon-index expanded-icon-index)
-        is-add-list-icon? (is-empty-list? list)]
+        is-expanded? (= icon-index expanded-icon-index)]
       {:ui-type ::icon
        :key uuid
        :id (str "home-icon-" uuid)
@@ -29,17 +38,18 @@
 
 (defn state->ast [db]
   (let [{:keys [derived-state state]} db
-        {:keys [expanded-list-idx lists]} state]
+        {:keys [expanded-queridos-idx queridos]} state]
     {:id "home-base"
      :ui-type ::base
-     :expanded-icon (when expanded-list-idx
-                      (let [list (nth lists expanded-list-idx)]
-                        (ui-list derived-state (:tasks list) (:name list) (:asset list) expanded-list-idx (:uuid list))))
+     :add-querido (add-querido derived-state)
+     :expanded-icon (when expanded-queridos-idx
+                      (let [list (nth queridos expanded-queridos-idx)]
+                        (ui-list derived-state (:tasks list) (:name list) (:asset list) expanded-queridos-idx (:uuid list) (:pub-key list))))
      :on-deexpand-icon (fn [handle-ui-event!]
                          (fn [& args]
-                           (when expanded-list-idx
+                           (when expanded-queridos-idx
                              (handle-ui-event! {:type :icon-expansion-toggle
-                                                :list-idx expanded-list-idx}))))
+                                                :list-idx expanded-queridos-idx}))))
      :on-reorder-icons (fn [handle-ui-event!]
                          (fn [old-idx new-idx]
                            (let [[old-idx new-idx] (if (< old-idx new-idx) ;;strangely, there doesn't seem to be a standard for what old and new mean when reordering
@@ -48,21 +58,12 @@
                              (handle-ui-event! {:type :reorder-icons
                                                 :from-index old-idx
                                                 :to-index new-idx}))))
-     :icons (mapv (partial icon derived-state expanded-list-idx) (range) lists)}))
+     :icons (mapv (partial icon derived-state expanded-queridos-idx) (range) queridos)}))
 
 ;; Widget stuff
 
-(def icon-radius 20)
-(def number-of-columns 4)
-(def title-style (m/TextStyle
-                   .color m/Colors.black
-                   .fontSize 14))
-
-(defn ctx->coords [^m/BuildContext context]
-  (let [box ^m/RenderBox (.findRenderObject context)
-        position (.localToGlobal box m/Offset.zero)
-        size (.-size box)]
-    {:position position :size size}))
+(def number-of-columns 2)
+(def icon-max-width 270)
 
 (defn key->coords [^m/GlobalKey key]
   (let [box ^m/RenderBox (.findRenderObject (.-currentContext key))
@@ -98,7 +99,7 @@
         :key key
         :context ctx
         :let [{:keys [notch-height phone-height phone-width]} (get-phone-measurements ctx)
-              content-start (/ (+ notch-height 40) phone-height)]
+              content-start (/ (+ notch-height 20) phone-height)]
         :vsync clock
         :managed [icon-transition-controller (m/AnimationController
                                               .vsync clock
@@ -106,18 +107,28 @@
                   expanded-icon-atom (atom nil) :dispose nil]
         :bind {:expanded-icon-atom expanded-icon-atom
                :icon-transition-controller icon-transition-controller}
-        m/Stack
+        (m/Stack
+         .alignment m/Alignment.center)
         .children
         [(f/widget
-          :let [{:keys [on-reorder-icons]} @(get-ast-atom)]
           :watch [{:keys [icons]} (get-ast-atom)]
-          (reorderable-grid/ReorderableGridView.count
+          :let [{:keys [on-reorder-icons]} @(get-ast-atom)]
+          (reorderable-grid/ReorderableGridView.extent
+           .maxCrossAxisExtent icon-max-width
            .anchor content-start
-           .crossAxisCount number-of-columns
-           .childAspectRatio 0.8
+           .childAspectRatio 1.1
            .proxyDecorator (fn [child _ _] child)
            .onReorder (on-reorder-icons handle-ui-event!)
            .children (mapv recursive-call icons)))
+         (f/widget
+          :context ctx
+          :let [keyboard-to-bottom (.-bottom (m/MediaQuery.viewInsetsOf ctx))
+                keyboard-height (if (pos? keyboard-to-bottom) (+ keyboard-to-bottom 10) 30)]
+          (m/AnimatedPositioned
+           .duration (Duration .milliseconds 100)
+           .bottom (+ keyboard-height 20)
+           .child (f/widget
+                   (recursive-call (:add-querido @(get-ast-atom))))))
          (f/widget
           :watch [{:keys [expanded-icon]} (get-ast-atom)]
           :let [{:keys [on-deexpand-icon]} @(get-ast-atom)]
@@ -126,15 +137,18 @@
             (.forward icon-transition-controller)
             (m/Stack
              .children
-             [(animated-blur icon-transition-controller)
+             [(f/widget
+               (animated-fade
+                .controller icon-transition-controller
+                .begin 0.5
+                .end 1)
+               (m/Container
+                .color (m/Colors.white.withOpacity 0.6)
+                .width phone-width
+                .height phone-height))
+              (animated-blur icon-transition-controller)
               (m/GestureDetector
                .behavior m/HitTestBehavior.opaque
-               .onTap (fn []
-                        (.then (.reverse icon-transition-controller)
-                               (fn [_]
-                                 (reset! expanded-icon-atom nil)
-                                 ((on-deexpand-icon handle-ui-event!))))
-                        nil)
                .onHorizontalDragStart (fn [_]
                                         (.then (.reverse icon-transition-controller)
                                                (fn [_]
@@ -160,36 +174,66 @@
          .onTap (fn []
                   ((on-expand-icon handle-ui-event!))
                   (reset! expanded-icon-atom {:image-coords (key->coords image-global-key)
-                                              :image-key image-global-key
-                                              :text-coords (key->coords text-global-key)
-                                              :text-key text-global-key
-                                              :icon-idx idx
-                                              :title title})))
+                                              :text-coords (key->coords text-global-key)})))
         (m/Column)
         .children
         [(m/SizedBox .height 20)
          (f/widget
           (m/Container
            .key image-global-key)
-          (m/Image.asset (str "assets/animated/" asset)
-                         .fit m/BoxFit.contain
-                         .width 40
-                         .height 40))
+          (home-icon-asset asset))
          (f/widget
           (m/Material
            .type m/MaterialType.transparency)
           (m/SizedBox
            .key text-global-key
-           .width 95)
-          (m/TextField
-           .controller text-controller
-           .enabled false
-           .textAlign m/TextAlign.center
-           .maxLines 3
-           .decoration (m/InputDecoration
-                        .contentPadding m/EdgeInsets.zero
-                        .isDense true
-                        .border m/InputBorder.none)
-           .style title-style))])
+           .width (* 0.6 icon-max-width)
+           .height 70)
+          (home-icon-title .controller text-controller .enabled false))])
+
+       ;;TODO add button to copy the pubkey to clipboard
+       ::add-querido
+       (f/widget
+        :context ctx
+        :managed [text-controller (m/TextEditingController)]
+        :let [{:keys [on-add-pubkey]} @(get-ast-atom)]
+        (m/Column
+         .crossAxisAlignment m/CrossAxisAlignment.start)
+        .children
+        [(m/Row
+          .children
+          [(f/widget
+            (m/IconButton
+             .iconSize 30
+             .icon (m/Icon m/Icons.content_copy)
+             .onPressed (fn []
+                          (services/Clipboard.setData (services/ClipboardData. .text (:paste-content @(get-ast-atom))))
+                          nil)))
+           (f/widget
+            (m/SizedBox .width 300)
+            (m/TextField
+             .textInputAction m.TextInputAction/done
+             .maxLines 1
+             .style (m/TextStyle
+                     .fontSize 22
+                     .fontWeight m/FontWeight.normal
+                     .color m/Colors.black)
+             .decoration (m/InputDecoration
+                          .hintText "paste a friend's pubkey here v"
+                          .hintStyle (m/TextStyle .fontSize 22
+                                                  .fontWeight m/FontWeight.normal
+                                                  .color m.Colors/grey)
+                          .contentPadding (m/EdgeInsets.only .bottom -10))
+             .onSubmitted (fn [pubkey]
+                            ((on-add-pubkey handle-ui-event!) pubkey)
+                            (.clear text-controller))
+             .controller text-controller))])
+         (m/Text "    ^ Copy your pubey"
+          .style (m/TextStyle
+                  .fontSize 22
+                  .fontWeight m/FontWeight.normal
+                  .color m/Colors.grey)
+          .textAlign m/TextAlign.start)])
+
 
        (throw (Exception (str "Unknown ui-type in home ast-store->widget: " @(get-ast-atom))))))))
