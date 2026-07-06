@@ -92,10 +92,9 @@
 
 (defn dispatch! [event]
   (let [message (create-message event)]
-    (if (and send-events @web-socket @initialized? message)
-      (do (.add ^WebSocket @web-socket message)
-          (prn "Sent event to relay:" message))
-      (prn "WebSocket not initialized while trying to send event"))))
+    (when (and send-events @web-socket @initialized? message)
+      (.add ^WebSocket @web-socket message)
+      true)))
 
 (defn start-listening! [ws user-task-uuids friend-pub-keys user-pub-key handle-network-data!]
   (.listen ^WebSocket ws

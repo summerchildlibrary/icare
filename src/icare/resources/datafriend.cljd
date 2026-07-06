@@ -1,0 +1,248 @@
+(ns icare.resources.datafriend
+  (:require ["package:flutter_lmdb2/lmdb.dart" :as lmdb]
+            ["package:path_provider/path_provider.dart" :as path]
+            ["dart:io" :as io]
+            ["dart:convert" :as convert]
+            [cljd.edn :refer [read-string]]))
+
+(def log? true)
+(defn- log [message]
+  (when log?
+    (println message)))
+
+(defn- encode-utf8 [s]     (convert/utf8.encode s))
+(defn- decode-utf8 [bytes] (convert/utf8.decode bytes))
+
+(defn- decode-from-storage [bytes]
+  (-> bytes
+      decode-utf8
+      read-string))
+
+(defn storage-value
+  [value]
+  (encode-utf8 (pr-str value)))
+
+(defn- storage-eav-key
+  [entity attribute]
+  (encode-utf8 (pr-str [entity attribute])))
+
+(defn- create-dir-if-not-exist [path]
+  (let [directory (io/Directory path)]
+    (if (.existsSync directory)
+      (try
+        (.createSync directory .recursive true)
+        (log (str "Created db directory at: " path))
+        directory
+        (catch Exception e
+          (throw (Exception (str "failed to create a directory for the lmdb db because: " e)))))
+      directory)))
+
+(defn- check-directory-permissions [path]
+  (try
+    (let [file (io/File (str path "/test.txt"))]
+      (await (.writeAsString file "test"))
+      (await (.delete file))
+      (log "Write permissions verified at db directory."))
+    (catch Exception e
+      (throw (Exception (str "DB directory at '" path "' does not have appropriate write permissions: " e))))))
+
+(defonce lmdb-store (atom nil))
+
+(defn open
+  "Creates/opens a db at dir-name in the apps documents directory.
+  Returns {:eav v :aev v :ave v} where vs are sorted-map indices with their corresponding structure.
+  Throws an exception when we can't access the app documents directory for some reason"
+  [dir-name]
+  (let [app-dir ^io/Directory (await (path/getApplicationDocumentsDirectory))
+        db-path (str (.-path app-dir) "/lmdb-" dir-name)
+        _       ^io/Directory (create-dir-if-not-exist db-path)
+        lmdb    (lmdb/LMDB)]
+    (reset! lmdb-store lmdb)
+    (try
+      (let [flags (lmdb/LMDBFlagSet)]
+        (await (.init lmdb db-path .config (lmdb/LMDBInitConfig
+                                            .mapSize (* 1 1024 1024 1024) ;; 1 GB
+                                            .maxDbs 1) ;;We only want one eav index which we use to populate the in memory indexes
+                                 .flags flags))
+        (log "Database initialized!"))
+      (catch Exception e
+        (throw (Exception (str "Failed to initialized db because of: " e)))))
+    (let [txn (await (.txnStart lmdb .flags (doto (lmdb/LMDBFlagSet) (.add lmdb/MDB_RDONLY))))]
+      (try
+        (let [eav-storage (await (.cursorOpen lmdb txn .dbName "eav"))
+              first-entry (await (.cursorGet lmdb eav-storage nil lmdb/CursorOp.first))
+              db (loop [^lmdb/CursorEntry? entry first-entry eav {} aev {} ave {}]
+                   (if (nil? entry)
+                     {:eav eav :aev aev :ave ave}
+                     (let [ea    (.-key entry)
+                           [e a] (decode-from-storage ea)
+                           v     (decode-from-storage (.-data entry))]
+                       (recur (await (.cursorGet lmdb eav-storage nil lmdb/CursorOp.next))
+                              (assoc-in eav [e a] v)
+                              (assoc-in aev [a e] v)
+                              (assoc-in ave [a v e] nil)))))]
+          (.cursorClose lmdb eav-storage)
+          (.txnCommit lmdb txn)
+          db)
+        (catch Exception e
+          (await (.txnAbort lmdb txn))
+          (throw (Exception (str "Failed to iterate through lmdb storage because of: " e))))))))
+
+(defn close
+  "Closes  the open lmdb or does nothing."
+  ([] (when-let [lmdb @lmdb-store] (close lmdb)))
+  ([lmdb] (.close ^lmdb/LMDB lmdb) :success))
+
+(defn transact-to-storage-async
+  [diff]
+  (assert @lmdb-store "Cannot transact before opening the db!")
+  (let [db          ^lmdb/LMDB @lmdb-store
+        add-map     (get diff 'add {})
+        retract-map (get diff 'retract {})
+        txn         (await (.txnStart db))]
+    (try
+      (let [eav (await (.cursorOpen db txn .dbName "eav"))]
+        (doseq [[entity attmap] retract-map
+                [attribute _]   attmap]
+          (when-let [entry (await (.cursorGet db eav (storage-eav-key entity attribute) lmdb/CursorOp.set))]
+            (await (.cursorDelete db entry))))
+        (doseq [[entity attmap]   add-map
+                [attribute value] attmap]
+          (await (.cursorPut db eav (storage-eav-key entity attribute) (storage-value value) 0)))
+        (.cursorClose db eav)
+        (await (.txnCommit db txn))
+        {:success nil})
+      (catch Exception e
+        (await (.txnAbort db txn))
+        {:failure e}))))
+
+(defn transact-to-memory [db diff]
+  (let [add-map     (get diff 'add {})
+        retract-map (get diff 'retract {})
+        db          (reduce (fn [db [entity attmap]]
+                              (reduce (fn [db [attribute _]]
+                                        (if-let [old-v (get-in (:eav db) [entity attribute])]
+                                          (-> db
+                                              (update-in [:eav entity] dissoc attribute)
+                                              (update-in [:aev attribute] dissoc entity)
+                                              (update-in [:ave attribute old-v] dissoc entity))
+                                          db))
+                                      db attmap))
+                            db retract-map)
+        db          (reduce (fn [db [entity attmap]]
+                              (reduce (fn [db [attribute value]]
+                                        (let [old-v (get-in (:eav db) [entity attribute])]
+                                          (-> db
+                                              (cond-> old-v (update-in [:ave attribute] dissoc old-v))
+                                              (assoc-in [:eav entity attribute] value)
+                                              (assoc-in [:aev attribute entity] value)
+                                              (assoc-in [:ave attribute value entity] nil))))
+                                      db attmap))
+                            db add-map)]
+    db))
+
+(defn transact
+  "Executes a transaction. diff is a map with optional 'add and 'retract keys,
+  each mapping to an entity->attmap: {entity {attr val} ...}.
+  Retracts are applied before adds."
+  [db diff]
+  (transact-to-storage-async diff)
+  (transact-to-memory db diff))
+
+(defn- triple-tier
+  "Takes a triple and returns an int representing how difficult it is to query on that triple with our indexes
+  All lookups are currently fixed-point, so it might not make sense to keep on to this."
+  [[e a v]]
+  (condp = [(symbol? e) (symbol? v)]
+    [false false] 0 ;;this just means we're querying for a triple with all values specified.
+    [false true]  1
+    [true  false] 2
+    [true  true]  3))
+
+(defn get-value [db {e :entity a :attribute}]
+  (get-in (:eav db) [e a] nil))
+
+(defn get-entities [db {a :attribute v :value}]
+  (-> db
+      :ave
+      (get-in [a v])
+      keys))
+
+(defn get-evpairs [db {a :attribute}]
+  (-> db
+      :aev
+      (get a)
+      seq))
+
+(defn- try-bind
+  "bindings holds a one to one mapping between symbols and values
+  that means we don't allow many to one relations such as {:a 1 :b 1 :c 1}.
+  if a symbol or value is already bound, we abort the whole transaction and return nil"
+  [bindings & sym-val-pairs]
+  (loop [bindings bindings sym-val-pairs (partition 2 sym-val-pairs)]
+    (if (or (empty? sym-val-pairs) (nil? bindings))
+      bindings
+      (let [[sym val]  (first sym-val-pairs)
+             bound-val (get-in bindings [:sym->val sym])
+             bound-sym (get-in bindings [:val->sym val])
+             bindings  (cond (and bound-val (not= bound-val val)) nil
+                             (and bound-sym (not= bound-sym sym)) nil
+                             :else (-> bindings
+                                       (assoc-in [:sym->val sym] val)
+                                       (assoc-in [:val->sym val] sym)))]
+        (recur bindings (next sym-val-pairs))))))
+
+(defn execute
+  ([db triples result pending bindings]
+   (if (empty? triples)
+     (reduce (fn [result [[e a] v]] (assoc-in result [e a] v)) result pending) ;;if we wanted to filter out certain symbols from our results, we should probably do it here
+     (let [[e a v :as triple] (apply min-key triple-tier triples)
+           remaining (remove #{triple} triples)
+           e (get-in bindings [:sym->val e] e)
+           v (get-in bindings [:sym->val v] v)]
+       (condp = [(symbol? e) (symbol? v)]
+         [false false]
+         (execute db remaining result (conj pending [[e a] v]) bindings)
+
+         [false true]
+         (when-let [found (get-value db {:entity e :attribute a})] ;;filter here
+           (when-let [bindings (try-bind bindings v found)]
+             (execute db remaining result (conj pending [[e a] found]) bindings)))
+
+         [true false]
+         (when-let [entities (get-entities db {:attribute a :value v})] ;;filter here
+           (reduce (fn [result-sofar found]
+                     (or (when-let [bindings (try-bind bindings e found)]
+                           (execute db remaining result-sofar (conj pending [[found a] v]) bindings))
+                         result-sofar))
+                   result entities))
+
+         [true true]
+         (when-let [ev-pairs (get-evpairs db {:attribute a})] ;;filter here
+           (reduce (fn [result-sofar [found-entity found-value]]
+                     (or (when-let [bindings (try-bind bindings e found-entity v found-value)]
+                           (execute db remaining result-sofar (conj pending [[found-entity a] found-value]) bindings))
+                         result-sofar))
+                   result ev-pairs)))))))
+
+(defn parse-triples
+  "converts an entity->attmap: {entity1 {attr1 val1 attr2 val2} entity2 {...} ...}
+  to a list of triples: [[entity1 attr1 val1] [entity1 attr2 val2] [entity2 attr1 val3] ...
+  prunes all triples with no symbols since those aren't actually queries"
+  [entity->attmap]
+  (mapcat (fn [[entity attmap]]
+            (let [is-entity-symbol? (symbol? entity)]
+              (reduce (fn [acc [attribute value]]
+                        (if (or is-entity-symbol? (symbol? attribute) (symbol? value))
+                          (conj acc [entity attribute value])
+                          acc))
+                      []
+                      attmap)))
+          entity->attmap))
+
+(def empty-bindings {:sym->val {} :val->sym {}})
+
+(defn query
+  [db entity->attmap & options]
+  (let [triples (parse-triples entity->attmap)]
+    (or (execute db triples {} [] empty-bindings) {})))

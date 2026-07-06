@@ -42,9 +42,12 @@
 ;;   {"test-task-uuid-1234" {"b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b" {:dummy "receipt"}}}) ;; {task-uuid -> {requester-pub-key -> event-json}}
 (def default-notify-receipts {})
 
+(def default-unsent-network-log [])
+
 (defonce store (atom {:state default-state
                       :derived-state default-derived-state
-                      :notify-receipts default-notify-receipts}))
+                      :notify-receipts default-notify-receipts
+                      :network-log default-unsent-network-log}))
 
 (defn diff-lists [old-list new-list]
   (let [before   (into {} (mapv (juxt :uuid identity) (filter :uuid (:tasks old-list))))
@@ -505,6 +508,10 @@
                        :pub-key pubkey
                        :tasks []}))
 
+    :reset-network-log
+    (let [{:keys [log]} event]
+      (conj db [:network-log log]))
+
     (throw (Exception (str "No state handling function found for event: " event)))))
 
 (defn dispatch! [event]
@@ -521,17 +528,20 @@
 (defn get-state [] (:state @store))
 (defn get-derived-state [] (:derived-state @store))
 (defn get-notify-receipts [] (:notify-receipts @store))
+(defn get-network-log [] (:network-log @store))
 (defn get-db [] @store)
 
 ;;Call this function from core, this is the intended way to get a reference to the store
-(defn initialize-state! [pub-key persisted-state persisted-receipts]
+(defn initialize-state! [pub-key persisted-state persisted-receipts persisted-network-log]
   (when-not @initialized?
     (prn "Initializing state with pub key:" pub-key)
     (when use-persistent-storage?
-      (when-some [state persisted-state]
-        (swap! store assoc :state state))
-      (when-some [receipts persisted-receipts]
-        (swap! store assoc :notify-receipts receipts)))
+      (when persisted-state
+        (swap! store assoc :state persisted-state))
+      (when persisted-receipts
+        (swap! store assoc :notify-receipts persisted-receipts))
+      (when persisted-network-log
+        (swap! store assoc :network-log persisted-network-log)))
     (reset! initialized? true)
     (prn "this is your pub key:" pub-key)
     (update-user-pub-key! pub-key))

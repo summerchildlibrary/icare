@@ -9,11 +9,10 @@
 ;;We also load our secure storage here
 ;;basically storage handles all our persistent data needs
 
-(def store-file-name "icare_state.txt")
-(def receipts-file-name "icare_receipts.txt")
 (defonce initialized? (atom false))
 (defonce store-file (atom nil))
 (defonce receipts-file (atom nil))
+(defonce network-log-file (atom nil))
 
 (defn ^Future get-secure-credentials [key-generator]
   (let [storage (FlutterSecureStorage)
@@ -33,30 +32,39 @@
 
       :else (throw (Exception "Secure credentials exist partially")))))
 
+(defn get-or-create-file [path-to-directory file-name]
+  (let [file-path (str path-to-directory "/" file-name)
+        file ^File (File file-path)]
+    (when-not (await (.exists file))
+      (await (.create file)))
+    file))
+
+(defn read-file [^File file]
+  (try
+    (let [serial-content (await (.readAsString file))]
+      (when (seq serial-content)
+        (read-string serial-content)))
+    (catch Exception e
+      (prn "Failed to read file:" (.-path file) "with error:" e)
+      nil)))
+
 (defn ^Future initialize-storage! []
   (when-not @initialized?
     (prn "Initializing storage...")
     (reset! initialized? true)
-    (let [directory (await (getApplicationDocumentsDirectory))
-          path (.-path directory)
-          state-file-path (str path "/" store-file-name)
-          state-file ^File (File state-file-path)
-          receipts-file-path (str path "/" receipts-file-name)
-          receipts-file* ^File (File receipts-file-path)
-          _ (when-not (await (.exists state-file))
-              (await (.create state-file)))
-          _ (when-not (await (.exists receipts-file*))
-              (await (.create receipts-file*)))]
-      (reset! store-file state-file)
-      (reset! receipts-file receipts-file*)))
-  (let [[private-key public-key] (await (get-secure-credentials (.-generate Keychain))) ;;this is a little ugly for the sake of development code that constantly reloads.
-        serial-persisted-state (await (.readAsString ^File @store-file))
-        state (try (when (seq serial-persisted-state) (read-string serial-persisted-state))
-                   (catch Exception e (prn "Failed to parse state, resetting:" e) nil))
-        serial-persisted-receipts (await (.readAsString ^File @receipts-file))
-        receipts (try (when (seq serial-persisted-receipts) (read-string serial-persisted-receipts))
-                      (catch Exception e (prn "Failed to parse receipts, resetting:" e) nil))]
-    [private-key public-key state receipts]))
+    (let [directory        (await (getApplicationDocumentsDirectory))
+          path             (.-path directory)
+          state-file*       ^File (await (get-or-create-file path "icare_state.txt"))
+          receipts-file*    ^File (await (get-or-create-file path "icare_receipts.txt"))
+          network-log-file* ^File (await (get-or-create-file path "icare_network_log.txt"))]
+      (reset! store-file state-file*)
+      (reset! receipts-file receipts-file*)
+      (reset! network-log-file network-log-file*)))
+  (let [[private-key public-key] (await (get-secure-credentials (.-generate Keychain)))
+        state       (await (read-file @store-file))
+        receipts    (await (read-file @receipts-file))
+        network-log (await (read-file @network-log-file))]
+    [private-key public-key state receipts network-log]))
 
 (defn dispatch! [event]
   (if-not @initialized?
@@ -67,5 +75,8 @@
 
       :receipts-change-event
       (await (.writeAsString ^File @receipts-file (pr-str (:new-receipts event))))
+
+      :network-log-change-event
+      (await (.writeAsString ^File @network-log-file (pr-str (:new-network-log event))))
 
       (throw (Exception (str "tried to modify storage with an unknown event" event))))))

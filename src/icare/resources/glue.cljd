@@ -1,9 +1,9 @@
 (ns icare.resources.glue
   (:require [icare.resources.state
-             :refer [dispatch! initialize-state! gather-pub-keys-and-uuids get-device-token]
+             :refer [dispatch! initialize-state! gather-pub-keys-and-uuids get-device-token get-network-log]
              :rename {dispatch! state-dispatch!}]
             [icare.resources.storage :refer [initialize-storage! dispatch!] :rename {dispatch! storage-dispatch!}]
-            [icare.resources.network :refer [initialize-network!]]
+            [icare.resources.network :refer [initialize-network! dispatch!] :rename {dispatch! network-dispatch!}]
             ["package:firebase_messaging/firebase_messaging.dart" :as firebase-messaging]))
 
 (defn update-state-and-persist! [event]
@@ -29,8 +29,8 @@
           (.catchError (fn [e]
                          (prn "Failed to get device token: " e)))))))
 
-(defn ^Future initialize-resources-from-storage! [private-key public-key persisted-state persisted-receipts handle-network-data!]
-  (let [store (initialize-state! public-key persisted-state persisted-receipts)
+(defn ^Future initialize-resources-from-storage! [private-key public-key persisted-state persisted-receipts persisted-network-log handle-network-data!]
+  (let [store (initialize-state! public-key persisted-state persisted-receipts persisted-network-log)
         db @store
         old-device-token (get-device-token {:state db});;TODO we can get rid of this once we implement the glue function
         new-device-token (await (get-device-token-future))
@@ -43,5 +43,16 @@
     db))
 
 (defn ^Future initialize-resources! [handle-network-data!]
-  (let [[private-key public-key persisted-state persisted-receipts] (await (initialize-storage!))]
-    (initialize-resources-from-storage! private-key public-key persisted-state persisted-receipts handle-network-data!)))
+  (let [[private-key public-key persisted-state persisted-receipts persisted-network-log] (await (initialize-storage!))]
+    (initialize-resources-from-storage! private-key public-key persisted-state persisted-receipts persisted-network-log handle-network-data!)))
+
+(defn attemp-network-update! [event]
+  (let [log (conj (get-network-log) event)]
+    (loop [event (first log) log (next log)]
+      (if event
+        (if (network-dispatch! event)
+          (recur (first log) (next log))
+          (let [db (state-dispatch! {:type :reset-network-log :log (apply vector event log)})]
+            (storage-dispatch! {:type :network-log-change-event :new-network-log (:network-log db)})))
+        (let [db (state-dispatch! {:type :reset-network-log :log []})]
+          (storage-dispatch! {:type :network-log-change-event :new-network-log (:network-log db)}))))))
