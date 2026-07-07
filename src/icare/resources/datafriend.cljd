@@ -62,14 +62,14 @@
       (let [flags (lmdb/LMDBFlagSet)]
         (await (.init lmdb db-path .config (lmdb/LMDBInitConfig
                                             .mapSize (* 1 1024 1024 1024) ;; 1 GB
-                                            .maxDbs 1) ;;We only want one eav index which we use to populate the in memory indexes
+                                            .maxDbs 0) ;; Using default unnamed database, no named dbs needed
                                  .flags flags))
         (log "Database initialized!"))
       (catch Exception e
         (throw (Exception (str "Failed to initialized db because of: " e)))))
     (let [txn (await (.txnStart lmdb .flags (doto (lmdb/LMDBFlagSet) (.add lmdb/MDB_RDONLY))))]
       (try
-        (let [eav-storage (await (.cursorOpen lmdb txn .dbName "eav"))
+        (let [eav-storage (await (.cursorOpen lmdb txn)) ;;Use default unnamed database
               first-entry (await (.cursorGet lmdb eav-storage nil lmdb/CursorOp.first))
               db (loop [^lmdb/CursorEntry? entry first-entry eav {} aev {} ave {}]
                    (if (nil? entry)
@@ -101,7 +101,7 @@
         retract-map (get diff 'retract {})
         txn         (await (.txnStart db))]
     (try
-      (let [eav (await (.cursorOpen db txn .dbName "eav"))]
+      (let [eav (await (.cursorOpen db txn))] ;;Use default unnamed database
         (doseq [[entity attmap] retract-map
                 [attribute _]   attmap]
           (when-let [entry (await (.cursorGet db eav (storage-eav-key entity attribute) lmdb/CursorOp.set))]
@@ -192,10 +192,13 @@
                                        (assoc-in [:val->sym val] sym)))]
         (recur bindings (next sym-val-pairs))))))
 
+(def empty-bindings {:sym->val {} :val->sym {}})
+
 (defn execute
+  ([db triples] (execute db triples {} [] empty-bindings))
   ([db triples result pending bindings]
    (if (empty? triples)
-     (reduce (fn [result [[e a] v]] (assoc-in result [e a] v)) result pending) ;;if we wanted to filter out certain symbols from our results, we should probably do it here
+     (reduce (fn [result [[e a] v]] (assoc-in result [e a] v)) result pending)
      (let [[e a v :as triple] (apply min-key triple-tier triples)
            remaining (remove #{triple} triples)
            e (get-in bindings [:sym->val e] e)
@@ -205,12 +208,13 @@
          (execute db remaining result (conj pending [[e a] v]) bindings)
 
          [false true]
-         (when-let [found (get-value db {:entity e :attribute a})] ;;filter here
-           (when-let [bindings (try-bind bindings v found)]
-             (execute db remaining result (conj pending [[e a] found]) bindings)))
+         (let [found (get-value db {:entity e :attribute a})]
+           (when (any? found)
+             (when-let [bindings (try-bind bindings v found)]
+               (execute db remaining result (conj pending [[e a] found]) bindings))))
 
          [true false]
-         (when-let [entities (get-entities db {:attribute a :value v})] ;;filter here
+         (when-let [entities (get-entities db {:attribute a :value v})]
            (reduce (fn [result-sofar found]
                      (or (when-let [bindings (try-bind bindings e found)]
                            (execute db remaining result-sofar (conj pending [[found a] v]) bindings))
@@ -218,7 +222,7 @@
                    result entities))
 
          [true true]
-         (when-let [ev-pairs (get-evpairs db {:attribute a})] ;;filter here
+         (when-let [ev-pairs (get-evpairs db {:attribute a})]
            (reduce (fn [result-sofar [found-entity found-value]]
                      (or (when-let [bindings (try-bind bindings e found-entity v found-value)]
                            (execute db remaining result-sofar (conj pending [[found-entity a] found-value]) bindings))
@@ -240,9 +244,8 @@
                       attmap)))
           entity->attmap))
 
-(def empty-bindings {:sym->val {} :val->sym {}})
 
 (defn query
   [db entity->attmap & options]
   (let [triples (parse-triples entity->attmap)]
-    (or (execute db triples {} [] empty-bindings) {})))
+    (or (execute db triples) {})))
