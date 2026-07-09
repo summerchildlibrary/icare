@@ -1,552 +1,82 @@
 (ns icare.resources.state
-  (:require ["package:uuid/uuid.dart" :refer [Uuid]]))
+  (:require ["package:uuid/uuid.dart" :refer [Uuid]]
+            [icare.resources.pose :as pose]
+            [icare.resources.datafriend :as df]))
 
 (def uuid-generator (.-v4 (Uuid)))
-(def use-persistent-storage? false)
 
-;;This namespace manages all application state in one place
-;;The store contains three top-level keys:
-;;  :state - the main application state (reorderable-items, show-qr?, etc)
-;;  :derived-state - computed values derived from state (pub-key-to-name, user-pub-key)
-;;  :notify-receipts - notification receipts for push notifications
+;;This namespace holds the atomic reference to the datafriend database
+;;The UI queries and transacts against db-conn directly
+;;Transact using: (swap! db-conn df/transact diff)
+;;Query using: (df/query @db-conn {entity {attribute 'value}})
 ;;
 (defonce initialized? (atom false))
 
-(def default-state
-  {:animated-assets ["penguin.webp"
-                     "fish.webp"
-                     "heart.gif"
-                     "star.gif"
-                     "movies.gif"
-                     "dancing.gif"
-                     "settings-slow.gif"]
-   :list [{:title "Example task"
-           :uuid (uuid-generator)
-           :completed false}
-          {:is-add-task-task? true}]
-   :queridos [{:name "alex computer"
-               :uuid (uuid-generator)
-               :asset "star.gif"
-               :tasks []
-               :pub-key "0299b1e9eee16c522767bc13c3a7247ce52b0113320ee1cb1da7e9eb85a000dc"}]
-   :expanded-queridos-idx nil
-   :current-screen :pages
-   :device-token nil})
-
-(def default-derived-state
-  {:pub-key-to-name {}
-   :helper-active-pub-keys #{} ;; helper value, always empty after deriving
-   :user-pub-key nil})
-
-;; (def default-notify-receipts
-;;   {"test-task-uuid-1234" {"b5bff73132049a564cb588dad986a2acc31fa52c07bbecd991237b8cb9c2fa3b" {:dummy "receipt"}}}) ;; {task-uuid -> {requester-pub-key -> event-json}}
-(def default-notify-receipts {})
-
-(def default-unsent-network-log [])
-
-(defonce store (atom {:state default-state
-                      :derived-state default-derived-state
-                      :notify-receipts default-notify-receipts
-                      :network-log default-unsent-network-log}))
-
-(defn diff-lists [old-list new-list]
-  (let [before   (into {} (mapv (juxt :uuid identity) (filter :uuid (:tasks old-list))))
-        after    (into {} (mapv (juxt :uuid identity) (filter :uuid (:tasks new-list))))
-        added    (vals (apply dissoc after (keys before)))
-        removed  (vals (apply dissoc before (keys after)))
-        modified (map second (filter (fn [[uuid new-item]]
-                                       (when-let [old-item (get before uuid)] (not= old-item new-item)))
-                                     after))]
-    {:new-title (when-not (= (:name old-list) (:name new-list)) (:name new-list))
-     :new-asset (when-not (= (:asset old-list) (:asset new-list)) (:asset new-list))
-     :added added
-     :removed removed
-     :modified modified}))
-
-(defn get-animated-assets
-  ([] (get-animated-assets @store))
-  ([db] (get-in db [:state :animated-assets])))
-
-(defn get-updated-task
-  ([task-index] (get-updated-task @store task-index))
-  ([db task-index]  (get-in db [:state :list task-index])))
-
-(defn get-new-task
-  ([add-task-task-index] (get-new-task @store add-task-task-index))
-  ([db add-task-task-index] (get-in db [:state :list (if (zero? add-task-task-index) 1 add-task-task-index)])))
-;;
-;;Helper functions. Read only operations.
-;;Note: These functions work with the :state slice, not the full store
-
-(defn get-device-token
-  ([] (get-device-token (:state @store)))
-  ([state] (:device-token state)))
-
-(defn get-people-cards
-  ([] (get-people-cards (:state @store)))
-  ([state] (filterv #(#{:friend :user} (:type %)) (-> state :reorderable-items :items))))
-
-(defn get-person-task-uuids [person]
-  (let [{:keys [tasks]} person]
-    (mapv (fn [task] (:uuid task)) tasks)))
-
-(defn gather-pub-keys-and-uuids
-  ([] (gather-pub-keys-and-uuids (:state @store)))
-  ([state]
-   {:user-task-uuids (mapv :uuid (state :list))
-    :friend-pub-keys (mapv :pub-key (state :queridos))}))
-
-(defn get-user-pub-key
-  ([] (get-user-pub-key (:derived-state @store)))
-  ([derived-state] (:user-pub-key derived-state)))
-
-(defn get-reorderable-item-by-idx
-  ([reorderable-item-idx] (get-reorderable-item-by-idx (:state @store) reorderable-item-idx))
-  ([state reorderable-item-idx] (get-in state [:reorderable-items :items reorderable-item-idx])))
-
-(defn get-reorderable-item-idx-by-predicate [reorderable-items predicate]
-  (->> reorderable-items
-       (map vector (range))
-       (filter (fn [[idx item]] (predicate item)))
-       first
-       ((fn [[idx item]] idx))))
-
-(defn uuid->task-idx [tasks task-uuid]
-  (get-reorderable-item-idx-by-predicate tasks #(= (:uuid %) task-uuid)))
-
-(defn pub-key->reorderable-item-idx [reorderable-items pub-key]
-  (get-reorderable-item-idx-by-predicate
-   reorderable-items
-   #(= (:pub-key %) pub-key)))
-
-(defn get-user-reorderable-item-idx [reorderable-items]
-  (get-reorderable-item-idx-by-predicate
-   reorderable-items
-   #(= (:type %) :user)))
-
-;;this is a helper function to update the notify? status of a task
-;;It's meant to be called when we receive network events that modify a task in a meaningful way
-;;Be careful notifying a task. A task with notify? true is meant to be resolved by dispatching the :clear-card-notifies event
-;;This is done so that notify? controlls the notification flash animation.
-;;Therefore, for notify-task to work, we have to make sure that we've also implemented the notify? animation on the appropriate ui element
-;;We might want to make a universal notification system so that we can flash particular elements like the new person who liked your task or the
-;;particular subitem that's been added and not the entire task. To do this, we might want to add a new AST element: notifiable.
-(defn notify-task [state card-idx task-idx]
-  (let [expanded? (:expanded? (get-reorderable-item-by-idx state card-idx))]
-    (if expanded?
-      state
-      (assoc-in state [:reorderable-items :items card-idx :tasks task-idx :notify?] true))))
-
-(defn reorder-vector [v from-index to-index]
-  (vec (if (< from-index to-index)
-         (concat (subvec v 0 from-index)
-                 (subvec v (inc from-index) to-index)
-                 [(nth v from-index)]
-                 (subvec v to-index))
-         (concat (subvec v 0 to-index)
-                 [(nth v from-index)]
-                 (subvec v to-index from-index)
-                 (subvec v (inc from-index))))))
-;;
-;; DERIVED STATE LOGIC
-;; Computes derived values from state (pub-key-to-name mapping, user-pub-key)
-;;
-
-(defn remove-deleted-pub-keys [derived-state]
-  (let [old-pub-keys (keys (:pub-key-to-name derived-state))
-        active-pub-keys (:helper-active-pub-keys derived-state)
-        discard-pub-keys (filter (complement active-pub-keys) old-pub-keys)]
-    (-> (reduce (fn [acc discard-pub-key]
-                  (update acc :pub-key-to-name dissoc discard-pub-key))
-                derived-state
-                discard-pub-keys)
-        (assoc :helper-active-pub-keys #{}))))
-
-(defn update-derived-for-card [derived-state pub-key name]
-  (-> derived-state
-      (update :helper-active-pub-keys conj pub-key)
-      (assoc-in [:pub-key-to-name pub-key] name)))
-
-(defn derive-from-state [derived-state state]
-  (let [people-cards (get-people-cards state)]
-    (-> (reduce (fn [acc card]
-                  (let [{:keys [pub-key name type]} card]
-                    (cond-> (update-derived-for-card acc pub-key name)
-                      (= type :user) (assoc :user-pub-key pub-key))))
-                derived-state
-                people-cards)
-        remove-deleted-pub-keys)))
-
-(defn derive-db
-  "Helper to recompute derived-state from current state.
-   Call this after state changes that affect pub-keys or names."
-  [db]
-  (assoc db :derived-state (derive-from-state (:derived-state db) (:state db))))
-
-(defn index-of [coll item]
-  (first (keep-indexed (fn [idx x] (when (= x item) idx)) coll)))
-
-;;
-;;APPLY DB EVENT - All state transformations in one place
-;;Each handler updates :state and optionally calls derive-db for events that change pub-keys/names
-;;
-
-(defn apply-db-event [db event]
-  (condp = (:type event)
-
-    ;;--- Network events ---
-    :update-notify-requesters
-    (let [{:keys [want-notifications? task-uuid notification-requester event-json]} event]
-      (if want-notifications?
-        (assoc-in db [:notify-receipts task-uuid notification-requester] event-json)
-        (update-in db [:notify-receipts task-uuid] dissoc notification-requester)))
-
-    :update-task-event
-    (let [{:keys [task creator-pub-key]} event
-          state (:state db)
-          task-uuid (:uuid task)
-          deleted? (:deleted task)
-          querido-idx (-> (->> state :queridos (map :pub-key))
-                          (index-of creator-pub-key))
-          task-idx (when querido-idx
-                     (-> (->> (get-in state [:queridos querido-idx]) :tasks (map :uuid))
-                         (index-of task-uuid)))
-          user-pub-key (get-user-pub-key state)]
-      (or
-       ;; Delete existing task
-       (when (and querido-idx task-idx deleted?)
-         (update-in db [:state :queridos querido-idx :tasks]
-                    (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
-                                             (subvec tasks (inc task-idx)))))))
-       ;; Add new task
-       (when (and querido-idx (nil? task-idx) (not deleted?))
-         (update-in db [:state :queridos querido-idx :tasks]
-                    conj (conj task [:notify? true])))
-       ;; Update existing task
-       (when (and querido-idx task-idx (not deleted?))
-         (-> db
-             (update-in [:state :queridos querido-idx :tasks task-idx] conj task)))
-             ;; (update :state notify-task querido-idx task-idx)))
-       ;; Default: ignore nonsensical events
-       db))
-
-    ;;--- UI events ---
-
-    :complete-user-task
-    (let [{:keys [user-card-idx task-idx completed]} event]
-      (update-in db [:state :reorderable-items :items user-card-idx :tasks task-idx]
-                 (fn [task]
-                   (let [new-task (assoc task :completed completed)]
-                     (cond
-                       (and (not completed)
-                            (seq (:subitems new-task))
-                            (= :time (-> new-task :subitems first :type)))
-                       (update new-task :subitems subvec 1)
-
-                       completed
-                       (update new-task :subitems
-                               #(apply vector {:type :time :value (.toIso8601String (DateTime/now))} %))
-
-                       :else new-task)))))
-
-    :delete-user-task
-    (let [{:keys [user-card-idx task-idx]} event]
-      (update-in db [:state :reorderable-items :items user-card-idx :tasks]
-                 (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
-                                          (subvec tasks (inc task-idx)))))))
-
-    :rename-user-task
-    (let [{:keys [user-card-idx task-idx title]} event]
-      (assoc-in db [:state :reorderable-items :items user-card-idx :tasks task-idx :title] title))
-
-    :like-friend-task
-    (let [{:keys [friend-card-idx task-idx liked]} event]
-      (assoc-in db [:state :reorderable-items :items friend-card-idx :tasks task-idx :liked] liked))
-
-    :add-user-task
-    (let [{:keys [user-card-idx title]} event
-          new-task {:title title
-                    :uuid (uuid-generator)
-                    :completed false
-                    :subitems []}]
-      (update-in db [:state :reorderable-items :items user-card-idx :tasks] conj new-task))
-
-    :delete-card
-    (let [{:keys [card-idx]} event]
-      (-> db
-          (update-in [:state :reorderable-items :items]
-                     (fn [items] (vec (concat (subvec items 0 card-idx)
-                                              (subvec items (inc card-idx))))))
-          derive-db))
-
-    :rename-card
-    (let [{:keys [card-idx name]} event]
-      (-> db
-          (assoc-in [:state :reorderable-items :items card-idx :name] name)
-          derive-db))
-
-    :add-friend
-    (let [{:keys [name]} event]
-      (if (empty? name)
-        db
-        (update-in db [:state :reorderable-items :items]
-                   (fn [items]
-                     (let [new-friend {:type :uninitialized-person
-                                       :uuid (uuid-generator)
-                                       :friend name
-                                       :self nil}] ;;self refers to our name, for now we start out blank, but we would like to populate this field with the previously used name eventually
-                       (conj items new-friend))))))
-
-    :initialize-friend
-    (let [{:keys [card-idx public-key name]} event]
-      (if (empty? public-key)
-        db
-        (-> db
-            (update-in [:state :reorderable-items :items card-idx]
-                       conj {:pub-key public-key
-                             :type :friend
-                             :expanded? false
-                             :tasks []
-                             :name name})
-            derive-db)))
-
-    :reorder-items
-    (let [{:keys [from-index to-index]} event]
-      (update-in db [:state :reorderable-items :items]
-                 (fn [items]
-                   (vec (if (< from-index to-index)
-                          (concat (subvec items 0 from-index)
-                                  (subvec items (inc from-index) (inc to-index))
-                                  [(nth items from-index)]
-                                  (subvec items (inc to-index)))
-                          (concat (subvec items 0 to-index)
-                                  [(nth items from-index)]
-                                  (subvec items to-index from-index)
-                                  (subvec items (inc from-index))))))))
-
-    :card-expansion
-    (let [{:keys [card-idx expanded?]} event]
-      (-> db
-          (cond-> expanded?
-            (update-in [:state :reorderable-items :items]
-                       #(mapv (fn [item]
-                                (if (contains? item :expanded?)
-                                  (assoc item :expanded? false)
-                                  item))
-                              %)))
-          (assoc-in [:state :reorderable-items :items card-idx :expanded?] expanded?)))
-
-    :task-notification-finishes
-    (let [{:keys [card-idx]} event]
-      (update-in db [:state :reorderable-items :items card-idx :tasks]
-                 #(mapv (fn [task]
-                          (if (contains? task :notify?)
-                            (assoc task :notify? false)
-                            task))
-                        %)))
-
-    :toggle-wobble
-    (update-in db [:state :reorderable-items :wobble?] not)
-
-    :toggle-handshake-qr
-    (update-in db [:state :show-qr?] not)
-
-    :toggle-handshake-network ;;TODO we need to figure out how to do local network discovery
-    db
-
-    :delete-uninitialized-card
-    (let [{:keys [card-idx]} event]
-      (update-in db [:state :reorderable-items :items]
-                 (fn [items] (vec (concat (subvec items 0 card-idx)
-                                          (subvec items (inc card-idx)))))))
-
-    :rename-uninitialized-card-friend
-    (let [{:keys [card-idx name]} event]
-      (assoc-in db [:state :reorderable-items :items card-idx :friend] name))
-
-    :rename-uninitialized-card-self
-    (let [{:keys [card-idx name]} event]
-      (assoc-in db [:state :reorderable-items :items card-idx :self] name))
-
-    :update-device-token
-    (let [{:keys [device-token]} event]
-      (assoc-in db [:state :device-token] device-token))
-
-    ;;events from the refactor:
-
-    :navigate
-    (let [{:keys [screen]} event]
-      (assoc-in db [:state :current-screen] screen))
-
-    ;;Home.todo-list events
-    :rename-list
-    (let [{:keys [list-idx name]} event]
-      (assoc-in db [:state :queridos list-idx :name] name))
-
-    :edit-list-asset
-    (let [{:keys [list-idx asset]} event]
-      (assoc-in db [:state :queridos list-idx :asset] asset))
-
-    :reorder-asset-list
-    (let [{:keys [from-index to-index]} event]
-      (update-in db [:state :animated-assets] reorder-vector from-index to-index))
-
-    ;;--- Home page events ---
-    :icon-expansion-toggle
-    (let [{:keys [list-idx]} event]
-      (update-in db [:state :expanded-queridos-idx] #(if (= % list-idx) nil list-idx)))
-
-    :reorder-icons
-    (let [{:keys [from-index to-index]} event]
-      (update-in db [:state :queridos] reorder-vector from-index to-index))
-
-    :reorder-tasks
-    (let [{:keys [from-index to-index list-idx]} event]
-      (update-in db [:state :queridos list-idx :tasks] reorder-vector from-index to-index))
-
-    :complete-task
-    (let [{:keys [task-idx completed list-idx]} event]
-      (update-in db [:state :queridos list-idx :tasks task-idx]
-                 (fn [task]
-                   (let [new-task (assoc task :completed completed)]
-                     (cond
-                       (and (not completed)
-                            (seq (:subitems new-task))
-                            (= :time (-> new-task :subitems first :type)))
-                       (update new-task :subitems subvec 1) ;;remove timestamp
-
-                       completed ;;add timestamp
-                       (update new-task :subitems
-                               #(apply vector {:type :time :value (.toIso8601String (DateTime/now))} %))
-
-                       :else new-task)))))
-
-    :delete-task
-    (let [{:keys [task-idx list-idx]} event]
-      (update-in db [:state :queridos list-idx :tasks]
-                 (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
-                                          (subvec tasks (inc task-idx)))))))
-
-    :rename-task
-    (let [{:keys [task-idx title list-idx]} event]
-      (assoc-in db [:state :queridos list-idx :tasks task-idx :title] title))
-
-    :add-task
-    (let [{:keys [task-idx title list-idx]} event
-          new-task {:title (or title "")
-                    :uuid (uuid-generator)
-                    :completed false
-                    :subitems []}]
-      (update-in db [:state :queridos list-idx :tasks]
-                 (fn [tasks] (if (zero? task-idx)
-                               (apply vector (nth tasks 0) new-task (next tasks))
-                               (vec (concat (subvec tasks 0 task-idx)
-                                            [new-task]
-                                            (subvec tasks task-idx)))))))
-
-    ;;queridos tasks
-    :like-querido-task
-    (let [{:keys [task-idx liked list-idx]} event]
-      (assoc-in db [:state :queridos list-idx :tasks task-idx :liked] liked))
-
-    ;;--- List page events (operate on :list, no list-idx) ---
-    :list-complete-task
-    (let [{:keys [task-idx completed]} event]
-      (update-in db [:state :list task-idx]
-                 (fn [task]
-                   (let [new-task (assoc task :completed completed)]
-                     (cond
-                       (and (not completed)
-                            (seq (:subitems new-task))
-                            (= :time (-> new-task :subitems first :type)))
-                       (update new-task :subitems subvec 1)
-
-                       completed
-                       (update new-task :subitems
-                               #(apply vector {:type :time :value (.toIso8601String (DateTime/now))} %))
-
-                       :else new-task)))))
-
-    :list-rename-task
-    (let [{:keys [task-idx title]} event]
-      (assoc-in db [:state :list task-idx :title] title))
-
-    :list-delete-task
-    (let [{:keys [task-idx]} event]
-      (update-in db [:state :list]
-                 (fn [tasks] (vec (concat (subvec tasks 0 task-idx)
-                                          (subvec tasks (inc task-idx)))))))
-
-    :list-add-task
-    (let [{:keys [task-idx title]} event
-          new-task {:title (or title "")
-                    :uuid (uuid-generator)
-                    :completed false
-                    :subitems []}]
-      (update-in db [:state :list]
-                 (fn [tasks] (if (zero? task-idx)
-                               (apply vector (nth tasks 0) new-task (next tasks))
-                               (vec (concat (subvec tasks 0 task-idx)
-                                            [new-task]
-                                            (subvec tasks task-idx)))))))
-
-    :list-reorder-tasks
-    (let [{:keys [from-index to-index]} event]
-      (update-in db [:state :list] reorder-vector from-index to-index))
-
-    ;;TODO we need to figure out the logic of this
-    :send-friend-request
-    db
-
-    :add-pubkey
-    (let [{:keys [pubkey]} event]
-      (update-in db [:state :queridos]
-                 conj {:name "change-me"
-                       :uuid (uuid-generator)
-                       :asset (get (get-animated-assets db) (mod (count (get-in db [:state :queridos]))
-                                                                 (count (get-animated-assets db))))
-                       :pub-key pubkey
-                       :tasks []}))
-
-    :reset-network-log
-    (let [{:keys [log]} event]
-      (conj db [:network-log log]))
-
-    (throw (Exception (str "No state handling function found for event: " event)))))
-
-(defn dispatch! [event]
-  (assert @initialized? "State store not initialized yet! Call initialize-state! from core first.")
-  (swap! store apply-db-event event))
-
-(defn update-user-pub-key! [pub-key]
-  (swap! store assoc-in [:derived-state :user-pub-key] pub-key))
-
-;;
-;; GETTERS for each state slice
-;;
-
-(defn get-state [] (:state @store))
-(defn get-derived-state [] (:derived-state @store))
-(defn get-notify-receipts [] (:notify-receipts @store))
-(defn get-network-log [] (:network-log @store))
-(defn get-db [] @store)
-
-;;Call this function from core, this is the intended way to get a reference to the store
-(defn initialize-state! [pub-key persisted-state persisted-receipts persisted-network-log]
+;;The db-conn atom holds the datafriend database: {:eav {...} :aev {...} :ave {...}}
+(defonce db-conn (atom nil))
+
+;;Call this function to initialize the db-conn
+(defn initialize-state! [datafriend-db]
   (when-not @initialized?
-    (prn "Initializing state with pub key:" pub-key)
-    (when use-persistent-storage?
-      (when persisted-state
-        (swap! store assoc :state persisted-state))
-      (when persisted-receipts
-        (swap! store assoc :notify-receipts persisted-receipts))
-      (when persisted-network-log
-        (swap! store assoc :network-log persisted-network-log)))
-    (reset! initialized? true)
-    (prn "this is your pub key:" pub-key)
-    (update-user-pub-key! pub-key))
-    ;; Derive initial state
-    ;; (swap! store (fn [db]
-    ;;                (assoc db :derived-state
-    ;;                       (derive-from-state (:derived-state db) (:state db))))))
-  store)
+    (prn "Initializing state with datafriend db")
+    (reset! db-conn datafriend-db)
+    (reset! initialized? true))
+  db-conn)
+
+;;Transact helper - swaps db-conn with the result of df/transact
+(defn transact! [diff]
+  "Transact a diff to the database. Returns the new db value."
+  (swap! db-conn df/transact diff))
+
+;;The feel of the ui is user data, these are just the defaults
+(def default-physics
+  {:physics/repulsion-strength 2200.0
+   :physics/repulsion-radius 150.0
+   :physics/damping 4.0
+   :physics/static-friction 300.0
+   :physics/wall-stiffness 200.0
+   :physics/sleep-speed 4.0
+   :physics/sleep-frames 12
+   :physics/max-speed 3000.0})
+
+;;Default initial data for a fresh database
+(defn default-initial-data [pub-key]
+  (let [example-task-uuid (uuid-generator)
+        example-querido-uuid (uuid-generator)]
+    {'add
+     {;; Global config entity
+      :global/config
+      {:config/animated-assets ["penguin.webp"
+                                "fish.webp"
+                                "heart.gif"
+                                "star.gif"
+                                "movies.gif"
+                                "dancing.gif"
+                                "settings-slow.gif"]
+       :config/current-screen :pages
+       :config/user-pub-key pub-key
+       :config/todo-list-order [example-task-uuid :add-task-task]}
+
+      ;; Physics constants for the home canvas simulation
+      :global/physics default-physics
+
+      ;; Example task
+      example-task-uuid
+      {:task/title "Example task"
+       :task/completed false
+       :task/subitems []}
+
+      ;; Example querido
+      example-querido-uuid
+      (merge {:querido/name "alex computer"
+              :querido/asset "star.gif"
+              :querido/pub-key "0299b1e9eee16c522767bc13c3a7247ce52b0113320ee1cb1da7e9eb85a000dc"
+              :querido/task-order []}
+             (pose/pose-attrs :home 130 260))
+
+      ;; Add task placeholder
+      :add-task-task
+      {:task/is-add-task? true
+       :task/title ""
+       :task/completed false
+       :task/subitems []}}}))

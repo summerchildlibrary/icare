@@ -1,51 +1,79 @@
 (ns icare.ui.screens.pages.list.base
   (:require ["package:flutter/material.dart" :as m]
             [icare.ui.screens.pages.shared :refer [hsv get-phone-measurements autoscroll-away-from-keyboard]]
+            [icare.resources.datafriend :as df]
+            [icare.resources.state :refer [uuid-generator]]
             [cljd.flutter :as f]))
 
-(defn task [derived-state task-idx task]
-  (let [{:keys [uuid title completed is-add-task-task?]} task]
-    (if is-add-task-task?
+(defn task [db [task-id task]]
+  (let [{:keys [task/title task/completed task/is-add-task?]} task
+        todo-list-order (get-in db [:eav :global/config :config/todo-list-order])]
+    (if is-add-task?
       {:ui-type ::add-task-task
-       :key "add-task-task"
-       :id "add-task-task"
-       :on-add-task (fn [handle-ui-event!]
+       :key task-id
+       :id task-id
+       :on-add-task (fn [side-effects]
                       (fn [title]
                         (when-not (empty? title)
-                          (handle-ui-event! {:type :list-add-task
-                                             :title title
-                                             :task-idx task-idx}))))}
+                          (let [{:keys [transact! render!]} side-effects
+                                new-task-id (uuid-generator)
+                                new-todo-list-order (reduce (fn [new-order task-id]
+                                                              (cond
+                                                                (and (empty? new-order) (> (count todo-list-order) 1) (= task-id :add-task-task))
+                                                                (conj new-order task-id new-task-id)
+
+                                                                (= task-id :add-task-task) (conj new-order new-task-id task-id)
+
+                                                                :else (conj new-order task-id)))
+                                                            []
+                                                            todo-list-order)]
+                            (transact! {'add {new-task-id {:task/title title
+                                                           :task/completed false
+                                                           :task/subitems []}
+                                              :global/config {:config/todo-list-order new-todo-list-order}}})
+                            (render!)))))}
       {:ui-type ::task
-       :key uuid
-       :id (str "task-" uuid)
+       :key task-id
+       :id (str "task-" task-id)
        :title title
-       :on-complete (fn [handle-ui-event!]
+       :on-complete (fn [side-effects]
                       (fn []
-                        (handle-ui-event! {:type :list-complete-task
-                                           :task-idx task-idx
-                                           :completed (not completed)})))
-       :on-edit-task-title (fn [handle-ui-event!]
-                             (fn [title]
-                               (if (empty? title)
-                                 (handle-ui-event! {:type :list-delete-task
-                                                    :task-idx task-idx
-                                                    :uuid uuid})
-                                 (handle-ui-event! {:type :list-rename-task
-                                                    :task-idx task-idx
-                                                    :title title}))))
+                        (let [{:keys [transact! render!]} side-effects]
+                          (transact! {'add {task-id {:task/completed (not completed)}}})
+                          (render!))))
+       :on-edit-task-title (fn [side-effects]
+                             (fn [new-title]
+                               (let [{:keys [transact! render!]} side-effects]
+                                 (if (empty? new-title)
+                                   (transact! {'retract {task-id (get-in db [:eav task-id])}
+                                               'add     {:global/config {:config/todo-list-order (vec (remove #(= % task-id) todo-list-order))}}})
+                                   (transact! {'add {task-id {:task/title new-title}}}))
+                                 (render!))))
        :completed completed})))
 
 (defn state->ast [db]
-  (let [{:keys [derived-state state]} db
-        tasks (:list state)]
+  (let [todo-list-order (get-in db [:eav :global/config :config/todo-list-order])
+        all-tasks       (mapv (fn [task-id] [task-id (get-in db [:eav task-id])]) todo-list-order)]
+
+    (prn "Rendering" (count (remove (fn [[_ task]] (:task/is-add-task? task))  all-tasks)) "tasks")
+
     {:id "list-base"
      :ui-type ::base
-     :on-reorder-tasks (fn [handle-ui-event!]
+     :on-reorder-tasks (fn [side-effects]
                          (fn [old-idx new-idx]
-                           (handle-ui-event! {:type :list-reorder-tasks
-                                              :from-index old-idx
-                                              :to-index new-idx})))
-     :tasks (mapv (partial task derived-state) (range) tasks)}))
+                           (prn "old" old-idx "new" new-idx)
+                           (let [adjusted-new-idx (if (> new-idx old-idx) (dec new-idx) new-idx)] ;; Flutter's ReorderableListView returns strange indices, this is us dealing with that
+                             (prn "adjusted new-idx:" adjusted-new-idx)
+                             (let [{:keys [transact! render!]} side-effects
+                                   moved-task-id       (nth todo-list-order old-idx)
+                                   tasks-without-moved (vec (concat (subvec todo-list-order 0 old-idx)
+                                                                    (subvec todo-list-order (inc old-idx))))
+                                   reordered-tasks     (vec (concat (subvec tasks-without-moved 0 adjusted-new-idx)
+                                                                   [moved-task-id]
+                                                                   (subvec tasks-without-moved adjusted-new-idx)))]
+                               (transact! {'add {:global/config {:config/todo-list-order reordered-tasks}}})
+                               (render!)))))
+     :tasks (mapv (partial task db) all-tasks)}))
 
 (def task-padding {:left 40 :bottom 30})
 
@@ -56,11 +84,11 @@
                                    .fontSize 20))
 
 (defn ast-store->widget
-  ([ast-store handle-ui-event!] (ast-store->widget handle-ui-event! ast-store "list-base"))
-  ([handle-ui-event! ast-store id]
+  ([ast-store side-effects] (ast-store->widget side-effects ast-store "list-base"))
+  ([side-effects ast-store id]
    (let [recursive-call (fn [ast-id]
                           ;; (prn "ast-store->widget called with ast-id: " ast-id)
-                          (ast-store->widget handle-ui-event! ast-store ast-id))
+                          (ast-store->widget side-effects ast-store ast-id))
          get-ast-atom #(get @ast-store id)
          {:keys [ui-type key]} @(get-ast-atom)]
      (condp = ui-type
@@ -74,14 +102,15 @@
         .children
         [(f/widget
           :managed [scroll-controller (m/ScrollController)]
-          :let [{:keys [on-reorder-tasks]} @(get-ast-atom)]
           :watch [{:keys [tasks]} (get-ast-atom)]
           (autoscroll-away-from-keyboard
            .scrollController scroll-controller)
           (m/ReorderableListView
            .physics (m/AlwaysScrollableScrollPhysics)
            .children (mapv recursive-call tasks)
-           .onReorder (on-reorder-tasks handle-ui-event!)
+           ;;callbacks are fetched from the node atom at event time, a build-time :let would capture a closure over stale db data
+           .onReorder (fn [old-idx new-idx]
+                        (((:on-reorder-tasks @(get-ast-atom)) side-effects) old-idx new-idx))
            .anchor content-start
            .scrollController scroll-controller
            .footer (m/SizedBox .height 400)))])
@@ -91,7 +120,6 @@
         :key key
         :watch [{:keys [title completed subitems]} (get-ast-atom)]
         :managed [text-controller (m/TextEditingController .text title)]
-        :let [{:keys [on-complete on-edit-task-title]} @(get-ast-atom)]
         :padding task-padding
         m/Row
         .children
@@ -103,7 +131,8 @@
                            m/Icons.check_box_outline_blank)
                          .size 26
                          .color m.Colors/red)
-           .onPressed (on-complete handle-ui-event!)))
+           .onPressed (fn []
+                        (((:on-complete @(get-ast-atom)) side-effects)))))
          (f/widget
           (m/SizedBox .width 200)
           (m/TextField
@@ -111,7 +140,8 @@
            .autocorrect false
            .maxLines nil
            .style (.copyWith task-text-style .color (if completed (hsv 0 0 0.5) m/Colors.black))
-           .onSubmitted (on-edit-task-title handle-ui-event!)
+           .onSubmitted (fn [new-title]
+                          (((:on-edit-task-title @(get-ast-atom)) side-effects) new-title))
            .decoration (m/InputDecoration
                         .border m/InputBorder.none)
            .controller text-controller))])
@@ -119,7 +149,6 @@
        ::add-task-task
        (f/widget
         :key key
-        :let [{:keys [on-add-task]} @(get-ast-atom)]
         :padding task-padding
         (m/Row)
         .children
@@ -139,7 +168,7 @@
            .cursorHeight 38
            .onSubmitted (fn [new-task-title]
                           (.clear text-controller)
-                          ((on-add-task handle-ui-event!) new-task-title))
+                          (((:on-add-task @(get-ast-atom)) side-effects) new-task-title))
            .decoration (m/InputDecoration .border m/InputBorder.none)
            .controller text-controller))])
 

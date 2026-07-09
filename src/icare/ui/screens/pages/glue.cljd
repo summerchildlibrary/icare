@@ -16,8 +16,8 @@
    :home-page      (queridos-state->ast db)
    :bookmarks-page (list-state->ast db)})
 
-(defn ast-store->widget [ast-store handle-ui-event!]
+(defn ast-store->widget [ast-store side-effects]
   (f/widget
    (m/PageView
-    .children [(queridos-ast-store->widget ast-store handle-ui-event!)
-               (list-ast-store->widget ast-store handle-ui-event!)])))
+    .children [(queridos-ast-store->widget ast-store side-effects)
+               (list-ast-store->widget ast-store side-effects)])))

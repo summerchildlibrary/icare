@@ -1,21 +1,15 @@
 (ns icare.resources.glue
-  (:require [icare.resources.state
-             :refer [dispatch! initialize-state! gather-pub-keys-and-uuids get-device-token get-network-log]
-             :rename {dispatch! state-dispatch!}]
-            [icare.resources.storage :refer [initialize-storage! dispatch!] :rename {dispatch! storage-dispatch!}]
-            [icare.resources.network :refer [initialize-network! dispatch!] :rename {dispatch! network-dispatch!}]
-            ["package:firebase_messaging/firebase_messaging.dart" :as firebase-messaging]))
-
-(defn update-state-and-persist! [event]
-  (let [db (state-dispatch! event)]
-    (storage-dispatch! {:type :state-change-event :new-state (:state db)})
-    db))
+  (:require [icare.resources.state :refer [initialize-state! transact! db-conn default-initial-data default-physics]]
+            [icare.resources.datafriend :as df]
+            [icare.resources.pose :as pose]
+            ["package:firebase_messaging/firebase_messaging.dart" :as firebase-messaging]
+            ["package:nostr/nostr.dart" :refer [Keychain]]
+            ["package:flutter_secure_storage/flutter_secure_storage.dart" :refer [FlutterSecureStorage]]))
 
 (defn ^Future get-device-token-future []
   (let [messaging (firebase-messaging/FirebaseMessaging.instance)
         settings (await (.getNotificationSettings messaging))
         status (.-authorizationStatus settings)]
-    ;;TODO this is a good place to set the listener for token changes
     (when (= status firebase-messaging/AuthorizationStatus.notDetermined)
       (await (.requestPermission messaging
                 .alert true
@@ -29,30 +23,77 @@
           (.catchError (fn [e]
                          (prn "Failed to get device token: " e)))))))
 
-(defn ^Future initialize-resources-from-storage! [private-key public-key persisted-state persisted-receipts persisted-network-log handle-network-data!]
-  (let [store (initialize-state! public-key persisted-state persisted-receipts persisted-network-log)
-        db @store
-        old-device-token (get-device-token {:state db});;TODO we can get rid of this once we implement the glue function
-        new-device-token (await (get-device-token-future))
-        ;;TODO a good way to manage these new tokens is with some function in glue that updates state, persits, and checks for differences with the old token and sends the appropriate network calls
-        db (if (not= old-device-token new-device-token) ;;TODO when the device token changes, we need to send a bunch of updated notify request calls. We need to figure out how to handle network reconnection, probably we can have a network event that gets called on both on initial connection and reconnection to the ws, there is where we can grab the latest device token and send the updated notify requests and updated task calls. It might not even be neccessary to store the device token since we plan on resending all our state on every reconnection, if we try and be smart about it we might need to create some sort of queue for failed network calls that we resend on device connection. Then, we wouldn't even have to worry about at what point in the app cycle we send out the update notify requestsif we try and be smart about it we might need to create some sort of queue for failed network calls that we resend on device connection. Then, we wouldn't even have to worry about at what point in the app cycle we send out the update notify requests.
-             (update-state-and-persist! {:type :update-device-token :device-token new-device-token})
-             db)
-        {:keys [user-task-uuids friend-pub-keys]} (gather-pub-keys-and-uuids (:state db))]
-    (initialize-network! private-key user-task-uuids friend-pub-keys public-key handle-network-data!)
-    db))
+(defn ^Future get-secure-credentials []
+  (let [storage (FlutterSecureStorage)
+        contains-private-key? (await (.containsKey storage .key "private-key"))
+        contains-public-key? (await (.containsKey storage .key "public-key"))]
+    (cond
+      (and contains-private-key? contains-public-key?)
+      (let [private-key (await (.read storage .key "private-key"))
+            public-key (await (.read storage .key "public-key"))]
+        [private-key public-key])
 
-(defn ^Future initialize-resources! [handle-network-data!]
-  (let [[private-key public-key persisted-state persisted-receipts persisted-network-log] (await (initialize-storage!))]
-    (initialize-resources-from-storage! private-key public-key persisted-state persisted-receipts persisted-network-log handle-network-data!)))
+      (and (not contains-private-key?) (not contains-public-key?))
+      (let [{:flds [private public]} ^Keychain (.-generate Keychain)]
+        (await (.write storage .key "private-key" .value private))
+        (await (.write storage .key "public-key" .value public))
+        [private public])
 
-(defn attemp-network-update! [event]
-  (let [log (conj (get-network-log) event)]
-    (loop [event (first log) log (next log)]
-      (if event
-        (if (network-dispatch! event)
-          (recur (first log) (next log))
-          (let [db (state-dispatch! {:type :reset-network-log :log (apply vector event log)})]
-            (storage-dispatch! {:type :network-log-change-event :new-network-log (:network-log db)})))
-        (let [db (state-dispatch! {:type :reset-network-log :log []})]
-          (storage-dispatch! {:type :network-log-change-event :new-network-log (:network-log db)}))))))
+      :else (throw (Exception "Secure credentials exist partially")))))
+
+(defn ^Future initialize-persisted-resources! [handle-network-data!]
+  (let [;; Open datafriend database
+        datafriend-db (await (df/open "icare"))
+        _ (prn "Datafriend initialized with" (count (get-in datafriend-db [:eav])) "entities")
+
+        ;; Get credentials
+        [private-key public-key] (await (get-secure-credentials))
+        _ (prn "Loaded credentials for pub-key:" public-key)
+
+        ;; Populate default data if database is empty
+        is-empty? (zero? (count (get-in datafriend-db [:eav])))
+        datafriend-db (if is-empty?
+                        (do
+                          (prn "Populating default initial data...")
+                          (let [new-db (df/transact datafriend-db (default-initial-data public-key))]
+                            (prn "After populating, DB has entities:" (keys (:eav new-db)))
+                            new-db))
+                        datafriend-db)
+
+        ;; Initialize state with populated db
+        _ (initialize-state! datafriend-db)
+
+        ;; One-time migrations, combined into a SINGLE transaction: lmdb allows one write
+        ;; txn at a time and txnStart blocks the ui thread, so two fire-and-forget
+        ;; transact! calls in the same synchronous stretch deadlock the whole app
+        _ (let [db @db-conn
+                ;; the expanded querido depends on widget-layer icon coordinates that don't
+                ;; exist on a fresh launch, so we always start collapsed
+                expanded-querido-id (get-in db [:eav :global/config :config/expanded-querido])
+                ;; migrate queridos from the retired :config/queridos-order vector to physics poses
+                queridos-order (get-in db [:eav :global/config :config/queridos-order])
+                pose-adds (into {}
+                                (map-indexed (fn [idx querido-id]
+                                               [querido-id (pose/pose-attrs :home
+                                                                            (+ 120.0 (* (mod idx 2) 160.0))
+                                                                            (+ 240.0 (* (quot idx 2) 180.0)))])
+                                             (vec (remove #(get-in db [:eav % :pose/canvas]) (or queridos-order [])))))
+                ;; seed physics constants for dbs created before they existed
+                add-map (cond-> pose-adds
+                          (not (get-in db [:eav :global/physics])) (assoc :global/physics default-physics))
+                retract-map (cond-> {}
+                              expanded-querido-id (assoc-in [:global/config :config/expanded-querido] expanded-querido-id)
+                              queridos-order (assoc-in [:global/config :config/queridos-order] queridos-order))]
+            (when (or (seq add-map) (seq retract-map))
+              (transact! {'add add-map 'retract retract-map})))
+
+        ;; Get device token
+        device-token (await (get-device-token-future))
+        _ (prn "Device token:" device-token)
+
+        ;; Store device token in db if we have one
+        _ (when device-token
+            (transact! {'add {:global/config {:config/device-token device-token}}}))]
+
+    ;; Return db-conn for the UI to use
+    db-conn))

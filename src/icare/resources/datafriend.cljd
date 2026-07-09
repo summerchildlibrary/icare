@@ -104,8 +104,8 @@
       (let [eav (await (.cursorOpen db txn))] ;;Use default unnamed database
         (doseq [[entity attmap] retract-map
                 [attribute _]   attmap]
-          (when-let [entry (await (.cursorGet db eav (storage-eav-key entity attribute) lmdb/CursorOp.set))]
-            (await (.cursorDelete db entry))))
+          (when (await (.cursorGet db eav (storage-eav-key entity attribute) lmdb/CursorOp.set))
+            (await (.cursorDelete db eav))))
         (doseq [[entity attmap]   add-map
                 [attribute value] attmap]
           (await (.cursorPut db eav (storage-eav-key entity attribute) (storage-value value) 0)))
@@ -114,26 +114,34 @@
         {:success nil})
       (catch Exception e
         (await (.txnAbort db txn))
+        ;;this must be loud: a failed write means the in-memory db has diverged from disk until next launch
+        (println (str "DATAFRIEND STORAGE WRITE FAILED, in-memory db has diverged from disk! diff: " diff " error: " e))
         {:failure e}))))
 
+(def proprietary-nothing 'THIS-VALUE-REPRESENTS-NOTHING)
+
 (defn transact-to-memory [db diff]
-  (let [add-map     (get diff 'add {})
-        retract-map (get diff 'retract {})
+  (let [retract-map (get diff 'retract {})
         db          (reduce (fn [db [entity attmap]]
                               (reduce (fn [db [attribute _]]
-                                        (if-let [old-v (get-in (:eav db) [entity attribute])]
-                                          (-> db
-                                              (update-in [:eav entity] dissoc attribute)
-                                              (update-in [:aev attribute] dissoc entity)
-                                              (update-in [:ave attribute old-v] dissoc entity))
-                                          db))
+                                        ;;we check against proprietary-nothing instead of truthiness so stored falsy values (false, nil) still get retracted
+                                        (let [old-v (get-in (:eav db) [entity attribute] proprietary-nothing)]
+                                          (if (= old-v proprietary-nothing)
+                                            db
+                                            (-> db
+                                                (update-in [:eav entity] dissoc attribute)
+                                                (update-in [:aev attribute] dissoc entity)
+                                                (update-in [:ave attribute old-v] dissoc entity)))))
                                       db attmap))
                             db retract-map)
+        add-map     (get diff 'add {})
         db          (reduce (fn [db [entity attmap]]
                               (reduce (fn [db [attribute value]]
-                                        (let [old-v (get-in (:eav db) [entity attribute])]
+                                        (let [old-v (get-in (:eav db) [entity attribute] proprietary-nothing)]
                                           (-> db
-                                              (cond-> old-v (update-in [:ave attribute] dissoc old-v))
+                                              ;;remove only this entity from the old value's ave entry, other entities may share that value
+                                              (cond-> (not= old-v proprietary-nothing)
+                                                (update-in [:ave attribute old-v] dissoc entity))
                                               (assoc-in [:eav entity attribute] value)
                                               (assoc-in [:aev attribute entity] value)
                                               (assoc-in [:ave attribute value entity] nil))))
@@ -144,7 +152,9 @@
 (defn transact
   "Executes a transaction. diff is a map with optional 'add and 'retract keys,
   each mapping to an entity->attmap: {entity {attr val} ...}.
-  Retracts are applied before adds."
+  Retracts are applied before adds.
+  Storage writes are fire-and-forget: we rely on the dart event loop to serialize them,
+  until we move to full memory<->storage sync on every transaction (e.g. negentropy)."
   [db diff]
   (transact-to-storage-async diff)
   (transact-to-memory db diff))
@@ -160,7 +170,7 @@
     [true  true]  3))
 
 (defn get-value [db {e :entity a :attribute}]
-  (get-in (:eav db) [e a] nil))
+  (get-in (:eav db) [e a] proprietary-nothing))
 
 (defn get-entities [db {a :attribute v :value}]
   (-> db
@@ -209,7 +219,7 @@
 
          [false true]
          (let [found (get-value db {:entity e :attribute a})]
-           (when (any? found)
+           (when (not= found proprietary-nothing)
              (when-let [bindings (try-bind bindings v found)]
                (execute db remaining result (conj pending [[e a] found]) bindings))))
 

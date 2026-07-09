@@ -1,0 +1,35 @@
+(ns icare.resources.pose
+  "Spatial attributes for entities that live on a physics canvas.
+  :pose/x and :pose/y are the stored truth, :pose/cell is a spatial hash derived
+  at write time so radius queries only scan nearby cells through the ave index.
+  Always write poses through pose-attrs so x, y and cell can never drift apart."
+  (:require [icare.resources.datafriend :as df]))
+
+(def cell-size 128.0)
+
+(defn xy->cell [x y]
+  [(.floor (/ (double x) cell-size)) (.floor (/ (double y) cell-size))])
+
+(defn pose-attrs [canvas x y]
+  {:pose/canvas canvas
+   :pose/x (double x)
+   :pose/y (double y)
+   :pose/cell (xy->cell x y)})
+
+(defn entities-near
+  "Entities on canvas whose stored pose is within radius px of [x y].
+  Scans only the spatial hash cells that intersect the query square."
+  [db canvas x y radius]
+  (let [[c0 r0] (xy->cell (- x radius) (- y radius))
+        [c1 r1] (xy->cell (+ x radius) (+ y radius))
+        radius2 (* (double radius) (double radius))]
+    (vec
+     (for [c (range c0 (inc c1))
+           r (range r0 (inc r1))
+           entity (df/get-entities db {:attribute :pose/cell :value [c r]})
+           :let [attrs (get-in db [:eav entity])
+                 dx (- (:pose/x attrs) x)
+                 dy (- (:pose/y attrs) y)]
+           :when (and (= canvas (:pose/canvas attrs))
+                      (<= (+ (* dx dx) (* dy dy)) radius2))]
+       entity))))

@@ -14,13 +14,16 @@
             [icare.ui.normalized-ast :refer [ast->ast-store]]))
 
 ;;first we transform the application state into an abstract syntax tree (AST) which represents the entire UI. This is a pure function with no side effects.
-(defn state->ast [{:keys [state] :as db}]
-  {:id "root"
-   :ui-type ::root
-   :screen (condp = (:current-screen state)
-             :qr        (qr-state->ast db)
-             :pages     (pages-state->ast db)
-             (throw (Exception (str "Unknown screen while deriving ast: " (:current-screen state)))))})
+;;db is the datafriend database: {:eav {...} :aev {...} :ave {...}}
+(defn db->ast [db]
+  (let [;; Query current screen from db
+        current-screen (or (get-in db [:eav :global/config :config/current-screen]) :pages)]
+    {:id "root"
+     :ui-type ::root
+     :screen (condp = current-screen
+               :qr        (qr-state->ast db)
+               :pages     (pages-state->ast db)
+               (throw (Exception (str "Unknown screen while deriving ast: " current-screen))))}))
 
 ;;then we take this AST and normalize it into a flat map of id to AST node, where each node is stored in an atom.
 ;;in each AST we replace their AST children with just their ids to make diffing with old asts easier.
@@ -28,7 +31,7 @@
 ;;{"root" atom{id "root" :ui-type :root :screen "whatever"} "whatever" atom{:id "whatever" :more-stuff ...}}
 ;;and we do all this before passing it to the ast-store->widget.
 ;;Because of this, each widget can watch the specific atom that corresponds to its AST node.
-(defn ast-store->widget [ast-store handle-ui-event!]
+(defn ast-store->widget [ast-store side-effects]
   (f/widget
    :vsync clock
    :managed [transition-controller (m/AnimationController
@@ -38,8 +41,8 @@
              screen-widget         (f/widget
                                     :watch [screen build-screen]
                                     (condp = screen ;;screen is the id of the root node for each screen
-                                      "pages"           (pages-ast-store->widget ast-store handle-ui-event!)
-                                      "qr-base"         (qr-ast-store->widget ast-store handle-ui-event!)
+                                      "pages"           (pages-ast-store->widget ast-store side-effects)
+                                      "qr-base"         (qr-ast-store->widget ast-store side-effects)
                                       (throw (Exception (str "Unknown screen id while deriving widgets: " screen)))))]
    :watch   [{new-screen :screen}  (get @ast-store "root")]
    (do
@@ -61,16 +64,16 @@
   [db]
   (assert @widgets-built? "render-ui! was called before the initial build-widgets! call. Make sure to call build-widgets! first to initialize the widget tree.")
   (-> db
-      state->ast
+      db->ast
       ast->ast-store))
 
 (defn build-widgets!
   "This is like render-ui! but it actually returns the widget tree instead of just updating the atoms.
   This is used for the initial build of the app, on subsequent attempts to render, i.e. after ui and network events
   we just call render-ui! to update the atoms and trigger re-renders of the widgets."
-  [db handle-ui-event!]
+  [db side-effects]
   (reset! widgets-built? true)
   (-> db
-      state->ast
+      db->ast
       ast->ast-store
-      (ast-store->widget handle-ui-event!)))
+      (ast-store->widget side-effects)))

@@ -6,10 +6,14 @@
             ["firebase_options.dart" :as firebase-options]
             ["package:haptic_feedback/haptic_feedback.dart" :as haptics]
             [cljd.flutter :as f]
-            [icare.resources.glue :refer [initialize-resources!]]
-            [icare.network-events :refer [handle-network-data!]]
-            [icare.ui.glue :refer [build-widgets!]]
-            [icare.ui-events :refer [handle-ui-event!]]))
+            [icare.resources.glue :refer [initialize-persisted-resources!]]
+            [icare.resources.state :refer [transact! uuid-generator db-conn]]
+            [icare.resources.datafriend :as df]
+            [icare.ui.glue :refer [build-widgets! render-ui!]]))
+
+;; Stub for network events (TODO: implement later)
+(defn handle-network-data! [data]
+  (prn "Network data received (not yet implemented):" data))
 
 (defn main []
   (await (m/WidgetsFlutterBinding.ensureInitialized))
@@ -40,12 +44,15 @@
    .body
    (f/widget
     ;;We wait for futures and show a loading screen
-    :watch [db (initialize-resources! handle-network-data!)]
-    :bypass (when-not db
+    :watch [db-conn (initialize-persisted-resources! handle-network-data!)]
+    :bypass (when-not db-conn
               (f/widget
                (m/SafeArea)
                (m/Text "Loading...")))
+    :let [db @db-conn
+          side-effects {:transact! transact!
+                        :render! #(render-ui! @db-conn)}]
     (m/SafeArea ;;we handle the top and bottom manually for edge to edge rendering
      .bottom false
      .top false)
-    (build-widgets! db handle-ui-event!))))
+    (build-widgets! db side-effects))))

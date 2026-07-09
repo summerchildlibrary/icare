@@ -1,6 +1,6 @@
 (ns icare.ui.screens.pages.queridos.base
   (:require ["package:flutter/material.dart" :as m]
-            ["package:reorderable_grid/reorderable_grid.dart" :as reorderable-grid]
+            ["package:flutter/scheduler.dart" :as scheduler]
             ["package:flutter_svg/flutter_svg.dart" :as svg]
             ["package:flutter/services.dart" :as services]
             ["dart:ui" :as ui]
@@ -9,61 +9,86 @@
              :rename {ast-store->widget expanded-icon->widget}]
             [icare.ui.screens.pages.shared :refer [get-phone-measurements autoscroll-away-from-keyboard]]
             [icare.ui.screens.pages.queridos.shared :refer [home-icon-asset home-icon-title animated-blur animated-fade debug-border ctx->coords]]
+            [icare.resources.state :refer [uuid-generator]]
+            [icare.resources.datafriend :as df]
+            [icare.resources.pose :as pose]
+            [icare.ui.physics :as physics]
             [cljd.flutter :as f]))
 
-(defn add-querido [derived-state]
-  {:ui-type ::add-querido
-   :id "home-add-querido"
-   :paste-content (:user-pub-key derived-state)
-   :on-add-pubkey (fn [handle-ui-event!]
-                     (fn [pubkey]
-                       (when-not (empty? pubkey)
-                         (handle-ui-event! {:type :add-pubkey
-                                            :pubkey pubkey}))))})
+(defn add-querido [db]
+  (let [config (get-in db [:eav :global/config])
+        user-pub-key (:config/user-pub-key config)
+        animated-assets (:config/animated-assets config)
+        home-count (count (df/get-entities db {:attribute :pose/canvas :value :home}))]
+    {:ui-type ::add-querido
+     :id "home-add-querido"
+     :paste-content user-pub-key
+     :on-add-pubkey (fn [side-effects]
+                      (fn [pubkey]
+                        (when-not (empty? pubkey)
+                          (let [{:keys [transact! render!]} side-effects
+                                new-querido-id (uuid-generator)
+                                ;;spawn near the middle of the canvas and let repulsion shove everyone into place
+                                spawn-x (+ 150.0 (* 40.0 (mod home-count 4)))
+                                spawn-y (+ 320.0 (* 40.0 (mod home-count 3)))]
+                            (transact! {'add {new-querido-id (merge {:querido/name "change-me"
+                                                                     :querido/asset (get animated-assets (mod home-count (count animated-assets)))
+                                                                     :querido/pub-key pubkey
+                                                                     :querido/task-order []}
+                                                                    (pose/pose-attrs :home spawn-x spawn-y))}})
+                            (render!)))))}))
 
-(defn icon [derived-state expanded-icon-index icon-index list]
-  (let [{:keys [name asset tasks uuid]} list
-        is-expanded? (= icon-index expanded-icon-index)]
+(defn icon [db expanded-querido-id [querido-id querido]]
+  (let [{:keys [querido/name querido/asset pose/x pose/y]} querido
+        is-expanded? (= querido-id expanded-querido-id)]
       {:ui-type ::icon
-       :key uuid
-       :id (str "home-icon-" uuid)
-       :idx icon-index
+       :key querido-id
+       :id (str "home-icon-" querido-id)
+       :x x
+       :y y
        :is-expanded? is-expanded?
        :asset asset
-       :on-expand-icon (fn [handle-ui-event!]
+       :on-expand-icon (fn [side-effects]
                          (fn []
-                           (handle-ui-event! {:type :icon-expansion-toggle
-                                              :list-idx icon-index})))
+                           (let [{:keys [transact! render!]} side-effects]
+                             (transact! {'add {:global/config {:config/expanded-querido querido-id}}})
+                             (render!))))
        :title name}))
 
 (defn state->ast [db]
-  (let [{:keys [derived-state state]} db
-        {:keys [expanded-queridos-idx queridos]} state]
+  (let [config (get-in db [:eav :global/config])
+        expanded-querido-id (:config/expanded-querido config)
+        home-ids (sort (df/get-entities db {:attribute :pose/canvas :value :home}))
+        all-queridos (mapv (fn [querido-id] [querido-id (get-in db [:eav querido-id])]) home-ids)
+        physics-config (into {} (map (fn [[k v]] [(keyword (name k)) v])) (get-in db [:eav :global/physics]))]
     {:id "home-base"
      :ui-type ::base
-     :add-querido (add-querido derived-state)
-     :expanded-icon (when expanded-queridos-idx
-                      (let [list (nth queridos expanded-queridos-idx)]
-                        (ui-list derived-state (:tasks list) (:name list) (:asset list) expanded-queridos-idx (:uuid list) (:pub-key list))))
-     :on-deexpand-icon (fn [handle-ui-event!]
+     :physics physics-config
+     :add-querido (add-querido db)
+     :expanded-icon (when expanded-querido-id
+                      (ui-list db expanded-querido-id))
+     :on-deexpand-icon (fn [side-effects]
                          (fn [& args]
-                           (when expanded-queridos-idx
-                             (handle-ui-event! {:type :icon-expansion-toggle
-                                                :list-idx expanded-queridos-idx}))))
-     :on-reorder-icons (fn [handle-ui-event!]
-                         (fn [old-idx new-idx]
-                           (let [[old-idx new-idx] (if (< old-idx new-idx) ;;strangely, there doesn't seem to be a standard for what old and new mean when reordering
-                                                     [old-idx (inc new-idx)]
-                                                     [old-idx new-idx])]
-                             (handle-ui-event! {:type :reorder-icons
-                                                :from-index old-idx
-                                                :to-index new-idx}))))
-     :icons (mapv (partial icon derived-state expanded-queridos-idx) (range) queridos)}))
+                           (when expanded-querido-id
+                             (let [{:keys [transact! render!]} side-effects]
+                               (transact! {'retract {:global/config {:config/expanded-querido expanded-querido-id}}})
+                               (render!)))))
+     ;;sleep = commit, this is how settled simulation poses become durable facts
+     :on-commit-poses (fn [side-effects]
+                        (fn [id->xy]
+                          (let [{:keys [transact! render!]} side-effects]
+                            (transact! {'add (into {}
+                                                   (map (fn [[querido-id [x y]]]
+                                                          [querido-id (pose/pose-attrs :home x y)]))
+                                                   id->xy)})
+                            (render!))))
+     :icons (mapv (partial icon db expanded-querido-id) all-queridos)}))
 
 ;; Widget stuff
 
-(def number-of-columns 2)
 (def icon-max-width 270)
+(def icon-half-width 81.0)
+(def icon-half-height 85.0)
 
 (defn key->coords [^m/GlobalKey key]
   (let [box ^m/RenderBox (.findRenderObject (.-currentContext key))
@@ -85,11 +110,11 @@
 ;; AST -> STORE stuff
 
 (defn ast-store->widget
-  ([ast-store handle-ui-event!] (ast-store->widget handle-ui-event! ast-store "home-base"))
-  ([handle-ui-event! ast-store id]
+  ([ast-store side-effects] (ast-store->widget side-effects ast-store "home-base"))
+  ([side-effects ast-store id]
    (let [recursive-call (fn [ast-id]
                           ;; (prn "ast-store->widget called with ast-id: " ast-id)
-                          (ast-store->widget handle-ui-event! ast-store ast-id))
+                          (ast-store->widget side-effects ast-store ast-id))
          get-ast-atom #(get @ast-store id)
          {:keys [key ui-type]} @(get-ast-atom)]
      (condp = ui-type
@@ -99,27 +124,100 @@
         :key key
         :context ctx
         :let [{:keys [notch-height phone-height phone-width]} (get-phone-measurements ctx)
-              content-start (/ (+ notch-height 20) phone-height)]
+              ;;walls are soft springs, these bounds are where icon centers come to rest
+              bounds {:left 90.0
+                      :top (+ notch-height 130.0)
+                      :right (- phone-width 90.0)
+                      :bottom (- phone-height 320.0)}]
         :vsync clock
         :managed [icon-transition-controller (m/AnimationController
                                               .vsync clock
                                               .duration (Duration .milliseconds 300))
-                  expanded-icon-atom (atom nil) :dispose nil]
+                  expanded-icon-atom (atom nil) :dispose nil
+                  ;;the simulation owns positions while bodies are awake, the db owns them once they sleep
+                  sim-state (atom {:world (physics/make-world (:physics @(get-ast-atom)) bounds)
+                                   :pose-atoms {}
+                                   :prev-elapsed 0.0}) :dispose nil]
+        :let [sync-bodies! (fn [icon-node-ids]
+                             (swap! sim-state
+                                    (fn [{:keys [world pose-atoms] :as sim}]
+                                      (let [initial? (empty? (:bodies world))
+                                            wanted (into {}
+                                                         (map (fn [node-id]
+                                                                (let [{:keys [key x y]} @(get @ast-store node-id)]
+                                                                  [key [x y]])))
+                                                         icon-node-ids)
+                                            ;;bodies restored from the db start asleep, later spawns start awake so they settle
+                                            world (reduce (fn [world [querido-id [x y]]]
+                                                            (if (get-in world [:bodies querido-id])
+                                                              world
+                                                              (physics/add-body world querido-id x y initial?)))
+                                                          world
+                                                          wanted)
+                                            world (reduce (fn [world querido-id]
+                                                            (if (contains? wanted querido-id)
+                                                              world
+                                                              (physics/remove-body world querido-id)))
+                                                          world
+                                                          (vec (keys (:bodies world))))
+                                            pose-atoms (reduce (fn [pose-atoms [querido-id [x y]]]
+                                                                 (if (get pose-atoms querido-id)
+                                                                   pose-atoms
+                                                                   (assoc pose-atoms querido-id (atom [(double x) (double y)]))))
+                                                               pose-atoms
+                                                               wanted)]
+                                        (assoc sim :world world :pose-atoms pose-atoms)))))
+              commit-poses! (fn [slept-ids world]
+                              (((:on-commit-poses @(get-ast-atom)) side-effects)
+                               (into {}
+                                     (map (fn [querido-id]
+                                            (let [{:keys [x y]} (get-in world [:bodies querido-id])]
+                                              [querido-id [x y]])))
+                                     slept-ids)))
+              tick! (fn [elapsed]
+                      (let [{:keys [world prev-elapsed pose-atoms]} @sim-state
+                            now (/ (.-inMicroseconds ^Duration elapsed) 1000000.0)
+                            dt (- now prev-elapsed)]
+                        (swap! sim-state assoc :prev-elapsed now)
+                        (when-not (physics/all-asleep? world)
+                          (let [new-world (physics/step world dt)
+                                slept (physics/newly-slept world new-world)]
+                            (swap! sim-state assoc :world new-world)
+                            (doseq [[querido-id body] (:bodies new-world)]
+                              (when-not (:sleeping? body)
+                                (when-let [pose-atom (get pose-atoms querido-id)]
+                                  (reset! pose-atom [(:x body) (:y body)]))))
+                            (when (seq slept)
+                              ;;push the final resting pose, then transact it as a durable fact
+                              (doseq [querido-id slept]
+                                (when-let [pose-atom (get pose-atoms querido-id)]
+                                  (let [{:keys [x y]} (get-in new-world [:bodies querido-id])]
+                                    (reset! pose-atom [x y]))))
+                              (commit-poses! slept new-world))))))
+              drag-api {:start! (fn [querido-id]
+                                  (swap! sim-state update :world physics/begin-drag querido-id))
+                        :move! (fn [querido-id x y]
+                                 (swap! sim-state update :world physics/drag-to querido-id x y)
+                                 (when-let [pose-atom (get (:pose-atoms @sim-state) querido-id)]
+                                   (reset! pose-atom [x y])))
+                        :end! (fn [querido-id vx vy]
+                                (swap! sim-state update :world physics/end-drag querido-id vx vy))}]
+        ;;this widget is keep-alive and lives for the whole app, so the ticker is never disposed
+        :managed [ticker (scheduler/Ticker tick!) :dispose nil]
+        :let [_ (.start ticker)]
         :bind {:expanded-icon-atom expanded-icon-atom
-               :icon-transition-controller icon-transition-controller}
+               :icon-transition-controller icon-transition-controller
+               :sim-state sim-state
+               :drag-api drag-api}
         (m/Stack
          .alignment m/Alignment.center)
         .children
         [(f/widget
           :watch [{:keys [icons]} (get-ast-atom)]
-          :let [{:keys [on-reorder-icons]} @(get-ast-atom)]
-          (reorderable-grid/ReorderableGridView.extent
-           .maxCrossAxisExtent icon-max-width
-           .anchor content-start
-           .childAspectRatio 1.1
-           .proxyDecorator (fn [child _ _] child)
-           .onReorder (on-reorder-icons handle-ui-event!)
-           .children (mapv recursive-call icons)))
+          :let [_ (sync-bodies! icons)]
+          (m/SizedBox .width phone-width .height phone-height)
+          (m/Stack)
+          .children (mapv recursive-call icons))
          (f/widget
           :context ctx
           :let [keyboard-to-bottom (.-bottom (m/MediaQuery.viewInsetsOf ctx))
@@ -131,7 +229,6 @@
                    (recursive-call (:add-querido @(get-ast-atom))))))
          (f/widget
           :watch [{:keys [expanded-icon]} (get-ast-atom)]
-          :let [{:keys [on-deexpand-icon]} @(get-ast-atom)]
           :when expanded-icon
           (do
             (.forward icon-transition-controller)
@@ -153,50 +250,72 @@
                                         (.then (.reverse icon-transition-controller)
                                                (fn [_]
                                                  (reset! expanded-icon-atom nil)
-                                                 ((on-deexpand-icon handle-ui-event!))))
+                                                 (((:on-deexpand-icon @(get-ast-atom)) side-effects))))
                                         nil)
-               .child (expanded-icon->widget handle-ui-event! ast-store expanded-icon))])))])
+               .child (expanded-icon->widget side-effects ast-store expanded-icon))])))])
 
        ::icon
        (f/widget
         :key key
-        :get [:expanded-icon-atom]
-        :let [{:keys [idx on-expand-icon]} @(get-ast-atom)]
+        :get [:expanded-icon-atom :sim-state :drag-api]
         :watch [{:keys [title asset is-expanded?]} (get-ast-atom)]
         :bypass (when is-expanded?
                  (m/SizedBox))
         ;;TODO maybe we don't want to use global keys here
         :managed [image-global-key (m/GlobalKey)                      :dispose nil
                   text-global-key  (m/GlobalKey)                      :dispose nil
-                  text-controller (m/TextEditingController .text title)]
-        (m/GestureDetector
-         .behavior m/HitTestBehavior.opaque
-         .onTap (fn []
-                  ((on-expand-icon handle-ui-event!))
-                  (reset! expanded-icon-atom {:image-coords (key->coords image-global-key)
-                                              :text-coords (key->coords text-global-key)})))
-        (m/Column)
-        .children
-        [(m/SizedBox .height 20)
-         (f/widget
-          (m/Container
-           .key image-global-key)
-          (home-icon-asset asset))
-         (f/widget
-          (m/Material
-           .type m/MaterialType.transparency)
-          (m/SizedBox
-           .key text-global-key
-           .width (* 0.6 icon-max-width)
-           .height 70)
-          (home-icon-title .controller text-controller .enabled false))])
+                  text-controller (m/TextEditingController .text title)
+                  drag-grab (atom nil) :dispose nil]
+        :let [pose-atom (get (:pose-atoms @sim-state) key)
+              content (f/widget
+                       (m/GestureDetector
+                        .behavior m/HitTestBehavior.opaque
+                        .onTap (fn []
+                                 (((:on-expand-icon @(get-ast-atom)) side-effects))
+                                 (reset! expanded-icon-atom {:image-coords (key->coords image-global-key)
+                                                             :text-coords (key->coords text-global-key)}))
+                        .onPanStart (fn [details]
+                                      ;;remember where on the icon the finger grabbed it
+                                      (let [[x y] @pose-atom
+                                            finger (.-globalPosition details)]
+                                        (reset! drag-grab [(- x (.-dx finger)) (- y (.-dy finger))])
+                                        ((:start! drag-api) key)))
+                        .onPanUpdate (fn [details]
+                                       (let [[grab-x grab-y] @drag-grab
+                                             finger (.-globalPosition details)]
+                                         ((:move! drag-api) key (+ (.-dx finger) grab-x) (+ (.-dy finger) grab-y))))
+                        .onPanEnd (fn [details]
+                                    ;;hand the finger's velocity to the body, throws come for free
+                                    (let [v (.-pixelsPerSecond (.-velocity details))]
+                                      ((:end! drag-api) key (.-dx v) (.-dy v)))))
+                       (m/SizedBox .width (* 2 icon-half-width) .height (* 2 icon-half-height))
+                       (m/Column)
+                       .children
+                       [(m/SizedBox .height 20)
+                        (f/widget
+                         (m/Container
+                          .key image-global-key)
+                         (home-icon-asset asset))
+                        (f/widget
+                         (m/Material
+                          .type m/MaterialType.transparency)
+                         (m/SizedBox
+                          .key text-global-key
+                          .width (* 0.6 icon-max-width)
+                          .height 70)
+                         (home-icon-title .controller text-controller .enabled false))])]
+        ;;only this inner widget rebuilds at frame rate, the icon content above is built per semantic change
+        (f/widget
+         :watch [[x y] pose-atom]
+         (m/Positioned .left 0.0 .top 0.0)
+         (m/Transform.translate .offset (m/Offset (- x icon-half-width) (- y icon-half-height)))
+         content))
 
        ;;TODO add button to copy the pubkey to clipboard
        ::add-querido
        (f/widget
         :context ctx
         :managed [text-controller (m/TextEditingController)]
-        :let [{:keys [on-add-pubkey]} @(get-ast-atom)]
         (m/Column
          .crossAxisAlignment m/CrossAxisAlignment.start)
         .children
@@ -224,11 +343,13 @@
                                                   .fontWeight m/FontWeight.normal
                                                   .color m.Colors/grey)
                           .contentPadding (m/EdgeInsets.only .bottom -10))
+             ;;this widget never rebuilds (nothing to watch), so we fetch the callback at event time,
+             ;;a build-time :let would capture a closure over stale db data
              .onSubmitted (fn [pubkey]
-                            ((on-add-pubkey handle-ui-event!) pubkey)
+                            (((:on-add-pubkey @(get-ast-atom)) side-effects) pubkey)
                             (.clear text-controller))
              .controller text-controller))])
-         (m/Text "    ^ Copy your pubey"
+         (m/Text "    ^ Copy your pubkey"
           .style (m/TextStyle
                   .fontSize 22
                   .fontWeight m/FontWeight.normal

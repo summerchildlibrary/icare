@@ -1,0 +1,157 @@
+(ns icare.ui.physics
+  "A pure, force based physics simulator for ui elements.
+  The world and bodies are plain maps and (step world dt) is a pure function,
+  so the whole simulation is testable and inspectable as data.
+  Positions are owned by the simulation while bodies are awake,
+  the database is authoritative once they sleep (sleep = commit)."
+  (:require ["dart:math" :as math]))
+
+(def default-config
+  {:repulsion-strength 2200.0 ;;peak acceleration between overlapping bodies, px/s^2
+   :repulsion-radius 150.0    ;;bodies further apart than this don't interact, px
+   :damping 4.0               ;;velocity decay, 1/s
+   :static-friction 300.0     ;;repulsion below this doesn't move bodies, so crowds can reach equilibrium and sleep, px/s^2
+   :wall-stiffness 200.0      ;;spring acceleration per px of wall penetration, 1/s^2, stiff so crowded walls only yield a few px
+   :sleep-speed 4.0           ;;bodies slower than this are candidates for sleep, px/s
+   :sleep-frames 12           ;;consecutive slow substeps before a body sleeps
+   :max-speed 3000.0})        ;;px/s, keeps throws from tunneling out of the world
+
+(defn make-world [config bounds]
+  {:config (merge default-config config)
+   :bounds bounds
+   :bodies {}})
+
+(defn add-body
+  ([world id x y] (add-body world id x y false))
+  ([world id x y asleep?]
+   (assoc-in world [:bodies id] {:x (double x) :y (double y) :vx 0.0 :vy 0.0
+                                 :kinematic? false
+                                 :sleeping? asleep?
+                                 :still-frames 0})))
+
+(defn remove-body [world id]
+  (update world :bodies dissoc id))
+
+(defn- wake [body]
+  (assoc body :sleeping? false :still-frames 0))
+
+(defn begin-drag [world id]
+  (update-in world [:bodies id] #(assoc (wake %) :kinematic? true :vx 0.0 :vy 0.0)))
+
+(defn drag-to [world id x y]
+  (update-in world [:bodies id] assoc :x (double x) :y (double y)))
+
+(defn end-drag [world id vx vy]
+  (update-in world [:bodies id] #(assoc (wake %) :kinematic? false :vx (double vx) :vy (double vy))))
+
+(defn- repulsion
+  "Soft radial push away from every body within repulsion radius."
+  [config body others]
+  (reduce (fn [[fx fy] other]
+            (let [dx (- (:x body) (:x other))
+                  dy (- (:y body) (:y other))
+                  d  (math/sqrt (+ (* dx dx) (* dy dy)))
+                  radius (:repulsion-radius config)]
+              (cond
+                (>= d radius) [fx fy]
+                ;;fully overlapping bodies get a deterministic sideways shove
+                (< d 0.001) [(+ fx (:repulsion-strength config)) fy]
+                :else (let [mag (* (:repulsion-strength config) (- 1.0 (/ d radius)))]
+                        [(+ fx (* mag (/ dx d))) (+ fy (* mag (/ dy d)))]))))
+          [0.0 0.0]
+          others))
+
+(defn- wall-force
+  "Springs that push body centers back inside the bounds."
+  [config {:keys [left top right bottom]} {:keys [x y]}]
+  (let [k (:wall-stiffness config)]
+    [(cond (< x left)  (* k (- left x))
+           (> x right) (* k (- right x))
+           :else 0.0)
+     (cond (< y top)    (* k (- top y))
+           (> y bottom) (* k (- bottom y))
+           :else 0.0)]))
+
+(defn- effective-force
+  "The force that would actually move a body: friction gated repulsion plus walls.
+  Static friction zeroes tiny residual repulsion, without it a crowded canvas creeps
+  forever and never settles. Walls are a constraint, not an interaction, they always act."
+  [config bounds bodies id body]
+  (let [others (vals (dissoc bodies id))
+        [rx ry] (repulsion config body others)
+        r-force (math/sqrt (+ (* rx rx) (* ry ry)))
+        rx (if (< r-force (:static-friction config)) 0.0 rx)
+        ry (if (< r-force (:static-friction config)) 0.0 ry)
+        [wx wy] (wall-force config bounds body)]
+    [(+ rx wx) (+ ry wy)]))
+
+(defn- step-body [config bounds bodies id body dt]
+  (cond
+    ;;kinematic bodies are driven from outside (the user's finger)
+    (:kinematic? body) body
+
+    ;;a sleeping body wakes only when the effective force on it could actually move it,
+    ;;this keeps bodies asleep while a neighbour merely glides past, and keeps bodies
+    ;;resting against a yielding wall (balanced forces) asleep
+    (:sleeping? body)
+    (let [[fx fy] (effective-force config bounds bodies id body)]
+      (if (> (math/sqrt (+ (* fx fx) (* fy fy))) (:static-friction config))
+        (wake body)
+        body))
+
+    :else
+    (let [[fx fy] (effective-force config bounds bodies id body)
+          ;;semi implicit euler with implicit damping
+          damp (/ 1.0 (+ 1.0 (* (:damping config) dt)))
+          vx (* (+ (:vx body) (* fx dt)) damp)
+          vy (* (+ (:vy body) (* fy dt)) damp)
+          speed (math/sqrt (+ (* vx vx) (* vy vy)))
+          rescale (if (> speed (:max-speed config)) (/ (:max-speed config) speed) 1.0)
+          vx (* vx rescale)
+          vy (* vy rescale)
+          x (+ (:x body) (* vx dt))
+          y (+ (:y body) (* vy dt))
+          ;;rest is rest, even leaning on a yielding wall, sleep is purely about motion
+          still? (< speed (:sleep-speed config))
+          still-frames (if still? (inc (:still-frames body)) 0)
+          sleeping? (>= still-frames (:sleep-frames config))]
+      {:x x :y y
+       :vx (if sleeping? 0.0 vx)
+       :vy (if sleeping? 0.0 vy)
+       :kinematic? false
+       :sleeping? sleeping?
+       :still-frames still-frames})))
+
+(def ^:private substep-seconds (/ 1.0 120.0))
+
+(defn- step-once [{:keys [config bounds bodies] :as world} dt]
+  (assoc world :bodies
+         (reduce-kv (fn [acc id body]
+                      (assoc acc id (step-body config bounds bodies id body dt)))
+                    {}
+                    bodies)))
+
+(defn step
+  "Advances the world by dt seconds in fixed substeps.
+  dt is clamped so a long pause between frames can't explode the simulation."
+  [world dt]
+  (let [dt (min (double dt) 0.05)]
+    (loop [world world remaining dt]
+      (if (< remaining substep-seconds)
+        world
+        (recur (step-once world substep-seconds) (- remaining substep-seconds))))))
+
+(defn all-asleep? [world]
+  (every? (fn [body] (and (:sleeping? body) (not (:kinematic? body))))
+          (vals (:bodies world))))
+
+(defn newly-slept
+  "Ids of bodies that went to sleep between two world states."
+  [old-world new-world]
+  (reduce-kv (fn [acc id body]
+               (if (and (:sleeping? body)
+                        (not (:sleeping? (get-in old-world [:bodies id]))))
+                 (conj acc id)
+                 acc))
+             []
+             (:bodies new-world)))
