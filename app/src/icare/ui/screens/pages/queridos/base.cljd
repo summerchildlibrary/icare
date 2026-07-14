@@ -9,9 +9,9 @@
              :rename {ast-store->widget expanded-icon->widget}]
             [icare.ui.screens.pages.shared :refer [get-phone-measurements autoscroll-away-from-keyboard]]
             [icare.ui.screens.pages.queridos.shared :refer [home-icon-asset home-icon-title animated-blur animated-fade debug-border ctx->coords]]
-            [icare.resources.state :refer [uuid-generator]]
-            [icare.resources.datafriend :as df]
-            [icare.resources.pose :as pose]
+            [icare.state :refer [uuid-generator]]
+            [icare.datafriend :as df]
+            [icare.pose :as pose]
             [icare.ui.physics :as physics]
             [cljd.flutter :as f]))
 

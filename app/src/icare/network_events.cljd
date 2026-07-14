@@ -2,8 +2,8 @@
   (:require ["package:nostr/nostr.dart" :refer [Event]]
             ["dart:convert" :refer [jsonDecode jsonEncode]]
             [cljd.edn :refer [read-string]]
-            [icare.resources.state :refer [dispatch!] :rename {dispatch! state-dispatch!}]
-            [icare.resources.storage :refer [dispatch!] :rename {dispatch! storage-dispatch!}]
+            [icare.state :refer [dispatch!] :rename {dispatch! state-dispatch!}]
+            [icare.storage :refer [dispatch!] :rename {dispatch! storage-dispatch!}]
             [icare.ui.glue :refer [render-ui!]]))
 
 (def send-updated-task-kind 39505)

@@ -8,7 +8,7 @@
             [icare.ui.screens.pages.queridos.shared :refer [home-icon-asset home-icon-title
                                                             animated-sliver-fade animated-fade
                                                             lerp-polar-offsets ctx->coords]]
-            [icare.resources.state :refer [uuid-generator]]
+            [icare.state :refer [uuid-generator]]
             [cljd.flutter :as f]))
 
 (defn task [db querido-id [task-id task]]

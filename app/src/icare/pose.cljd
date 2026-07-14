@@ -1,9 +1,9 @@
-(ns icare.resources.pose
+(ns icare.pose
   "Spatial attributes for entities that live on a physics canvas.
   :pose/x and :pose/y are the stored truth, :pose/cell is a spatial hash derived
   at write time so radius queries only scan nearby cells through the ave index.
   Always write poses through pose-attrs so x, y and cell can never drift apart."
-  (:require [icare.resources.datafriend :as df]))
+  (:require [icare.datafriend :as df]))
 
 (def cell-size 128.0)
 

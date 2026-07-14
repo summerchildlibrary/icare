@@ -1,7 +1,7 @@
-(ns icare.resources.network
+(ns icare.network
   (:require ["package:nostr/nostr.dart" :refer [Event Request Filter]]
             ["dart:io" :refer [WebSocket]]
-            [icare.resources.state :refer [get-device-token]]))
+            [icare.state :refer [get-device-token]]))
 
 ;;This module handles outbound network messages.
 ;;It creates and sends Nostr events to the relay.

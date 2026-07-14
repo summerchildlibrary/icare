@@ -1,8 +1,8 @@
 (ns icare.ui.screens.pages.list.base
   (:require ["package:flutter/material.dart" :as m]
             [icare.ui.screens.pages.shared :refer [hsv get-phone-measurements autoscroll-away-from-keyboard]]
-            [icare.resources.datafriend :as df]
-            [icare.resources.state :refer [uuid-generator]]
+            [icare.datafriend :as df]
+            [icare.state :refer [uuid-generator]]
             [cljd.flutter :as f]))
 
 (defn task [db [task-id task]]

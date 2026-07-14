@@ -1,7 +1,7 @@
-(ns icare.resources.state
+(ns icare.state
   (:require ["package:uuid/uuid.dart" :refer [Uuid]]
-            [icare.resources.pose :as pose]
-            [icare.resources.datafriend :as df]))
+            [icare.pose :as pose]
+            [icare.datafriend :as df]))
 
 (def uuid-generator (.-v4 (Uuid)))
 

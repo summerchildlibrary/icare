@@ -1,4 +1,4 @@
-(ns icare.resources.storage
+(ns icare.storage
   (:require ["package:path_provider/path_provider.dart" :refer [getApplicationDocumentsDirectory]]
             ["package:flutter_secure_storage/flutter_secure_storage.dart" :refer [FlutterSecureStorage]]
             ["dart:io" :refer [File]]
