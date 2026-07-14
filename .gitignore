@@ -56,7 +56,10 @@ test/cljd-out/
 
 # Mine
 /.clj-kondo/
-/push_notifications_server/.nrepl-port
+/.nrepl-port
+;; datamigo's LMDB store; created in the CWD (repo root) when the server is
+;; launched via `-M:datamigo` from the shared deps.edn.
+/data/
 
 # Magit
 /lib/
@@ -66,5 +69,5 @@ test/cljd-out/
 /windows/
 /REPL.lock
 /.lsp/
-/push_notifications_server/do-do-online-firebase-adminsdk-fbsvc-809d342389.json
+/do-do-online-firebase-adminsdk-fbsvc-809d342389.json
 /ios/build/

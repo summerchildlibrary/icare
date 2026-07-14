@@ -1,7 +1,50 @@
-{:paths ["src"] ; where your cljd files are
+;; Single shared deps.edn for all Clojure projects in this repo:
+;;   - icare                  ClojureDart Flutter app  (app/src/icare, base config below)
+;;   - push-notifications     JVM Clojure server        (alias :push,     server/src)
+;;   - datamigo               JVM Clojure sync server   (alias :datamigo, server/src)
+;;
+;; The base :paths/:deps/:cljd/opts drive the ClojureDart build, so
+;; `clojure -M:cljd ...` continues to work. Both JVM servers share server/src
+;; and each has an alias adding its JVM dependencies and entry point.
+
+{:paths ["app/src"] ; where the cljd files live
  :deps {tensegritics/clojuredart
         {:git/url "https://github.com/tensegritics/ClojureDart.git"
          :sha "4ee792f3044589c96b019c2a86db9b23f1b283ab"}}
- :aliases {:cljd {:main-opts ["-m" "cljd.build"]}}
  :cljd/opts {:kind :flutter
-             :main icare.core}}
+             :main icare.core}
+ :aliases
+ {:cljd {:main-opts ["-m" "cljd.build"]}
+
+  ;; ── push notifications server ───────────────────────────────────────────
+  :push
+  {:extra-paths ["server/src"]
+   :extra-deps {org.clojure/clojure {:mvn/version "1.12.4"}
+                ;; WebSocket client for connecting to Nostr relay
+                org.java-websocket/Java-WebSocket {:mvn/version "1.5.4"}
+                ;; JSON parsing
+                org.clojure/data.json {:mvn/version "2.5.0"}
+                ;; secp256k1 for Nostr signature verification
+                fr.acinq.secp256k1/secp256k1-kmp-jni-jvm {:mvn/version "0.15.0"}
+                ;; HTTP client for sending push notifications
+                clj-http/clj-http {:mvn/version "3.12.3"}
+                ;; Google Auth Library for obtaining access tokens to call FCM API
+                com.google.auth/google-auth-library-oauth2-http {:mvn/version "1.19.0"}}
+   :main-opts ["-m" "push-notifications-server.core"]}
+
+  ;; ── datamigo sync server ────────────────────────────────────────────────
+  ;; lmdbjava (via jnr-ffi) reflects into java.nio; JDK 17+ needs this opened.
+  :datamigo
+  {:extra-paths ["server/src"]
+   :extra-deps {org.clojure/clojure {:mvn/version "1.12.4"}
+                ;; HTTP + WebSocket server
+                aleph/aleph {:mvn/version "0.7.1"}
+                ;; async streams / deferreds (transitive via aleph, pinned for clarity)
+                manifold/manifold {:mvn/version "0.4.3"}
+                ;; secp256k1 for Schnorr signature verification
+                fr.acinq.secp256k1/secp256k1-kmp-jni-jvm {:mvn/version "0.15.0"}
+                ;; LMDB embedded key-value store
+                org.lmdbjava/lmdbjava {:mvn/version "0.9.0"}}
+   :jvm-opts ["--add-opens" "java.base/java.nio=ALL-UNNAMED"
+              "--enable-native-access=ALL-UNNAMED"]
+   :main-opts ["-m" "datamigo.core"]}}}
