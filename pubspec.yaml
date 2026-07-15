@@ -47,6 +47,8 @@ dependencies:
   haptic_feedback: ^0.6.4+3
   reorderable_grid: ^1.0.13
   flutter_lmdb2: ^0.9.5
+  crypto: ^3.0.6
+  convert: ^3.1.2
 
 dev_dependencies:
   flutter_test:

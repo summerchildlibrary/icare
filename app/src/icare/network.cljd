@@ -1,0 +1,106 @@
+(ns icare.network
+  "REST sync client for the datamigo server. Drives the negentropy protocol over
+   HTTP: the client is always the initiator.
+
+   Push (own namespace): sync rounds against /sync compute the diff the server must
+   apply; the client signs it and POSTs /commit. Pull (a friend's namespace): the
+   same sync rounds, but the client applies the resulting diff to its own copy and
+   never commits. Watch: long-poll /watch to be told when a friend committed, then
+   pull-sync that friend."
+  (:require ["dart:io" :as io]
+            ["dart:convert" :as convert]
+            ["package:crypto/crypto.dart" :as crypto]
+            ["package:convert/convert.dart" :as dartconvert]
+            ["package:nostr/nostr.dart" :refer [Keychain]]
+            [cljd.edn :as edn]
+            [icare.aztree :as aztree]
+            [icare.negentropy :as negentropy]))
+
+(def server-url "http://localhost:8080") ;; TODO configurable / https in production
+
+(defonce ^:private http-client (io/HttpClient))
+
+(defn- sha256-hex
+  "SHA-256 of the UTF-8 bytes of `s`, hex-encoded — the 32-byte-hash-as-hex form
+   bip340/Keychain.sign expects and the server's verifySchnorr checks."
+  [^String s]
+  (dartconvert/hex.encode (.-bytes (.convert crypto/sha256 (convert/utf8.encode s)))))
+
+;; ── HTTP ──────────────────────────────────────────────────────────────────────
+
+(defn ^Future post-edn
+  "POST an EDN body to `path` and return the parsed EDN response."
+  [path body]
+  (let [uri (Uri/parse (str server-url path))
+        request (await (.postUrl ^io/HttpClient http-client uri))]
+    (.write request (pr-str body))
+    (let [response (await (.close request))
+          text (await (.join (.transform response convert/utf8.decoder)))]
+      (edn/read-string text))))
+
+;; ── Sync rounds ───────────────────────────────────────────────────────────────
+
+(defn ^Future run-sync-rounds
+  "Drive the negentropy rounds against the server for `namespace`, with `tree` as
+   the initiator's view. Returns {:only-ours [[k v]...] :only-theirs [[k v]...]
+   :commit-token t}: only-ours are entries the client has that the server lacks,
+   only-theirs the reverse. Callers pick direction (push vs pull)."
+  [namespace tree]
+  (loop [ranges (negentropy/initial-ranges tree)
+         only-ours []
+         only-theirs []
+         commit-token nil
+         rounds 0]
+    (if (or (empty? ranges) (> rounds 64))
+      {:only-ours only-ours :only-theirs only-theirs :commit-token commit-token}
+      (let [response (await (post-edn "/sync" {:namespace namespace :ranges ranges}))
+            {:keys [sub-ranges]} response
+            token (:commit-token response)
+            {next-ranges :next-ranges new-ours :only-ours new-theirs :only-theirs}
+            (negentropy/process-response tree sub-ranges)]
+        (recur next-ranges (into only-ours new-ours) (into only-theirs new-theirs) token (inc rounds))))))
+
+;; ── Push (own namespace) ──────────────────────────────────────────────────────
+
+(defn ^Future push-sync!
+  "Sync the owner's namespace `tree` up to the server. Runs the negentropy rounds,
+   signs the resulting diff and commit token with `private-key-hex`, and commits.
+   `public-key-hex` is the namespace. Returns the server's commit response."
+  [public-key-hex private-key-hex tree]
+  (let [{:keys [only-ours only-theirs commit-token]} (await (run-sync-rounds public-key-hex tree))
+        ;; the server must converge to the client: put what the client has and the
+        ;; server lacks, delete what the server has and the client lacks.
+        diff {:puts only-ours :deletes (mapv first only-theirs)}]
+    (if (and (empty? (:puts diff)) (empty? (:deletes diff)))
+      {:ok true :noop true} ;; already in sync, nothing to commit
+      (let [message-hash-hex (sha256-hex (pr-str [public-key-hex diff commit-token]))
+            signature (.sign (Keychain private-key-hex) message-hash-hex)]
+        (await (post-edn "/commit" {:namespace public-key-hex
+                                    :diff diff
+                                    :commit-token commit-token
+                                    :signature signature}))))))
+
+;; ── Pull (a friend's namespace) ───────────────────────────────────────────────
+
+(defn ^Future pull-sync!
+  "Sync a friend's namespace down. `local-tree` is our current copy of that
+   friend's namespace; runs the negentropy rounds and returns the updated tree with
+   the server's changes applied (puts added, deletes removed). Read-only on the
+   server."
+  [friend-public-key-hex local-tree]
+  (let [{:keys [only-ours only-theirs]} (await (run-sync-rounds friend-public-key-hex local-tree))
+        ;; the client converges to the server: put what the server has and we lack
+        ;; (only-theirs, with values), delete what we have and the server lacks.
+        tree (reduce (fn [t [k _]] (dissoc t k)) local-tree only-ours)
+        tree (reduce (fn [t [k v]] (assoc t k v)) tree only-theirs)]
+    tree))
+
+;; ── Watch (long-poll) ─────────────────────────────────────────────────────────
+
+(defn ^Future watch-once!
+  "Long-poll the server for a change to any of `friend-public-key-hexes`. Blocks up
+   to the server's timeout (~1 min) and returns the namespace hex that changed, or
+   nil on timeout. Callers loop this, pull-syncing the poked friend each time."
+  [friend-public-key-hexes]
+  (let [response (await (post-edn "/watch" {:namespaces friend-public-key-hexes}))]
+    (:poked response)))

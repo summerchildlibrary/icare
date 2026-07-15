@@ -203,61 +203,60 @@
 
 (defn- node-insert
   [node insert-key insert-value fingerprint-high fingerprint-low compare-keys]
-  (let [n ^AZNode node
-        placement (cond
-                    (nil? node) :place
-                    (outranks? fingerprint-high fingerprint-low insert-key
-                               (.-fingerprint-high n) (.-fingerprint-low n) (.-entry-key n)
-                               compare-keys) :place
-                    (neg? (compare-keys insert-key (.-entry-key n))) :go-left
-                    :else :go-right)]
-    (case placement
-      :place
-      (let [[less greater] (unzip node insert-key compare-keys)]
-        (make-node insert-key insert-value fingerprint-high fingerprint-low less greater))
+  (if (nil? node)
+    (make-node insert-key insert-value fingerprint-high fingerprint-low nil nil)
+    (let [n ^AZNode node
+          placement (cond
+                      (outranks? fingerprint-high fingerprint-low insert-key
+                                 (.-fingerprint-high n) (.-fingerprint-low n) (.-entry-key n)
+                                 compare-keys) :place
+                      (neg? (compare-keys insert-key (.-entry-key n))) :go-left
+                      :else :go-right)]
+      (case placement
+        :place
+        (let [[less greater] (unzip node insert-key compare-keys)]
+          (make-node insert-key insert-value fingerprint-high fingerprint-low less greater))
 
-      :go-left
-      (make-node (.-entry-key n) (.-entry-value n)
-                 (.-fingerprint-high n) (.-fingerprint-low n)
-                 (node-insert (.-left n) insert-key insert-value fingerprint-high fingerprint-low compare-keys)
-                 (.-right n))
+        :go-left
+        (make-node (.-entry-key n) (.-entry-value n)
+                   (.-fingerprint-high n) (.-fingerprint-low n)
+                   (node-insert (.-left n) insert-key insert-value fingerprint-high fingerprint-low compare-keys)
+                   (.-right n))
 
-      :go-right
-      (make-node (.-entry-key n) (.-entry-value n)
-                 (.-fingerprint-high n) (.-fingerprint-low n)
-                 (.-left n)
-                 (node-insert (.-right n) insert-key insert-value fingerprint-high fingerprint-low compare-keys)))))
+        :go-right
+        (make-node (.-entry-key n) (.-entry-value n)
+                   (.-fingerprint-high n) (.-fingerprint-low n)
+                   (.-left n)
+                   (node-insert (.-right n) insert-key insert-value fingerprint-high fingerprint-low compare-keys))))))
 
 (defn- node-remove
   [node remove-key compare-keys]
-  (let [n ^AZNode node
-        action (cond
-                 (nil? node) :missing
-                 (zero? (compare-keys remove-key (.-entry-key n))) :remove-here
-                 (neg? (compare-keys remove-key (.-entry-key n))) :go-left
-                 :else :go-right)]
-    (case action
-      :missing
-      node
+  (if (nil? node)
+    node
+    (let [n ^AZNode node
+          action (cond
+                   (zero? (compare-keys remove-key (.-entry-key n))) :remove-here
+                   (neg? (compare-keys remove-key (.-entry-key n))) :go-left
+                   :else :go-right)]
+      (case action
+        :remove-here
+        (zip (.-left n) (.-right n) compare-keys)
 
-      :remove-here
-      (zip (.-left n) (.-right n) compare-keys)
+        :go-left
+        (let [new-left (node-remove (.-left n) remove-key compare-keys)]
+          (if (identical? new-left (.-left n))
+            node
+            (make-node (.-entry-key n) (.-entry-value n)
+                       (.-fingerprint-high n) (.-fingerprint-low n)
+                       new-left (.-right n))))
 
-      :go-left
-      (let [new-left (node-remove (.-left n) remove-key compare-keys)]
-        (if (identical? new-left (.-left n))
-          node
-          (make-node (.-entry-key n) (.-entry-value n)
-                     (.-fingerprint-high n) (.-fingerprint-low n)
-                     new-left (.-right n))))
-
-      :go-right
-      (let [new-right (node-remove (.-right n) remove-key compare-keys)]
-        (if (identical? new-right (.-right n))
-          node
-          (make-node (.-entry-key n) (.-entry-value n)
-                     (.-fingerprint-high n) (.-fingerprint-low n)
-                     (.-left n) new-right))))))
+        :go-right
+        (let [new-right (node-remove (.-right n) remove-key compare-keys)]
+          (if (identical? new-right (.-right n))
+            node
+            (make-node (.-entry-key n) (.-entry-value n)
+                       (.-fingerprint-high n) (.-fingerprint-low n)
+                       (.-left n) new-right)))))))
 
 (defn- node-get [node lookup-key compare-keys not-found]
   (loop [node node]

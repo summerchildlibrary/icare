@@ -80,16 +80,18 @@
   (let [^isolate/SendPort to-storage (:to-storage ports)
         responses (:from-storage ports)]
     (loop [ranges (negentropy/initial-ranges mem-ordered)
-           puts []
-           deletes []]
+           only-ours []
+           only-theirs []]
       (if (empty? ranges)
-        (.send to-storage [:reconcile puts deletes])
+        ;; memory is authoritative; disk converges: put what memory has and disk
+        ;; lacks, delete what disk has and memory lacks.
+        (.send to-storage [:reconcile only-ours (mapv first only-theirs)])
         (do
           (.send to-storage [:sync ranges])
           (let [[_ sub-ranges] (await (.firstWhere responses (fn [m] (= (first m) :sync-response))))
-                {next-ranges :next-ranges new-puts :puts new-deletes :deletes}
+                {next-ranges :next-ranges new-ours :only-ours new-theirs :only-theirs}
                 (negentropy/process-response mem-ordered sub-ranges)]
-            (recur next-ranges (into puts new-puts) (into deletes new-deletes))))))))
+            (recur next-ranges (into only-ours new-ours) (into only-theirs new-theirs))))))))
 
 ;; Coalescing state for reconcile!. While a sync is running, further calls only
 ;; set pending?, so exactly one trailing run fires afterward against the latest db.

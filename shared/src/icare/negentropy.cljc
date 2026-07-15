@@ -55,24 +55,29 @@
         ranges))
 
 (defn- diff-leaf
-  "Diff the initiator's authoritative items for [low, high) against the
-   responder's `their-items` for the same range. Returns [puts deletes]: puts are
-   [key value] the initiator has but the responder lacks; deletes are keys the
-   responder has but the initiator lacks. Matching keys are identical entries and
-   need no action."
+  "Symmetric diff of the initiator's items for [low, high) against the responder's
+   `their-items` for the same range. Returns [only-ours only-theirs], each a vector
+   of [key value]: only-ours are entries the initiator has and the responder lacks;
+   only-theirs are entries the responder has and the initiator lacks (with their
+   values). Matching keys are identical entries (the key carries the update
+   timestamp) and need no action. The caller picks direction — a push applies
+   only-ours as puts and only-theirs as deletes on the responder; a pull does the
+   reverse on the initiator."
   [tree low high their-items]
   (let [our-items  (aztree/range-items tree low high)
         our-keys   (set (map first our-items))
         their-keys (set (map first their-items))
-        puts    (filterv (fn [[k _]] (not (contains? their-keys k))) our-items)
-        deletes (filterv (fn [k] (not (contains? our-keys k))) (map first their-items))]
-    [puts deletes]))
+        only-ours   (filterv (fn [[k _]] (not (contains? their-keys k))) our-items)
+        only-theirs (filterv (fn [[k _]] (not (contains? our-keys k))) their-items)]
+    [only-ours only-theirs]))
 
 (defn process-response
   "Initiator side. Given the initiator's `tree` and the responder's `sub-ranges`,
-   return {:next-ranges :puts :deletes}. :fp sub-ranges that still differ from the
-   initiator become next-round ranges [low high our-fp]; :items leaves are diffed
-   into puts and deletes. When :next-ranges is empty the sync is complete."
+   return {:next-ranges :only-ours :only-theirs}. :fp sub-ranges that still differ
+   become next-round ranges [low high our-fp]; :items leaves are diffed
+   symmetrically into :only-ours (initiator has, responder lacks) and :only-theirs
+   (responder has, initiator lacks), both as [key value]. When :next-ranges is
+   empty the sync is complete; the caller chooses which side to apply."
   [tree sub-ranges]
   (reduce
    (fn [acc [low high tag payload]]
@@ -84,9 +89,9 @@
            (update acc :next-ranges conj [low high our-fp])))
 
        :items
-       (let [[puts deletes] (diff-leaf tree low high payload)]
+       (let [[only-ours only-theirs] (diff-leaf tree low high payload)]
          (-> acc
-             (update :puts into puts)
-             (update :deletes into deletes)))))
-   {:next-ranges [] :puts [] :deletes []}
+             (update :only-ours into only-ours)
+             (update :only-theirs into only-theirs)))))
+   {:next-ranges [] :only-ours [] :only-theirs []}
    sub-ranges))
