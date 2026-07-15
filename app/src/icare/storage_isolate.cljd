@@ -1,27 +1,45 @@
 (ns icare.storage-isolate
   (:require ["dart:isolate" :as isolate]
             [cljd.dart.isolates :as isolates]
-            [icare.storage :as storage]))
+            [icare.storage :as storage]
+            [icare.negentropy :as negentropy]))
 
 ;; The storage isolate owns the LMDB handle so all disk work happens off the UI
 ;; isolate. It is reactive: main (the authoritative side) drives it.
 ;;
 ;; Boot handshake:
 ;;   1. main spawns the isolate with two ports (:to-storage, :from-storage)
-;;   2. the isolate opens the store, reconstructs the db, and sends it back once
-;;      through :from-storage
-;;   3. main awaits that db and seeds datafriend with it before starting the app
+;;   2. the isolate opens the store, reconstructs the db, sends it back tagged
+;;      [:boot db] on :from-storage, and keeps the db's :ordered tree in memory
+;;   3. main awaits [:boot db] and seeds datafriend before starting the app
 ;;
-;; Steady state: main sends request messages down :to-storage; the isolate applies
-;; them to LMDB. Messages are edn-like vectors tagged by a leading keyword:
-;;   [:reconcile puts delete-keys]  -> storage/apply-reconciliation!
+;; Reconciliation (main authoritative, initiates): main runs the negentropy round
+;; trip against the isolate's :ordered tree, exchanging only fingerprints and, at
+;; the leaves, the differing entries. Messages on :to-storage:
+;;   [:sync ranges]            -> isolate replies [:sync-response sub-ranges]
+;;   [:reconcile puts deletes] -> isolate applies the diff to LMDB and its tree
+;; Replies to main go on :from-storage, tagged: [:boot db], [:sync-response ...].
 
 (def db-dir "icare")
 
-(defn- handle-message [message]
+;; The isolate's view of disk's :ordered aztree, kept in sync with LMDB so each
+;; sync diffs against current state. Only ever touched inside the storage isolate.
+(defonce ^:private disk-ordered (atom nil))
+
+(defn- handle-message [^isolate/SendPort from-storage message]
   (case (first message)
+    :sync
+    (let [[_ ranges] message
+          sub-ranges (negentropy/respond @disk-ordered ranges)]
+      (.send from-storage [:sync-response sub-ranges]))
+
     :reconcile
     (let [[_ puts delete-keys] message]
+      (swap! disk-ordered
+             (fn [tree]
+               (as-> tree tree
+                 (reduce dissoc tree delete-keys)
+                 (reduce (fn [t [k v]] (assoc t k v)) tree puts))))
       (await (storage/apply-reconciliation! puts delete-keys)))
 
     (println (str "storage isolate: unknown message " (first message)))))
@@ -31,20 +49,69 @@
    ReceivePort we consume) and :from-storage (a SendPort we reply on)."
   [{:keys [to-storage from-storage]}]
   (let [boot-db (await (storage/open db-dir))]
-    (.send ^isolate/SendPort from-storage boot-db)
+    (reset! disk-ordered (:ordered boot-db))
+    (.send ^isolate/SendPort from-storage [:boot boot-db])
     (.listen ^isolate/ReceivePort to-storage
-             (fn [message] (handle-message message)))))
+             (fn [message] (handle-message from-storage message)))))
+
+;; ── Main side ────────────────────────────────────────────────────────────────
 
 (defn ^Future spawn-storage!
   "Spawn the storage isolate and complete the boot handshake. Returns a map with
-   :isolate, :ports (:to-storage a SendPort, :from-storage a ReceivePort) and :db,
-   the reconstructed datafriend db read from disk. Send [:reconcile puts deletes]
-   down (:to-storage :ports) to persist reconciliation writes."
+   :isolate, :ports (:to-storage a SendPort, :from-storage a ReceivePort, whose
+   stream carries [:sync-response ...] replies during a sync) and :db, the
+   reconstructed datafriend db read from disk."
   []
   (let [{:keys [isolate ports]} (await (isolates/spawn! isolate-main
                                                         {:ports {:to-storage :send
                                                                  :from-storage :recv}}))
-        boot-db (await (.-first ^isolate/ReceivePort (:from-storage ports)))]
+        responses (.asBroadcastStream ^isolate/ReceivePort (:from-storage ports))
+        [_ boot-db] (await (.-first responses))]
     {:isolate isolate
-     :ports ports
+     :ports (assoc ports :from-storage responses)
      :db boot-db}))
+
+(defn- ^Future run-sync!
+  "Drive one full negentropy sync so the isolate's LMDB matches `mem-ordered` (the
+   authoritative in-memory :ordered aztree). Sends fingerprint ranges, narrows to
+   the differing entries over successive rounds, then sends one [:reconcile ...]
+   that the isolate applies to disk."
+  [ports mem-ordered]
+  (let [^isolate/SendPort to-storage (:to-storage ports)
+        responses (:from-storage ports)]
+    (loop [ranges (negentropy/initial-ranges mem-ordered)
+           puts []
+           deletes []]
+      (if (empty? ranges)
+        (.send to-storage [:reconcile puts deletes])
+        (do
+          (.send to-storage [:sync ranges])
+          (let [[_ sub-ranges] (await (.firstWhere responses (fn [m] (= (first m) :sync-response))))
+                {next-ranges :next-ranges new-puts :puts new-deletes :deletes}
+                (negentropy/process-response mem-ordered sub-ranges)]
+            (recur next-ranges (into puts new-puts) (into deletes new-deletes))))))))
+
+;; Coalescing state for reconcile!. While a sync is running, further calls only
+;; set pending?, so exactly one trailing run fires afterward against the latest db.
+(defonce ^:private syncing? (atom false))
+(defonce ^:private pending? (atom false))
+
+(defn- drive! [ports db-conn]
+  (reset! pending? false)
+  (-> (run-sync! ports (:ordered @db-conn))
+      (.then (fn [_] (if @pending? (drive! ports db-conn) (reset! syncing? false))))
+      (.catchError (fn [e]
+                     (reset! syncing? false)
+                     (println (str "reconcile! sync failed: " e))))))
+
+(defn reconcile!
+  "Reconcile the current db's :ordered to the isolate's LMDB. Coalesced: while a
+   sync is running, further calls only mark that another run is needed, so exactly
+   one trailing run fires afterward against the latest db. Since each run
+   reconciles the current db, that trailing run captures everything persisted in
+   the meantime, so overlapping calls never queue or race."
+  [ports db-conn]
+  (if @syncing?
+    (reset! pending? true)
+    (do (reset! syncing? true) (drive! ports db-conn)))
+  nil)

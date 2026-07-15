@@ -1,4 +1,4 @@
-(ns icare.ui.glue
+(ns icare.ui
   (:require ["package:flutter/material.dart" :as m]
             ;; [icare.benchmarks :refer [dart-time]]
             [icare.ui.shared :refer [scale-down-fade-animation]]

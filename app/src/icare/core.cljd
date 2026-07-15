@@ -13,7 +13,7 @@
             [icare.pose :as pose]
             [icare.storage-isolate :as storage-isolate]
             [icare.uuid :refer [uuid-generator]]
-            [icare.ui.glue :refer [build-widgets! render-ui!]]))
+            [icare.ui :as ui]))
 
 ;; Stub for network events (TODO: implement later)
 (defn handle-network-data! [data]
@@ -136,7 +136,7 @@
    .body
    (f/widget
     ;;We wait for futures and show a loading screen
-    :watch [db-conn (let [{storage-ports :ports datafriend-db :db} (await (storage-isolate/spawn-storage!))
+    :watch [booted (let [{ports* :ports datafriend-db :db} (await (storage-isolate/spawn-storage!))
                           _ (prn "Datafriend initialized with" (count (get-in datafriend-db [:eav])) "entities")
                           [private-key public-key] (await (get-secure-credentials))
                           _ (prn "Loaded credentials for pub-key:" public-key)
@@ -165,15 +165,16 @@
                           device-token (await (get-device-token-future))
                           _ (prn "Device token:" device-token)
                           _ (when device-token (df/transact db {'add {:global/config {:config/device-token device-token}}}))]
-                      (atom db))]
-    :bypass (when-not db-conn
+                      {:db-conn (atom db) :ports ports*})]
+    :bypass (when-not booted
               (f/widget
                (m/SafeArea)
                (m/Text "Loading...")))
-    :let [db @db-conn
+    :let [{:keys [db-conn ports]} booted
           side-effects {:transact! (fn [diff] (swap! db-conn df/transact diff))
-                        :render! (fn [] (render-ui! @db-conn))}]
+                        :render! (fn [] (ui/render-ui! @db-conn))
+                        :persist! (fn [] (storage-isolate/reconcile! ports db-conn))}]
     (m/SafeArea ;;we handle the top and bottom manually for edge to edge rendering
      .bottom false
      .top false)
-    (build-widgets! db side-effects))))
+    (ui/build-widgets! @db-conn side-effects))))
