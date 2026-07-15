@@ -20,7 +20,6 @@
   (:import (com.sun.net.httpserver HttpServer HttpHandler HttpExchange)
            (fr.acinq.secp256k1 Secp256k1)
            (java.security MessageDigest)
-           (java.net InetSocketAddress)
            (java.util HexFormat UUID)
            (java.util.concurrent Executors LinkedBlockingQueue ConcurrentHashMap TimeUnit)
            (java.io ByteArrayOutputStream)))
@@ -94,7 +93,7 @@
     (with-open [out (.getResponseBody exchange)]
       (.write out bytes))))
 
-(defn- handler [f]
+(defn handler [f]
   (reify HttpHandler
     (handle [_ exchange]
       (try
@@ -106,7 +105,7 @@
 
 ;; ── Endpoints ─────────────────────────────────────────────────────────────────
 
-(defn- handle-sync
+(defn handle-sync
   "One negentropy round. Body: {:namespace hex :ranges [[low high fp]...]}. The
    server is the responder: it loads the namespace's tree and returns the
    sub-ranges describing where it differs from the client's fingerprints, plus a
@@ -119,7 +118,7 @@
     (respond! exchange 200 {:sub-ranges sub-ranges
                             :commit-token (issue-token! namespace)})))
 
-(defn- handle-commit
+(defn handle-commit
   "Push path, authenticated. Body: {:namespace hex :diff {:puts :deletes}
    :commit-token t :signature hex}. The signature is a Schnorr sig by the
    namespace's key over sha256(pr-str [namespace diff commit-token]) — proving key
@@ -146,7 +145,7 @@
 
 (def ^:private watch-timeout-ms (* 60 1000))
 
-(defn- handle-watch
+(defn handle-watch
   "Long-poll. Body: {:namespaces [friend-hex...]}. Park up to a minute; return
    {:poked ns-hex} when any watched namespace commits, or {:poked nil} on timeout.
    The client re-issues to keep watching."
@@ -158,25 +157,3 @@
       (let [poked (.poll queue watch-timeout-ms TimeUnit/MILLISECONDS)]
         (respond! exchange 200 {:poked poked}))
       (finally (unregister-watcher! namespaces queue)))))
-
-;; ── Server ────────────────────────────────────────────────────────────────────
-
-(defonce ^:private server (atom nil))
-
-(defn start-server!
-  ([] (start-server! 8080 16))
-  ([port pool-size]
-   (let [srv (HttpServer/create (InetSocketAddress. port) 0)]
-     (.setExecutor srv (Executors/newFixedThreadPool pool-size))
-     (.createContext srv "/sync" (handler handle-sync))
-     (.createContext srv "/commit" (handler handle-commit))
-     (.createContext srv "/watch" (handler handle-watch))
-     (.start srv)
-     (reset! server srv)
-     (println (str "datamigo listening on :" port))
-     srv)))
-
-(defn stop-server! []
-  (when-let [srv @server]
-    (.stop srv 0)
-    (reset! server nil)))
