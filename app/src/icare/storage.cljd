@@ -3,7 +3,7 @@
             ["package:path_provider/path_provider.dart" :as path]
             ["dart:io" :as io]
             [cljd.edn :refer [read-string]]
-            [icare.aztree :as aztree]))
+            [icare.datafriend :as df]))
 
 ;; The persistent mirror of datafriend's :ordered structure. LMDB holds one
 ;; record per entity, using the same schema as :ordered:
@@ -41,7 +41,7 @@
            (assoc :ordered (assoc (:ordered db) ordered-key entity-map))
            (assoc-in [:e->key entity] ordered-key)
            (update :next-timestamp max (inc timestamp)))))
-   {:eav {} :aev {} :ave {} :ordered (aztree/atree) :e->key {} :next-timestamp 0}
+   (df/empty-db)
    records))
 
 (defn open

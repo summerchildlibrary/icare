@@ -11,6 +11,7 @@
             [cljd.flutter :as f]
             [icare.datafriend :as df]
             [icare.pose :as pose]
+            [icare.storage-isolate :as storage-isolate]
             [icare.uuid :refer [uuid-generator]]
             [icare.ui.glue :refer [build-widgets! render-ui!]]))
 
@@ -135,7 +136,7 @@
    .body
    (f/widget
     ;;We wait for futures and show a loading screen
-    :watch [db-conn (let [datafriend-db (await (df/open "icare"))
+    :watch [db-conn (let [{storage-ports :ports datafriend-db :db} (await (storage-isolate/spawn-storage!))
                           _ (prn "Datafriend initialized with" (count (get-in datafriend-db [:eav])) "entities")
                           [private-key public-key] (await (get-secure-credentials))
                           _ (prn "Loaded credentials for pub-key:" public-key)

@@ -22,13 +22,6 @@
    :e->key {}
    :next-timestamp 0})
 
-(defn open
-  "Returns a fresh in-memory db. Persistence and reload-from-storage are handled
-  by the storage isolate (to be wired up), which will hand back a populated db;
-  until then every launch starts empty."
-  [_dir-name]
-  (empty-db))
-
 (def proprietary-nothing 'THIS-VALUE-REPRESENTS-NOTHING)
 
 (defn- sync-ordered-entity

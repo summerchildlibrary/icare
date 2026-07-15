@@ -1,0 +1,50 @@
+(ns icare.storage-isolate
+  (:require ["dart:isolate" :as isolate]
+            [cljd.dart.isolates :as isolates]
+            [icare.storage :as storage]))
+
+;; The storage isolate owns the LMDB handle so all disk work happens off the UI
+;; isolate. It is reactive: main (the authoritative side) drives it.
+;;
+;; Boot handshake:
+;;   1. main spawns the isolate with two ports (:to-storage, :from-storage)
+;;   2. the isolate opens the store, reconstructs the db, and sends it back once
+;;      through :from-storage
+;;   3. main awaits that db and seeds datafriend with it before starting the app
+;;
+;; Steady state: main sends request messages down :to-storage; the isolate applies
+;; them to LMDB. Messages are edn-like vectors tagged by a leading keyword:
+;;   [:reconcile puts delete-keys]  -> storage/apply-reconciliation!
+
+(def db-dir "icare")
+
+(defn- handle-message [message]
+  (case (first message)
+    :reconcile
+    (let [[_ puts delete-keys] message]
+      (await (storage/apply-reconciliation! puts delete-keys)))
+
+    (println (str "storage isolate: unknown message " (first message)))))
+
+(defn isolate-main
+  "Entry point run inside the spawned isolate. `ports` has :to-storage (a
+   ReceivePort we consume) and :from-storage (a SendPort we reply on)."
+  [{:keys [to-storage from-storage]}]
+  (let [boot-db (await (storage/open db-dir))]
+    (.send ^isolate/SendPort from-storage boot-db)
+    (.listen ^isolate/ReceivePort to-storage
+             (fn [message] (handle-message message)))))
+
+(defn ^Future spawn-storage!
+  "Spawn the storage isolate and complete the boot handshake. Returns a map with
+   :isolate, :ports (:to-storage a SendPort, :from-storage a ReceivePort) and :db,
+   the reconstructed datafriend db read from disk. Send [:reconcile puts deletes]
+   down (:to-storage :ports) to persist reconciliation writes."
+  []
+  (let [{:keys [isolate ports]} (await (isolates/spawn! isolate-main
+                                                        {:ports {:to-storage :send
+                                                                 :from-storage :recv}}))
+        boot-db (await (.-first ^isolate/ReceivePort (:from-storage ports)))]
+    {:isolate isolate
+     :ports ports
+     :db boot-db}))
