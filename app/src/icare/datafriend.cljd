@@ -1,127 +1,59 @@
 (ns icare.datafriend
-  (:require ["package:flutter_lmdb2/lmdb.dart" :as lmdb]
-            ["package:path_provider/path_provider.dart" :as path]
-            ["dart:io" :as io]
-            ["dart:convert" :as convert]
-            [cljd.edn :refer [read-string]]))
+  (:require [icare.aztree :as aztree]))
 
-(def log? true)
-(defn- log [message]
-  (when log?
-    (println message)))
+;; A datafriend db is a map of five structures:
+;;   :eav :aev :ave   the query indexes {entity {attribute value}} and friends
+;;   :ordered         an aztree keyed by [timestamp entity] -> {entity {attribute value}}
+;;                    holding one entry per (non-empty) entity, ordered by the recency
+;;                    of that entity's last update. This is the sole structure persisted
+;;                    and the one negentropy reconciles over; its per-entry fingerprint
+;;                    aggregate lets two endpoints localize their differences.
+;;   :e->key          {entity -> [timestamp entity]} locating each entity's current
+;;                    :ordered key, so an update can remove the old key before inserting
+;;                    the new one (the timestamp changes on every touch).
+;;   :next-timestamp  a monotonically increasing counter; its only job is to cluster
+;;                    recently-updated entities adjacently in :ordered.
 
-(defn- encode-utf8 [s]     (convert/utf8.encode s))
-(defn- decode-utf8 [bytes] (convert/utf8.decode bytes))
-
-(defn- decode-from-storage [bytes]
-  (-> bytes
-      decode-utf8
-      read-string))
-
-(defn storage-value
-  [value]
-  (encode-utf8 (pr-str value)))
-
-(defn- storage-eav-key
-  [entity attribute]
-  (encode-utf8 (pr-str [entity attribute])))
-
-(defn- create-dir-if-not-exist [path]
-  (let [directory (io/Directory path)]
-    (if (.existsSync directory)
-      (try
-        (.createSync directory .recursive true)
-        (log (str "Created db directory at: " path))
-        directory
-        (catch Exception e
-          (throw (Exception (str "failed to create a directory for the lmdb db because: " e)))))
-      directory)))
-
-(defn- check-directory-permissions [path]
-  (try
-    (let [file (io/File (str path "/test.txt"))]
-      (await (.writeAsString file "test"))
-      (await (.delete file))
-      (log "Write permissions verified at db directory."))
-    (catch Exception e
-      (throw (Exception (str "DB directory at '" path "' does not have appropriate write permissions: " e))))))
-
-(defonce lmdb-store (atom nil))
+(defn empty-db []
+  {:eav {}
+   :aev {}
+   :ave {}
+   :ordered (aztree/atree)
+   :e->key {}
+   :next-timestamp 0})
 
 (defn open
-  "Creates/opens a db at dir-name in the apps documents directory.
-  Returns {:eav v :aev v :ave v} where vs are sorted-map indices with their corresponding structure.
-  Throws an exception when we can't access the app documents directory for some reason"
-  [dir-name]
-  (let [app-dir ^io/Directory (await (path/getApplicationDocumentsDirectory))
-        db-path (str (.-path app-dir) "/lmdb-" dir-name)
-        _       ^io/Directory (create-dir-if-not-exist db-path)
-        lmdb    (lmdb/LMDB)]
-    (reset! lmdb-store lmdb)
-    (try
-      (let [flags (lmdb/LMDBFlagSet)]
-        (await (.init lmdb db-path .config (lmdb/LMDBInitConfig
-                                            .mapSize (* 1 1024 1024 1024) ;; 1 GB
-                                            .maxDbs 0) ;; Using default unnamed database, no named dbs needed
-                                 .flags flags))
-        (log "Database initialized!"))
-      (catch Exception e
-        (throw (Exception (str "Failed to initialized db because of: " e)))))
-    (let [txn (await (.txnStart lmdb .flags (doto (lmdb/LMDBFlagSet) (.add lmdb/MDB_RDONLY))))]
-      (try
-        (let [eav-storage (await (.cursorOpen lmdb txn)) ;;Use default unnamed database
-              first-entry (await (.cursorGet lmdb eav-storage nil lmdb/CursorOp.first))
-              db (loop [^lmdb/CursorEntry? entry first-entry eav {} aev {} ave {}]
-                   (if (nil? entry)
-                     {:eav eav :aev aev :ave ave}
-                     (let [ea    (.-key entry)
-                           [e a] (decode-from-storage ea)
-                           v     (decode-from-storage (.-data entry))]
-                       (recur (await (.cursorGet lmdb eav-storage nil lmdb/CursorOp.next))
-                              (assoc-in eav [e a] v)
-                              (assoc-in aev [a e] v)
-                              (assoc-in ave [a v e] nil)))))]
-          (.cursorClose lmdb eav-storage)
-          (.txnCommit lmdb txn)
-          db)
-        (catch Exception e
-          (await (.txnAbort lmdb txn))
-          (throw (Exception (str "Failed to iterate through lmdb storage because of: " e))))))))
-
-(defn close
-  "Closes  the open lmdb or does nothing."
-  ([] (when-let [lmdb @lmdb-store] (close lmdb)))
-  ([lmdb] (.close ^lmdb/LMDB lmdb) :success))
-
-(defn transact-to-storage-async
-  [diff]
-  (assert @lmdb-store "Cannot transact before opening the db!")
-  (let [db          ^lmdb/LMDB @lmdb-store
-        add-map     (get diff 'add {})
-        retract-map (get diff 'retract {})
-        txn         (await (.txnStart db))]
-    (try
-      (let [eav (await (.cursorOpen db txn))] ;;Use default unnamed database
-        (doseq [[entity attmap] retract-map
-                [attribute _]   attmap]
-          (when (await (.cursorGet db eav (storage-eav-key entity attribute) lmdb/CursorOp.set))
-            (await (.cursorDelete db eav))))
-        (doseq [[entity attmap]   add-map
-                [attribute value] attmap]
-          (await (.cursorPut db eav (storage-eav-key entity attribute) (storage-value value) 0)))
-        (.cursorClose db eav)
-        (await (.txnCommit db txn))
-        {:success nil})
-      (catch Exception e
-        (await (.txnAbort db txn))
-        ;;this must be loud: a failed write means the in-memory db has diverged from disk until next launch
-        (println (str "DATAFRIEND STORAGE WRITE FAILED, in-memory db has diverged from disk! diff: " diff " error: " e))
-        {:failure e}))))
+  "Returns a fresh in-memory db. Persistence and reload-from-storage are handled
+  by the storage isolate (to be wired up), which will hand back a populated db;
+  until then every launch starts empty."
+  [_dir-name]
+  (empty-db))
 
 (def proprietary-nothing 'THIS-VALUE-REPRESENTS-NOTHING)
 
+(defn- sync-ordered-entity
+  "Bring the :ordered and :e->key structures in line with an entity's current
+   attribute map in :eav. Removes the entity's old :ordered entry (its timestamp
+   changed) and, if it still has attributes, inserts a fresh entry keyed by a new
+   [timestamp entity]. An entity with no attributes left is dropped from both."
+  [db entity]
+  (let [attmap  (get-in db [:eav entity])
+        old-key (get-in db [:e->key entity])
+        ordered (cond-> (:ordered db) old-key (dissoc old-key))]
+    (if (seq attmap)
+      (let [timestamp (:next-timestamp db)
+            new-key   [timestamp entity]]
+        (-> db
+            (assoc :ordered (assoc ordered new-key {entity attmap}))
+            (assoc-in [:e->key entity] new-key)
+            (assoc :next-timestamp (inc timestamp))))
+      (-> db
+          (assoc :ordered ordered)
+          (update :e->key dissoc entity)))))
+
 (defn transact-to-memory [db diff]
   (let [retract-map (get diff 'retract {})
+        add-map     (get diff 'add {})
         db          (reduce (fn [db [entity attmap]]
                               (reduce (fn [db [attribute _]]
                                         ;;we check against proprietary-nothing instead of truthiness so stored falsy values (false, nil) still get retracted
@@ -134,7 +66,6 @@
                                                 (update-in [:ave attribute old-v] dissoc entity)))))
                                       db attmap))
                             db retract-map)
-        add-map     (get diff 'add {})
         db          (reduce (fn [db [entity attmap]]
                               (reduce (fn [db [attribute value]]
                                         (let [old-v (get-in (:eav db) [entity attribute] proprietary-nothing)]
@@ -146,17 +77,17 @@
                                               (assoc-in [:aev attribute entity] value)
                                               (assoc-in [:ave attribute value entity] nil))))
                                       db attmap))
-                            db add-map)]
+                            db add-map)
+        touched     (into (set (keys retract-map)) (keys add-map))
+        db          (reduce sync-ordered-entity db touched)]
     db))
 
 (defn transact
   "Executes a transaction. diff is a map with optional 'add and 'retract keys,
   each mapping to an entity->attmap: {entity {attr val} ...}.
-  Retracts are applied before adds.
-  Storage writes are fire-and-forget: we rely on the dart event loop to serialize them,
-  until we move to full memory<->storage sync on every transaction (e.g. negentropy)."
+  Retracts are applied before adds. Updates all five indexes, including the
+  :ordered aztree and :e->key locator used for negentropy reconciliation."
   [db diff]
-  ;; (transact-to-storage-async diff)
   (transact-to-memory db diff))
 
 (defn- triple-tier
