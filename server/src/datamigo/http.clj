@@ -18,13 +18,45 @@
             [icare.negentropy :as negentropy]
             [clojure.edn :as edn])
   (:import (com.sun.net.httpserver HttpServer HttpHandler HttpExchange)
+           (fr.acinq.secp256k1 Secp256k1)
+           (java.security MessageDigest)
            (java.net InetSocketAddress)
-           (java.util HexFormat)
-           (java.util.concurrent Executors LinkedBlockingQueue TimeUnit)
+           (java.util HexFormat UUID)
+           (java.util.concurrent Executors LinkedBlockingQueue ConcurrentHashMap TimeUnit)
            (java.io ByteArrayOutputStream)))
 
 (def hex-format (HexFormat/of))
 (defn- hex->bytes [^String s] (.parseHex hex-format s))
+
+;; ── Crypto ──────────────────────────────────────────────────────────────────
+
+(defonce ^Secp256k1 secp256k1 (Secp256k1/get))
+
+(defn- ^bytes sha256 [^String s]
+  (.digest (MessageDigest/getInstance "SHA-256") (.getBytes s "UTF-8")))
+
+(defn- verify-schnorr [^bytes pubkey ^bytes msg ^bytes sig]
+  (try (.verifySchnorr secp256k1 sig msg pubkey) (catch Exception _ false)))
+
+;; ── Commit tokens (replay protection) ─────────────────────────────────────────
+;;
+;; The db is open to reads; only commits are authenticated, proving the caller
+;; owns the namespace (holds its private key). To stop replay without depending on
+;; client clocks, the server issues a fresh token on every /sync response and keeps
+;; only the latest per namespace. A commit must carry that token, signed together
+;; with the diff; using it removes it, and issuing a new one supersedes the old, so
+;; a captured commit can never be replayed. One entry per namespace, no expiry.
+
+(defonce ^ConcurrentHashMap commit-tokens (ConcurrentHashMap.))
+
+(defn- issue-token! [namespace-hex]
+  (let [token (str (UUID/randomUUID))]
+    (.put commit-tokens namespace-hex token)
+    token))
+
+(defn- consume-token! [namespace-hex token]
+  ;; atomic: removes only if `token` is the current one for the namespace
+  (and token (.remove commit-tokens namespace-hex token)))
 
 ;; ── Watchers ──────────────────────────────────────────────────────────────────
 ;;
@@ -77,26 +109,40 @@
 (defn- handle-sync
   "One negentropy round. Body: {:namespace hex :ranges [[low high fp]...]}. The
    server is the responder: it loads the namespace's tree and returns the
-   sub-ranges describing where it differs from the client's fingerprints. Same for
-   push and pull; the server just responds."
+   sub-ranges describing where it differs from the client's fingerprints, plus a
+   fresh :commit-token the owner will sign into a subsequent commit. Reads are open,
+   so no auth here; the token only matters if this client goes on to commit."
   [^HttpExchange exchange]
   (let [{:keys [namespace ranges]} (read-body exchange)
         tree (storage/get-or-load-tree namespace (hex->bytes namespace))
         sub-ranges (negentropy/respond tree ranges)]
-    (respond! exchange 200 {:sub-ranges sub-ranges})))
+    (respond! exchange 200 {:sub-ranges sub-ranges
+                            :commit-token (issue-token! namespace)})))
 
 (defn- handle-commit
-  "Push path. Body: {:namespace hex :diff {:puts :deletes}}. The owner has finished
-   a negentropy round and computed what the server's tree must change to match its
-   own. Patch memory, enqueue the LMDB write (fire-and-forget), then poke the
-   namespace's watchers so permitted friends come pull."
+  "Push path, authenticated. Body: {:namespace hex :diff {:puts :deletes}
+   :commit-token t :signature hex}. The signature is a Schnorr sig by the
+   namespace's key over sha256(pr-str [namespace diff commit-token]) — proving key
+   ownership and binding this exact diff and token. The token must be the current
+   one for the namespace (consumed on use, superseded by later syncs), which stops
+   replay. On success: patch memory, enqueue the LMDB write, poke watchers."
   [^HttpExchange exchange]
-  (let [{:keys [namespace diff]} (read-body exchange)
-        pubkey-bytes (hex->bytes namespace)]
-    (storage/patch-tree! namespace diff)
-    (storage/enqueue-diff! pubkey-bytes diff)
-    (poke-watchers! namespace)
-    (respond! exchange 200 {:ok true})))
+  (let [{:keys [namespace diff commit-token signature]} (read-body exchange)
+        pubkey-bytes (hex->bytes namespace)
+        message (sha256 (pr-str [namespace diff commit-token]))]
+    (cond
+      (not (consume-token! namespace commit-token))
+      (respond! exchange 403 {:error "invalid or stale commit token"})
+
+      (not (and signature (verify-schnorr pubkey-bytes message (hex->bytes signature))))
+      (respond! exchange 403 {:error "invalid signature"})
+
+      :else
+      (do
+        (storage/patch-tree! namespace diff)
+        (storage/enqueue-diff! pubkey-bytes diff)
+        (poke-watchers! namespace)
+        (respond! exchange 200 {:ok true})))))
 
 (def ^:private watch-timeout-ms (* 60 1000))
 

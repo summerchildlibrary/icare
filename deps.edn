@@ -36,12 +36,9 @@
   ;; lmdbjava (via jnr-ffi) reflects into java.nio; JDK 17+ needs this opened.
   :datamigo
   {:extra-paths ["server/src" "shared/src"]
+   ;; HTTP is the JDK's built-in com.sun.net.httpserver — no dependency needed.
    :extra-deps {org.clojure/clojure {:mvn/version "1.12.4"}
-                ;; HTTP + WebSocket server
-                aleph/aleph {:mvn/version "0.7.1"}
-                ;; async streams / deferreds (transitive via aleph, pinned for clarity)
-                manifold/manifold {:mvn/version "0.4.3"}
-                ;; secp256k1 for Schnorr signature verification
+                ;; secp256k1 for Schnorr signature verification of commits
                 fr.acinq.secp256k1/secp256k1-kmp-jni-jvm {:mvn/version "0.15.0"}
                 ;; LMDB embedded key-value store
                 org.lmdbjava/lmdbjava {:mvn/version "0.9.0"}}
