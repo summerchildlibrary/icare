@@ -51,7 +51,12 @@
           (assoc :ordered ordered)
           (update :e->key dissoc entity)))))
 
-(defn transact-to-memory [db diff]
+(defn transact
+  "Executes a transaction. diff is a map with optional 'add and 'retract keys,
+  each mapping to an entity->attmap: {entity {attr val} ...}.
+  Retracts are applied before adds. Updates all five indexes, including the
+  :ordered aztree and :e->key locator used for negentropy reconciliation."
+  [db diff]
   (let [retract-map (get diff 'retract {})
         add-map     (get diff 'add {})
         db          (reduce (fn [db [entity attmap]]
@@ -81,14 +86,6 @@
         touched     (into (set (keys retract-map)) (keys add-map))
         db          (reduce sync-ordered-entity db touched)]
     db))
-
-(defn transact
-  "Executes a transaction. diff is a map with optional 'add and 'retract keys,
-  each mapping to an entity->attmap: {entity {attr val} ...}.
-  Retracts are applied before adds. Updates all five indexes, including the
-  :ordered aztree and :e->key locator used for negentropy reconciliation."
-  [db diff]
-  (transact-to-memory db diff))
 
 (defn- triple-tier
   "Takes a triple and returns an int representing how difficult it is to query on that triple with our indexes

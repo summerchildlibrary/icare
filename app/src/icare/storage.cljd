@@ -1,0 +1,99 @@
+(ns icare.storage
+  (:require ["package:flutter_lmdb2/lmdb.dart" :as lmdb]
+            ["package:path_provider/path_provider.dart" :as path]
+            ["dart:io" :as io]
+            [cljd.edn :refer [read-string]]
+            [icare.aztree :as aztree]))
+
+;; The persistent mirror of datafriend's :ordered structure. LMDB holds one
+;; record per entity, using the same schema as :ordered:
+;;
+;;   key   = (pr-str [timestamp entity])
+;;   value = (pr-str {entity {attribute value ...}})
+;;
+;; The value carries the whole entity map so a boot can rebuild every datafriend
+;; index from disk alone, and the key carries the real timestamp so ordering (and
+;; :next-timestamp) survive across launches. This namespace owns the LMDB handle;
+;; it is the only code that touches disk.
+
+(defonce ^:private store (atom nil))
+
+(defn- ^String app-db-path [dir-name]
+  (let [app-dir ^io/Directory (await (path/getApplicationDocumentsDirectory))]
+    (str (.-path app-dir) "/lmdb-" dir-name)))
+
+(defn- rebuild-indexes
+  "Fold the stored [[timestamp entity] {entity attmap}] records into a full
+   datafriend db, preserving each entity's persisted timestamp and reconstructing
+   the :eav/:aev/:ave query indexes, the :ordered aztree and the :e->key locator.
+   :next-timestamp is seeded past the highest timestamp seen."
+  [records]
+  (reduce
+   (fn [db [[timestamp entity :as ordered-key] entity-map]]
+     (let [attmap (get entity-map entity)
+           db (reduce (fn [db [attribute value]]
+                        (-> db
+                            (assoc-in [:eav entity attribute] value)
+                            (assoc-in [:aev attribute entity] value)
+                            (assoc-in [:ave attribute value entity] nil)))
+                      db attmap)]
+       (-> db
+           (assoc :ordered (assoc (:ordered db) ordered-key entity-map))
+           (assoc-in [:e->key entity] ordered-key)
+           (update :next-timestamp max (inc timestamp)))))
+   {:eav {} :aev {} :ave {} :ordered (aztree/atree) :e->key {} :next-timestamp 0}
+   records))
+
+(defn open
+  "Initialize the LMDB store at dir-name in the app documents directory, read all
+   persisted entity records, and return a fully reconstructed datafriend db."
+  [dir-name]
+  (let [db-path (await (app-db-path dir-name))
+        store* (lmdb/LMDB)]
+    (await (.init store* db-path
+                  .config (lmdb/LMDBInitConfig .mapSize (* 1 1024 1024 1024) .maxDbs 0)))
+    (reset! store store*)
+    (let [txn (await (.txnStart store* .flags (doto (lmdb/LMDBFlagSet) (.add lmdb/MDB_RDONLY))))]
+      (try
+        (let [cursor (await (.cursorOpen store* txn))
+              records (loop [^lmdb/CursorEntry? entry (await (.cursorGet store* cursor nil lmdb/CursorOp.first))
+                             records []]
+                        (if (nil? entry)
+                          records
+                          (let [ordered-key (read-string (.-keyAsString entry))
+                                entity-map (read-string (.-dataAsString entry))]
+                            (recur (await (.cursorGet store* cursor nil lmdb/CursorOp.next))
+                                   (conj records [ordered-key entity-map])))))]
+          (.cursorClose store* cursor)
+          (await (.txnCommit store* txn))
+          (rebuild-indexes records))
+        (catch Exception e
+          (await (.txnAbort store* txn))
+          (throw (Exception (str "Failed to read from lmdb storage: " e))))))))
+
+(defn close []
+  (when-let [store* @store]
+    (.close ^lmdb/LMDB store*)
+    (reset! store nil)
+    :closed))
+
+(defn apply-reconciliation!
+  "Apply a batch of reconciliation writes in a single transaction. `puts` is a seq
+   of [[timestamp entity] {entity attmap}] to store; `delete-keys` is a seq of
+   [timestamp entity] keys to remove. Both are keyed exactly as :ordered, so the
+   caller passes the aztree entries and locator keys directly."
+  [puts delete-keys]
+  (assert @store "Cannot write to storage before opening it")
+  (let [store* ^lmdb/LMDB @store
+        txn (await (.txnStart store*))]
+    (try
+      (doseq [ordered-key delete-keys]
+        (await (.delete store* txn (pr-str ordered-key))))
+      (doseq [[ordered-key entity-map] puts]
+        (await (.putUtf8 store* txn (pr-str ordered-key) (pr-str entity-map))))
+      (await (.txnCommit store* txn))
+      {:success nil}
+      (catch Exception e
+        (await (.txnAbort store* txn))
+        (println (str "STORAGE WRITE FAILED, disk has diverged from memory! error: " e))
+        {:failure e}))))
