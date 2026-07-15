@@ -1,0 +1,6 @@
+(ns icare.uuid
+  (:require ["package:uuid/uuid.dart" :refer [Uuid]]))
+
+;; A v4 UUID generator. Lives outside core so UI code can mint ids without
+;; pulling in the app entry point.
+(def uuid-generator (.-v4 (Uuid)))

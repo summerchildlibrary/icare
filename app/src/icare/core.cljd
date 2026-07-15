@@ -9,14 +9,67 @@
             ["package:nostr/nostr.dart" :refer [Keychain]]
             ["package:flutter_secure_storage/flutter_secure_storage.dart" :refer [FlutterSecureStorage]]
             [cljd.flutter :as f]
-            [icare.state :refer [initialize-state! transact! db-conn default-initial-data default-physics]]
             [icare.datafriend :as df]
             [icare.pose :as pose]
+            [icare.uuid :refer [uuid-generator]]
             [icare.ui.glue :refer [build-widgets! render-ui!]]))
 
 ;; Stub for network events (TODO: implement later)
 (defn handle-network-data! [data]
   (prn "Network data received (not yet implemented):" data))
+
+;;The feel of the ui is user data, these are just the defaults
+(def default-physics
+  {:physics/repulsion-strength 2200.0
+   :physics/repulsion-radius 150.0
+   :physics/damping 4.0
+   :physics/static-friction 300.0
+   :physics/wall-stiffness 200.0
+   :physics/sleep-speed 4.0
+   :physics/sleep-frames 12
+   :physics/max-speed 3000.0})
+
+;;Default initial data for a fresh database
+(defn default-initial-data [pub-key]
+  (let [example-task-uuid (uuid-generator)
+        example-querido-uuid (uuid-generator)]
+    {'add
+     {;; Global config entity
+      :global/config
+      {:config/animated-assets ["penguin.webp"
+                                "fish.webp"
+                                "heart.gif"
+                                "star.gif"
+                                "movies.gif"
+                                "dancing.gif"
+                                "settings-slow.gif"]
+       :config/current-screen :pages
+       :config/user-pub-key pub-key
+       :config/todo-list-order [example-task-uuid :add-task-task]}
+
+      ;; Physics constants for the home canvas simulation
+      :global/physics default-physics
+
+      ;; Example task
+      example-task-uuid
+      {:task/title "Example task"
+       :task/completed false
+       :task/subitems []}
+
+      ;; Example querido
+      example-querido-uuid
+      (merge {:querido/name "alex computer"
+              :querido/asset "star.gif"
+              :querido/pub-key "0299b1e9eee16c522767bc13c3a7247ce52b0113320ee1cb1da7e9eb85a000dc"
+              :querido/task-order []}
+             (pose/pose-attrs :home 130 260))
+
+      ;; Add task placeholder
+      :add-task-task
+      {:task/is-add-task? true
+       :task/title ""
+       :task/completed false
+       :task/subitems []}}}))
 
 (defn ^Future get-device-token-future []
   (let [messaging (firebase-messaging/FirebaseMessaging.instance)
@@ -87,15 +140,13 @@
                           [private-key public-key] (await (get-secure-credentials))
                           _ (prn "Loaded credentials for pub-key:" public-key)
                           is-empty? (zero? (count (get-in datafriend-db [:eav])))
-                          datafriend-db (if is-empty?
-                                          (do
-                                            (prn "Populating default initial data...")
-                                            (let [new-db (df/transact datafriend-db (default-initial-data public-key))]
-                                              (prn "After populating, DB has entities:" (keys (:eav new-db)))
-                                              new-db))
-                                          datafriend-db)
-                          _ (initialize-state! datafriend-db)
-                          db @db-conn
+                          db (if is-empty?
+                               (do
+                                 (prn "Populating default initial data...")
+                                 (let [new-db (df/transact datafriend-db (default-initial-data public-key))]
+                                   (prn "After populating, DB has entities:" (keys (:eav new-db)))
+                                   new-db))
+                               datafriend-db)
                           expanded-querido-id (get-in db [:eav :global/config :config/expanded-querido])
                           queridos-order (get-in db [:eav :global/config :config/queridos-order])
                           pose-adds (into {}
@@ -109,18 +160,18 @@
                           retract-map (cond-> {}
                                         expanded-querido-id (assoc-in [:global/config :config/expanded-querido] expanded-querido-id)
                                         queridos-order (assoc-in [:global/config :config/queridos-order] queridos-order))
-                          _ (when (or (seq add-map) (seq retract-map)) (transact! {'add add-map 'retract retract-map}))
+                          db (if (or (seq add-map) (seq retract-map)) (df/transact db {'add add-map 'retract retract-map}) db)
                           device-token (await (get-device-token-future))
                           _ (prn "Device token:" device-token)
-                          _ (when device-token (transact! {'add {:global/config {:config/device-token device-token}}}))]
-                      db-conn)]
+                          _ (when device-token (df/transact db {'add {:global/config {:config/device-token device-token}}}))]
+                      (atom db))]
     :bypass (when-not db-conn
               (f/widget
                (m/SafeArea)
                (m/Text "Loading...")))
     :let [db @db-conn
-          side-effects {:transact! transact!
-                        :render! #(render-ui! @db-conn)}]
+          side-effects {:transact! (fn [diff] (swap! db-conn df/transact diff))
+                        :render! (fn [] (render-ui! @db-conn))}]
     (m/SafeArea ;;we handle the top and bottom manually for edge to edge rendering
      .bottom false
      .top false)
