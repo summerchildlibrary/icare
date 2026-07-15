@@ -7,7 +7,7 @@
 ;; `clojure -M:cljd ...` continues to work. Both JVM servers share server/src
 ;; and each has an alias adding its JVM dependencies and entry point.
 
-{:paths ["app/src"] ; where the cljd files live
+{:paths ["app/src" "shared/src"] ; cljd app sources + .cljc shared with the servers
  :deps {tensegritics/clojuredart
         {:git/url "https://github.com/tensegritics/ClojureDart.git"
          :sha "4ee792f3044589c96b019c2a86db9b23f1b283ab"}}
@@ -35,7 +35,7 @@
   ;; ── datamigo sync server ────────────────────────────────────────────────
   ;; lmdbjava (via jnr-ffi) reflects into java.nio; JDK 17+ needs this opened.
   :datamigo
-  {:extra-paths ["server/src"]
+  {:extra-paths ["server/src" "shared/src"]
    :extra-deps {org.clojure/clojure {:mvn/version "1.12.4"}
                 ;; HTTP + WebSocket server
                 aleph/aleph {:mvn/version "0.7.1"}
