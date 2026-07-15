@@ -488,7 +488,11 @@
   (let [items (range-items tree low high)
         total (count items)]
     (if (<= total 1)
-      (if (zero? total) [] [[low high]])
+      ;; A range with 0 or 1 items is its own single bucket. An empty range still
+      ;; yields [[low high]] (not []) so the responder emits an :items leaf for it:
+      ;; when fingerprints differ but the responder is empty here, the initiator has
+      ;; entries to push and must be told this range is a (empty) leaf to diff.
+      [[low high]]
       (let [buckets (min bucket-count total)
             per-bucket (quot (+ total buckets -1) buckets)
             boundary-keys (loop [item-index per-bucket boundaries []]
