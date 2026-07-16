@@ -8,70 +8,54 @@
             ["package:firebase_messaging/firebase_messaging.dart" :as firebase-messaging]
             ["package:nostr/nostr.dart" :refer [Keychain]]
             ["package:flutter_secure_storage/flutter_secure_storage.dart" :refer [FlutterSecureStorage]]
+            ["dart:isolate" :as isolate]
+            ["dart:ui" :as dart-ui]
             [cljd.flutter :as f]
+            [cljd.dart.isolates :as isolates]
             [icare.datafriend :as df]
-            [icare.pose :as pose]
-            [icare.storage-isolate :as storage-isolate]
-            [icare.network :as net]
+            [icare.storage :as storage]
+            [icare.network :as network]
             [icare.uuid :refer [uuid-generator]]
             [icare.ui :as ui]))
 
-;; Stub for network events (TODO: implement later)
-(defn handle-network-data! [data]
-  (prn "Network data received (not yet implemented):" data))
-
-;;The feel of the ui is user data, these are just the defaults
-(def default-physics
-  {:physics/repulsion-strength 2200.0
-   :physics/repulsion-radius 150.0
-   :physics/damping 4.0
-   :physics/static-friction 300.0
-   :physics/wall-stiffness 200.0
-   :physics/sleep-speed 4.0
-   :physics/sleep-frames 12
-   :physics/max-speed 3000.0})
-
-;;Default initial data for a fresh database
 (defn default-initial-data [pub-key]
   (let [example-task-uuid (uuid-generator)
         example-querido-uuid (uuid-generator)]
     {'add
-     {;; Global config entity
-      :global/config
-      {:config/animated-assets ["penguin.webp"
-                                "fish.webp"
-                                "heart.gif"
-                                "star.gif"
-                                "movies.gif"
-                                "dancing.gif"
-                                "settings-slow.gif"]
-       :config/current-screen :pages
-       :config/user-pub-key pub-key
-       :config/todo-list-order [example-task-uuid :add-task-task]}
+     {:global/config {:config/animated-assets ["penguin.webp"
+                                               "fish.webp"
+                                               "heart.gif"
+                                               "star.gif"
+                                               "movies.gif"
+                                               "dancing.gif"
+                                               "settings-slow.gif"]
+                      :config/current-screen :pages
+                      :config/user-pub-key pub-key
+                      :config/todo-list-order [example-task-uuid :add-task-task]}
 
-      ;; Physics constants for the home canvas simulation
-      :global/physics default-physics
+      :global/physics {:physics/repulsion-strength 2200.0
+                       :physics/repulsion-radius 150.0
+                       :physics/damping 4.0
+                       :physics/static-friction 300.0
+                       :physics/wall-stiffness 200.0
+                       :physics/sleep-speed 4.0
+                       :physics/sleep-frames 12
+                       :physics/max-speed 3000.0}
 
-      ;; Example task
-      example-task-uuid
-      {:task/title "Example task"
-       :task/completed false
-       :task/subitems []}
+      example-task-uuid {:task/title "Example task"
+                         :task/completed false
+                         :task/subitems []}
 
-      ;; Example querido
-      example-querido-uuid
-      (merge {:querido/name "alex computer"
-              :querido/asset "star.gif"
-              :querido/pub-key "0299b1e9eee16c522767bc13c3a7247ce52b0113320ee1cb1da7e9eb85a000dc"
-              :querido/task-order []}
-             (pose/pose-attrs :home 130 260))
+      example-querido-uuid (merge {:querido/name "alex computer"
+                                   :querido/asset "star.gif"
+                                   :querido/pub-key "0299b1e9eee16c522767bc13c3a7247ce52b0113320ee1cb1da7e9eb85a000dc"
+                                   :querido/task-order []}
+                                  (df/position-attributes :home 130 260))
 
-      ;; Add task placeholder
-      :add-task-task
-      {:task/is-add-task? true
-       :task/title ""
-       :task/completed false
-       :task/subitems []}}}))
+      :add-task-task {:task/is-add-task? true
+                      :task/title ""
+                      :task/completed false
+                      :task/subitems []}}}))
 
 (defn ^Future get-device-token-future []
   (let [messaging (firebase-messaging/FirebaseMessaging.instance)
@@ -136,47 +120,35 @@
     .resizeToAvoidBottomInset false) ;;we handle this manually by scrolling to make our text fields visible
    .body
    (f/widget
-    ;;We wait for futures and show a loading screen
-    :watch [booted (let [{ports* :ports datafriend-db :db} (await (storage-isolate/spawn-storage!))
-                          _ (prn "Datafriend initialized with" (count (get-in datafriend-db [:eav])) "entities")
-                          [private-key public-key] (await (get-secure-credentials))
-                          _ (prn "Loaded credentials for pub-key:" public-key)
-                          is-empty? (zero? (count (get-in datafriend-db [:eav])))
-                          db (if is-empty?
-                               (do
-                                 (prn "Populating default initial data...")
-                                 (let [new-db (df/transact datafriend-db (default-initial-data public-key))]
-                                   (prn "After populating, DB has entities:" (keys (:eav new-db)))
-                                   new-db))
-                               datafriend-db)
-                          expanded-querido-id (get-in db [:eav :global/config :config/expanded-querido])
-                          queridos-order (get-in db [:eav :global/config :config/queridos-order])
-                          pose-adds (into {}
-                                          (map-indexed (fn [idx querido-id]
-                                                         [querido-id (pose/pose-attrs :home
-                                                                                      (+ 120.0 (* (mod idx 2) 160.0))
-                                                                                      (+ 240.0 (* (quot idx 2) 180.0)))])
-                                                       (vec (remove #(get-in db [:eav % :pose/canvas]) (or queridos-order [])))))
-                          add-map (cond-> pose-adds
-                                    (not (get-in db [:eav :global/physics])) (assoc :global/physics default-physics))
-                          retract-map (cond-> {}
-                                        expanded-querido-id (assoc-in [:global/config :config/expanded-querido] expanded-querido-id)
-                                        queridos-order (assoc-in [:global/config :config/queridos-order] queridos-order))
-                          db (if (or (seq add-map) (seq retract-map)) (df/transact db {'add add-map 'retract retract-map}) db)
-                          device-token (await (get-device-token-future))
-                          _ (prn "Device token:" device-token)
-                          _ (when device-token (df/transact db {'add {:global/config {:config/device-token device-token}}}))
-                          conn (atom db)
-                          ;; start watching friends: pull each once, then long-poll
-                          ;; for pokes and pull the friend that changed. Friend dbs
-                          ;; live in the conn map keyed by their pubkey-hex.
-                          friend-pub-keys (->> (df/query @conn {'e {:querido/pub-key 'p}})
-                                               vals
-                                               (map :querido/pub-key)
-                                               (remove nil?)
-                                               distinct
-                                               vec)
-                          _ (net/watch-friends-loop! conn friend-pub-keys)]
+    :watch [booted (let [root-token               dart-ui/RootIsolateToken.instance
+                         {ports :ports}           (await (isolates/spawn!
+                                                          (fn [{:keys [to-storage from-storage]}]
+                                                            (services/BackgroundIsolateBinaryMessenger.ensureInitialized ^dart-ui/RootIsolateToken root-token)
+                                                            (.listen ^isolate/ReceivePort to-storage
+                                                                     (fn [message] (storage/handle-message from-storage message)))
+                                                            nil)
+                                                          {:ports {:to-storage :send :from-storage :recv}}))
+                         responses                (.asBroadcastStream ^isolate/ReceivePort (:from-storage ports))
+                         ports*                   (assoc ports :from-storage responses)
+                         _                        (.send ^isolate/SendPort (:to-storage ports) [:boot])
+                         [_ datafriend-db]        (await (.-first responses))
+                         _                        (prn "Datafriend initialized with" (count (get-in datafriend-db [:eav])) "entities")
+                         [private-key public-key] (await (get-secure-credentials))
+                         _                        (prn "Loaded credentials for pub-key:" public-key)
+                         is-empty?                (zero? (count (get-in datafriend-db [:eav])))
+                         db                       (if is-empty? (do (prn "Populating default initial data...")
+                                                                    (df/transact datafriend-db (default-initial-data public-key)))
+                                                                datafriend-db)
+                         device-token             (await (get-device-token-future))
+                         _                        (prn "Device token:" device-token)
+                         _                        (when device-token (df/transact db {'add {:global/config {:config/device-token device-token}}}))
+                         conn                     (atom db)
+                         friend-pub-keys          (->> (df/query @conn {'e {:querido/pub-key 'p}})
+                                                       vals
+                                                       (map :querido/pub-key)
+                                                       distinct
+                                                       vec)
+                         _                        (network/watch-friends-loop! conn friend-pub-keys)]
                       {:db-conn conn :ports ports* :public-key public-key :private-key private-key})]
     :bypass (when-not booted
               (f/widget
@@ -185,8 +157,8 @@
     :let [{:keys [db-conn ports public-key private-key]} booted
           side-effects {:transact! (fn [diff] (swap! db-conn df/transact diff))
                         :render! (fn [] (ui/render-ui! @db-conn))
-                        :persist! (fn [] (storage-isolate/reconcile! ports db-conn))
-                        :sync-to-server! (fn [] (net/sync-to-server! db-conn public-key private-key))}]
+                        :persist! (fn [] (storage/persist-to-disk! ports db-conn))
+                        :sync-to-server! (fn [] (network/sync-to-server! db-conn public-key private-key))}]
     (m/SafeArea ;;we handle the top and bottom manually for edge to edge rendering
      .bottom false
      .top false)

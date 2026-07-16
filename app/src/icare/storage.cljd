@@ -2,34 +2,40 @@
   (:require ["package:flutter_lmdb2/lmdb.dart" :as lmdb]
             ["package:path_provider/path_provider.dart" :as path]
             ["dart:io" :as io]
+            ["dart:isolate" :as isolate]
             [cljd.edn :refer [read-string]]
-            [icare.datafriend :as df]))
+            [icare.datafriend :as df]
+            [icare.negentropy :as negentropy]))
 
-;; The persistent mirror of datafriend's :ordered structure. LMDB holds one
-;; record per entity, using the same schema as :ordered:
+;; Persistence lives on its own isolate so all LMDB work happens off the UI
+;; isolate. LMDB mirrors datafriend's :ordered structure, one record per entity:
 ;;
-;;   key   = (pr-str [timestamp entity])
+;;   key   = (pr-str timestamp)
 ;;   value = (pr-str {entity {attribute value ...}})
 ;;
 ;; The value carries the whole entity map so a boot can rebuild every datafriend
-;; index from disk alone, and the key carries the real timestamp so ordering (and
-;; :next-timestamp) survive across launches. This namespace owns the LMDB handle;
-;; it is the only code that touches disk.
+;; index from disk alone, and the key is the real timestamp so ordering (and
+;; :next-timestamp) survive across launches.
+;;
+;; The isolate is reactive; main (the authoritative side) drives it. Boot handshake:
+;; main spawns the isolate, which opens the store, reconstructs the db, sends it
+;; back tagged [:boot db] and keeps the db's :ordered tree in memory; main awaits
+;; [:boot db] and seeds datafriend before starting the app. Reconciliation is a
+;; negentropy round trip: main sends [:sync ranges] and the isolate replies
+;; [:sync-response sub-ranges]; when the diff is localized main sends [:reconcile
+;; puts deletes] which the isolate applies to LMDB and its tree.
+
+(def db-dir "icare")
+
+;; ── LMDB (runs inside the storage isolate) ────────────────────────────────────
 
 (defonce ^:private store (atom nil))
 
-(defn- ^String app-db-path [dir-name]
+(defn- ^Future app-db-path [dir-name]
   (let [app-dir ^io/Directory (await (path/getApplicationDocumentsDirectory))]
     (str (.-path app-dir) "/lmdb-" dir-name)))
 
-(defn- rebuild-indexes
-  "Reconstruct a full datafriend db from stored [[timestamp entity] {entity attmap}]
-   records, preserving each entity's persisted timestamp. Just apply-records over an
-   empty db — the records are all adds, no deletes."
-  [records]
-  (df/apply-records (df/empty-db) records []))
-
-(defn open
+(defn- open
   "Initialize the LMDB store at dir-name in the app documents directory, read all
    persisted entity records, and return a fully reconstructed datafriend db."
   [dir-name]
@@ -38,7 +44,10 @@
     (await (.init store* db-path
                   .config (lmdb/LMDBInitConfig .mapSize (* 1 1024 1024 1024) .maxDbs 0)))
     (reset! store store*)
-    (let [txn (await (.txnStart store* .flags (doto (lmdb/LMDBFlagSet) (.add lmdb/MDB_RDONLY))))]
+    ;; a read-write txn (not MDB_RDONLY): flutter_lmdb2 opens the DBI with MDB_CREATE,
+    ;; which is illegal in a read-only txn on a fresh, empty database. This runs once
+    ;; at boot and commits immediately, so the write txn is harmless.
+    (let [txn (await (.txnStart store*))]
       (try
         (let [cursor (await (.cursorOpen store* txn))
               records (loop [^lmdb/CursorEntry? entry (await (.cursorGet store* cursor nil lmdb/CursorOp.first))
@@ -51,24 +60,17 @@
                                    (conj records [ordered-key entity-map])))))]
           (.cursorClose store* cursor)
           (await (.txnCommit store* txn))
-          (rebuild-indexes records))
+          ;; all records are adds, no deletes
+          (df/apply-records (df/empty-db) records []))
         (catch Exception e
           (await (.txnAbort store* txn))
           (throw (Exception (str "Failed to read from lmdb storage: " e))))))))
 
-(defn close []
-  (when-let [store* @store]
-    (.close ^lmdb/LMDB store*)
-    (reset! store nil)
-    :closed))
-
-(defn apply-reconciliation!
+(defn- apply-reconciliation!
   "Apply a batch of reconciliation writes in a single transaction. `puts` is a seq
-   of [[timestamp entity] {entity attmap}] to store; `delete-keys` is a seq of
-   [timestamp entity] keys to remove. Both are keyed exactly as :ordered, so the
-   caller passes the aztree entries and locator keys directly."
+   of [timestamp {entity attmap}] to store; `delete-keys` is a seq of timestamps to
+   remove — both keyed exactly as :ordered."
   [puts delete-keys]
-  (assert @store "Cannot write to storage before opening it")
   (let [store* ^lmdb/LMDB @store
         txn (await (.txnStart store*))]
     (try
@@ -82,3 +84,76 @@
         (await (.txnAbort store* txn))
         (println (str "STORAGE WRITE FAILED, disk has diverged from memory! error: " e))
         {:failure e}))))
+
+;; ── Isolate message handling ──────────────────────────────────────────────────
+
+;; The isolate's view of disk's :ordered aztree, kept in sync with LMDB so each
+;; sync diffs against current state. Only ever touched inside the storage isolate.
+(defonce ^:private disk-ordered (atom nil))
+
+(defn handle-message
+  "Dispatch one message received inside the storage isolate, replying on
+   `from-storage`. `[:boot]` opens LMDB, reconstructs the db, keeps its :ordered
+   tree and replies `[:boot db]`; `[:sync ranges]` replies `[:sync-response ...]`;
+   `[:reconcile puts deletes]` applies the diff to LMDB and the tree."
+  [^isolate/SendPort from-storage message]
+  (case (first message)
+    :boot
+    (let [boot-db (await (open db-dir))]
+      (reset! disk-ordered (:ordered boot-db))
+      (.send from-storage [:boot boot-db]))
+
+    :sync
+    (let [[_ ranges] message]
+      (.send from-storage [:sync-response (negentropy/respond @disk-ordered ranges)]))
+
+    :reconcile
+    (let [[_ puts delete-keys] message]
+      (swap! disk-ordered
+             (fn [tree]
+               (as-> tree tree
+                 (reduce dissoc tree delete-keys)
+                 (reduce (fn [t [k v]] (assoc t k v)) tree puts))))
+      (await (apply-reconciliation! puts delete-keys)))
+
+    (println (str "storage isolate: unknown message " (first message)))))
+
+;; ── Main side: coalescing sync driver ─────────────────────────────────────────
+
+;; Coalescing state for persist-to-disk!. While a sync is running, further calls
+;; only set pending?, so exactly one trailing run fires afterward against the
+;; latest db.
+(defonce ^:private persist-syncing? (atom false))
+(defonce ^:private persist-pending? (atom false))
+
+(defn persist-to-disk!
+  "Reconcile the current db's :ordered to the storage isolate's LMDB over the
+   negentropy protocol. `ports` has :to-storage (SendPort) and :from-storage (the
+   broadcast response stream). Coalesced: overlapping calls collapse to one trailing
+   run against the latest db, so they never queue or race."
+  [ports db-conn]
+  (if @persist-syncing?
+    (reset! persist-pending? true)
+    (letfn [(run-sync! [ordered]
+              (let [^isolate/SendPort to-storage (:to-storage ports)
+                    responses (:from-storage ports)]
+                (loop [ranges (negentropy/initial-ranges ordered) only-ours [] only-theirs []]
+                  (if (empty? ranges)
+                    (.send to-storage [:reconcile only-ours (mapv first only-theirs)])
+                    (do (.send to-storage [:sync ranges])
+                        (let [[_ sub-ranges] (await (.firstWhere responses (fn [m] (= (first m) :sync-response))))
+                              {next-ranges :next-ranges
+                               new-ours :only-ours
+                               new-theirs :only-theirs} (negentropy/process-response ordered sub-ranges)]
+                          (recur next-ranges (into only-ours new-ours) (into only-theirs new-theirs)))))))
+              nil)]
+      (reset! persist-syncing? true)
+      (reset! persist-pending? false)
+      (-> (run-sync! (:ordered @db-conn))
+          (.then (fn [_]
+                   (reset! persist-syncing? false)
+                   (when @persist-pending? (persist-to-disk! ports db-conn))))
+          (.catchError (fn [e]
+                         (reset! persist-syncing? false)
+                         (println (str "persist-to-disk! failed: " e)))))))
+  nil)

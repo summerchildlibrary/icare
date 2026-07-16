@@ -1,6 +1,6 @@
 (ns datamigo.storage
   "Per-namespace (per-pubkey) persistence for the sync server. Each namespace is an
-   aztree keyed [timestamp entity] -> {entity {attribute value}}, mirroring the
+   aztree keyed timestamp -> {entity {attribute value}}, mirroring the
    client's :ordered structure so the shared icare.negentropy protocol reconciles
    them directly.
 
@@ -21,7 +21,7 @@
 ;; ── LMDB ──────────────────────────────────────────────────────────────────────
 ;;
 ;; Key layout, all keys prefixed by the 32 raw pubkey bytes of the namespace:
-;;   [pubkey 32B][(pr-str [timestamp entity]) utf-8]  ->  (pr-str {entity attmap})
+;;   [pubkey 32B][(pr-str timestamp) utf-8]  ->  (pr-str {entity attmap})
 ;;
 ;; The pubkey prefix keeps each namespace's records contiguous, so loading a
 ;; namespace is a single prefix range scan.
@@ -46,7 +46,7 @@
     (.put buf pubkey-bytes) (.flip buf) buf))
 
 (defn- record-key->ordered-key
-  "Read the [timestamp entity] key back from a stored record key, skipping the
+  "Read the timestamp key back from a stored record key, skipping the
    32-byte pubkey prefix."
   [^ByteBuffer key]
   (let [suffix (byte-array (- (.remaining key) 32))

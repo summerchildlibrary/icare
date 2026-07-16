@@ -155,10 +155,13 @@
     (swap! db-conn assoc friend-public-key-hex updated)
     nil))
 
+(def ^:private watch-retry-delay (Duration .seconds 5))
+
 (defn ^Future watch-friends-loop!
   "Run for the life of the app: pull every friend once, then long-poll /watch. On
    each poke, pull just the friend that changed; on timeout, simply re-poll. Errors
-   are logged and the loop continues (the next pull re-reconciles any gap)."
+   (e.g. the server being down) are logged and retried after a delay so a failing
+   server doesn't spin; the next successful pull re-reconciles any gap."
   [db-conn friend-public-key-hexes]
   (doseq [friend friend-public-key-hexes]
     (try (await (pull-friend! db-conn friend))
@@ -169,5 +172,6 @@
         (when poked
           (await (pull-friend! db-conn poked))))
       (catch Exception e
-        (prn "watch/pull error:" e)))
+        (prn "watch/pull error:" e)
+        (await (Future.delayed watch-retry-delay))))
     (recur)))

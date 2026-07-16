@@ -11,7 +11,6 @@
             [icare.ui.screens.pages.queridos.shared :refer [home-icon-asset home-icon-title animated-blur animated-fade debug-border ctx->coords]]
             [icare.uuid :refer [uuid-generator]]
             [icare.datafriend :as df]
-            [icare.pose :as pose]
             [icare.ui.physics :as physics]
             [cljd.flutter :as f]))
 
@@ -19,7 +18,7 @@
   (let [config (get-in db [:eav :global/config])
         user-pub-key (:config/user-pub-key config)
         animated-assets (:config/animated-assets config)
-        home-count (count (df/get-entities db {:attribute :pose/canvas :value :home}))]
+        home-count (count (df/get-entities db {:attribute :position/canvas :value :home}))]
     {:ui-type ::add-querido
      :id "home-add-querido"
      :paste-content user-pub-key
@@ -35,11 +34,11 @@
                                                                      :querido/asset (get animated-assets (mod home-count (count animated-assets)))
                                                                      :querido/pub-key pubkey
                                                                      :querido/task-order []}
-                                                                    (pose/pose-attrs :home spawn-x spawn-y))}})
+                                                                    (df/position-attributes :home spawn-x spawn-y))}})
                             (render!)))))}))
 
 (defn icon [db expanded-querido-id [querido-id querido]]
-  (let [{:keys [querido/name querido/asset pose/x pose/y]} querido
+  (let [{:keys [querido/name querido/asset position/x position/y]} querido
         is-expanded? (= querido-id expanded-querido-id)]
       {:ui-type ::icon
        :key querido-id
@@ -58,7 +57,7 @@
 (defn state->ast [db]
   (let [config (get-in db [:eav :global/config])
         expanded-querido-id (:config/expanded-querido config)
-        home-ids (sort (df/get-entities db {:attribute :pose/canvas :value :home}))
+        home-ids (sort (df/get-entities db {:attribute :position/canvas :value :home}))
         all-queridos (mapv (fn [querido-id] [querido-id (get-in db [:eav querido-id])]) home-ids)
         physics-config (into {} (map (fn [[k v]] [(keyword (name k)) v])) (get-in db [:eav :global/physics]))]
     {:id "home-base"
@@ -79,7 +78,7 @@
                           (let [{:keys [transact! render!]} side-effects]
                             (transact! {'add (into {}
                                                    (map (fn [[querido-id [x y]]]
-                                                          [querido-id (pose/pose-attrs :home x y)]))
+                                                          [querido-id (df/position-attributes :home x y)]))
                                                    id->xy)})
                             (render!))))
      :icons (mapv (partial icon db expanded-querido-id) all-queridos)}))
