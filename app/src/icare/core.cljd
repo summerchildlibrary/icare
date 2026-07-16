@@ -12,6 +12,7 @@
             [icare.datafriend :as df]
             [icare.pose :as pose]
             [icare.storage-isolate :as storage-isolate]
+            [icare.network :as net]
             [icare.uuid :refer [uuid-generator]]
             [icare.ui :as ui]))
 
@@ -164,16 +165,28 @@
                           db (if (or (seq add-map) (seq retract-map)) (df/transact db {'add add-map 'retract retract-map}) db)
                           device-token (await (get-device-token-future))
                           _ (prn "Device token:" device-token)
-                          _ (when device-token (df/transact db {'add {:global/config {:config/device-token device-token}}}))]
-                      {:db-conn (atom db) :ports ports*})]
+                          _ (when device-token (df/transact db {'add {:global/config {:config/device-token device-token}}}))
+                          conn (atom db)
+                          ;; start watching friends: pull each once, then long-poll
+                          ;; for pokes and pull the friend that changed. Friend dbs
+                          ;; live in the conn map keyed by their pubkey-hex.
+                          friend-pub-keys (->> (df/query @conn {'e {:querido/pub-key 'p}})
+                                               vals
+                                               (map :querido/pub-key)
+                                               (remove nil?)
+                                               distinct
+                                               vec)
+                          _ (net/watch-friends-loop! conn friend-pub-keys)]
+                      {:db-conn conn :ports ports* :public-key public-key :private-key private-key})]
     :bypass (when-not booted
               (f/widget
                (m/SafeArea)
                (m/Text "Loading...")))
-    :let [{:keys [db-conn ports]} booted
+    :let [{:keys [db-conn ports public-key private-key]} booted
           side-effects {:transact! (fn [diff] (swap! db-conn df/transact diff))
                         :render! (fn [] (ui/render-ui! @db-conn))
-                        :persist! (fn [] (storage-isolate/reconcile! ports db-conn))}]
+                        :persist! (fn [] (storage-isolate/reconcile! ports db-conn))
+                        :sync-to-server! (fn [] (net/sync-to-server! db-conn public-key private-key))}]
     (m/SafeArea ;;we handle the top and bottom manually for edge to edge rendering
      .bottom false
      .top false)

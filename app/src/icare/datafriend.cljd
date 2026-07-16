@@ -24,6 +24,56 @@
 
 (def proprietary-nothing 'THIS-VALUE-REPRESENTS-NOTHING)
 
+(defn- clear-entity-indexes
+  "Remove all of an entity's attributes from the :eav/:aev/:ave query indexes."
+  [db entity]
+  (reduce (fn [db [attribute value]]
+            (-> db
+                (update-in [:eav entity] dissoc attribute)
+                (update-in [:aev attribute] dissoc entity)
+                (update-in [:ave attribute value] dissoc entity)))
+          db
+          (get-in db [:eav entity])))
+
+(defn apply-records
+  "Apply a set of authoritative [timestamp entity] records to `db`, preserving the
+   given timestamps rather than minting new ones — the shape produced by a
+   negentropy pull and by an LMDB reload. `puts` is a seq of [[timestamp entity]
+   {entity attmap}] to add or replace; `delete-keys` is a seq of [timestamp entity]
+   keys whose entities are removed. All five structures (:eav/:aev/:ave, :ordered,
+   :e->key) are updated. Unlike transact, this does not re-timestamp, so a friend's
+   or disk's :ordered keys stay identical to their source and later syncs stay
+   incremental."
+  [db puts delete-keys]
+  (let [;; deletes: drop each entity's indexes and its ordered/e->key entry
+        db (reduce (fn [db [_timestamp entity :as ordered-key]]
+                     (-> db
+                         (clear-entity-indexes entity)
+                         (update :eav dissoc entity)
+                         (update :ordered dissoc ordered-key)
+                         (update :e->key dissoc entity)))
+                   db delete-keys)
+        ;; puts: replace each entity's indexes and set its ordered/e->key verbatim
+        db (reduce (fn [db [[timestamp entity :as ordered-key] entity-map]]
+                     (let [attmap (get entity-map entity)
+                           ;; an entity may already exist under a different (older) key;
+                           ;; clear its old indexes and old ordered entry first
+                           old-key (get-in db [:e->key entity])
+                           db (cond-> (clear-entity-indexes db entity)
+                                old-key (update :ordered dissoc old-key))
+                           db (reduce (fn [db [attribute value]]
+                                        (-> db
+                                            (assoc-in [:eav entity attribute] value)
+                                            (assoc-in [:aev attribute entity] value)
+                                            (assoc-in [:ave attribute value entity] nil)))
+                                      db attmap)]
+                       (-> db
+                           (assoc :ordered (assoc (:ordered db) ordered-key entity-map))
+                           (assoc-in [:e->key entity] ordered-key)
+                           (update :next-timestamp max (inc timestamp)))))
+                   db puts)]
+    db))
+
 (defn- sync-ordered-entity
   "Bring the :ordered and :e->key structures in line with an entity's current
    attribute map in :eav. Removes the entity's old :ordered entry (its timestamp

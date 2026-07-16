@@ -23,26 +23,11 @@
     (str (.-path app-dir) "/lmdb-" dir-name)))
 
 (defn- rebuild-indexes
-  "Fold the stored [[timestamp entity] {entity attmap}] records into a full
-   datafriend db, preserving each entity's persisted timestamp and reconstructing
-   the :eav/:aev/:ave query indexes, the :ordered aztree and the :e->key locator.
-   :next-timestamp is seeded past the highest timestamp seen."
+  "Reconstruct a full datafriend db from stored [[timestamp entity] {entity attmap}]
+   records, preserving each entity's persisted timestamp. Just apply-records over an
+   empty db — the records are all adds, no deletes."
   [records]
-  (reduce
-   (fn [db [[timestamp entity :as ordered-key] entity-map]]
-     (let [attmap (get entity-map entity)
-           db (reduce (fn [db [attribute value]]
-                        (-> db
-                            (assoc-in [:eav entity attribute] value)
-                            (assoc-in [:aev attribute entity] value)
-                            (assoc-in [:ave attribute value entity] nil)))
-                      db attmap)]
-       (-> db
-           (assoc :ordered (assoc (:ordered db) ordered-key entity-map))
-           (assoc-in [:e->key entity] ordered-key)
-           (update :next-timestamp max (inc timestamp)))))
-   (df/empty-db)
-   records))
+  (df/apply-records (df/empty-db) records []))
 
 (defn open
   "Initialize the LMDB store at dir-name in the app documents directory, read all
