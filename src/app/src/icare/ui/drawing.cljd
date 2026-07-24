@@ -200,19 +200,27 @@
 
 ;; ── Widget ────────────────────────────────────────────────────────────────────
 
+(def ^:private dot-size 26)
+
+(defn- circle
+  "A plain colored circle. Pass border? true for the ringed white eraser look."
+  [color border?]
+  (m/Container
+   .width dot-size
+   .height dot-size
+   .decoration (m/BoxDecoration
+                .shape m/BoxShape.circle
+                .color color
+                .border (if border? (m/Border.all .color m/Colors.black .width 1.5) nil))))
+
 (defn- dot
-  "A tappable colored circle. Pass :border? true for the white eraser dot."
+  "A tappable colored circle for the corner row."
   [color border? on-tap]
   (m/GestureDetector
    .onTap (fn [] (on-tap) nil)
    .child (m/Container
-           .width 26
-           .height 26
            .margin (m/EdgeInsets.only .left 10)
-           .decoration (m/BoxDecoration
-                        .shape m/BoxShape.circle
-                        .color color
-                        .border (if border? (m/Border.all .color m/Colors.grey .width 1.5) nil)))))
+           .child (circle color border?))))
 
 (defn ast-store->widget [ast-store side-effects]
   (let [get-ast-atom #(get @ast-store "drawing-overlay")
@@ -237,10 +245,12 @@
            handle-start (fn [^m/LongPressStartDetails details]
                           (let [context (current-context)
                                 dot-color (:dot-color @(get-ast-atom))
-                                [nx cy] (content-point (.-globalPosition details) context)]
+                                ^ui/Offset gp (.-globalPosition details)
+                                [nx cy] (content-point gp context)
+                                finger [(.-dx gp) (.-dy gp)]]
                             (if (= dot-color :eraser)
-                              (reset! in-progress {:screen context :erasing? true})
-                              (reset! in-progress {:screen context :color dot-color :points [nx cy]}))))
+                              (reset! in-progress {:screen context :erasing? true :finger finger})
+                              (reset! in-progress {:screen context :color dot-color :points [nx cy] :finger finger}))))
            erase-at! (fn [context ^ui/Offset global-position]
                        (let [offset (scroll-offset (get @scroll-ctrl-atoms context))
                              px (.-dx global-position)
@@ -253,17 +263,20 @@
                            (((:on-erase @(get-ast-atom)) side-effects) hit-ids))))
            handle-move (fn [^m/LongPressMoveUpdateDetails details]
                          (when-let [{:keys [screen erasing?]} @in-progress]
-                           (if erasing?
-                             (erase-at! screen (.-globalPosition details))
-                             (let [[nx cy] (content-point (.-globalPosition details) screen)
-                                   points (:points @in-progress)
-                                   last-x (* (nth points (- (count points) 2)) phone-width)
-                                   last-y (nth points (dec (count points)))
-                                   dx (- (* nx phone-width) last-x)
-                                   dy (- cy last-y)]
-                               ;; downsample: only record a point every ~4px of movement
-                               (when (> (+ (* dx dx) (* dy dy)) 16.0)
-                                 (swap! in-progress update :points conj nx cy))))))
+                           (let [^ui/Offset gp (.-globalPosition details)]
+                             ;; the dot rides under the finger while drawing
+                             (swap! in-progress assoc :finger [(.-dx gp) (.-dy gp)])
+                             (if erasing?
+                               (erase-at! screen gp)
+                               (let [[nx cy] (content-point gp screen)
+                                     points (:points @in-progress)
+                                     last-x (* (nth points (- (count points) 2)) phone-width)
+                                     last-y (nth points (dec (count points)))
+                                     dx (- (* nx phone-width) last-x)
+                                     dy (- cy last-y)]
+                                 ;; downsample: only record a point every ~4px of movement
+                                 (when (> (+ (* dx dx) (* dy dy)) 16.0)
+                                   (swap! in-progress update :points conj nx cy)))))))
            handle-end (fn [_]
                         (when-let [{:keys [screen color points erasing?]} @in-progress]
                           (when (and (not erasing?) (>= (count points) 2))
@@ -308,27 +321,39 @@
          .onLongPressMoveUpdate handle-move
          .onLongPressEnd handle-end)
         (m/SizedBox.expand))
-       ;; the dot + palette, top right
+       ;; the dot: rides under the finger while drawing, otherwise sits top right
+       ;; with the palette fanning out leftward
        (f/widget
-        (m/Positioned .top (+ notch-height 8) .right 16)
-        (f/widget
-         :watch [open? palette-open?
-                 {:keys [dot-color]} (get-ast-atom)]
-         (m/Row .mainAxisSize m/MainAxisSize.min)
-         .children
-         (vec
-          (concat
-           (when open?
-             (concat
-              (for [color-kw palette]
-                (dot (color-of color-kw) false
-                     (fn []
-                       (((:on-set-color @(get-ast-atom)) side-effects) color-kw)
-                       (reset! palette-open? false))))
-              [(dot m/Colors.white true
-                    (fn []
-                      (((:on-set-color @(get-ast-atom)) side-effects) :eraser)
-                      (reset! palette-open? false)))]))
-           [(dot (if (= dot-color :eraser) m/Colors.white (color-of dot-color))
-                 (= dot-color :eraser)
-                 (fn [] (swap! palette-open? not)))]))))]))))
+        :watch [ip in-progress
+                open? palette-open?
+                {:keys [dot-color]} (get-ast-atom)]
+        (if ip
+          (let [[fx fy] (:finger ip)]
+            (f/widget
+             (m/Positioned .left (- fx (/ dot-size 2)) .top (- fy (/ dot-size 2)))
+             (m/IgnorePointer)
+             (circle (if (= dot-color :eraser) m/Colors.white (color-of dot-color))
+                     (= dot-color :eraser))))
+          (f/widget
+           (m/Positioned .top (+ notch-height 8) .right 16)
+           (m/Row .mainAxisSize m/MainAxisSize.min)
+           .children
+           (vec
+            (concat
+             (when open?
+               (concat
+                ;; the selected color is already on the main dot, so don't repeat it
+                (for [color-kw palette
+                      :when (not= color-kw dot-color)]
+                  (dot (color-of color-kw) false
+                       (fn []
+                         (((:on-set-color @(get-ast-atom)) side-effects) color-kw)
+                         (reset! palette-open? false))))
+                (when (not= dot-color :eraser)
+                  [(dot m/Colors.white true
+                        (fn []
+                          (((:on-set-color @(get-ast-atom)) side-effects) :eraser)
+                          (reset! palette-open? false)))])))
+             [(dot (if (= dot-color :eraser) m/Colors.white (color-of dot-color))
+                   (= dot-color :eraser)
+                   (fn [] (swap! palette-open? not)))])))))]))))

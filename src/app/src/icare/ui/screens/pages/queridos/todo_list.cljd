@@ -11,7 +11,7 @@
                                                             animated-sliver-fade animated-fade]]
             [cljd.flutter :as f]))
 
-(defn task [db querido-id [task-id task]]
+(defn task [db querido-id index [task-id task]]
   (let [{:keys [task/title task/completed task/is-add-task?]} task
         ;; a friend's task lives in their (read-only) namespace, so our "like" is a
         ;; separate entity in our OWN db keyed by the task's uuid, synced under our
@@ -26,6 +26,7 @@
        :id (str "querido-task-" task-id)
        :title title
        :liked liked
+       :index index
        :on-like (fn [side-effects]
                   (fn []
                     (let [{:keys [transact! render!]} side-effects]
@@ -100,7 +101,7 @@
                     :asset-list animated-assets}
      :asset asset
      :title name
-     :tasks (mapv (partial task db querido-id) all-tasks)}))
+     :tasks (vec (map-indexed (partial task db querido-id) all-tasks))}))
 
 (def task-padding {:left 30 :bottom 0})
 
@@ -207,12 +208,14 @@
        ::task
        (f/widget
         :key key
-        :watch [{:keys [completed liked title]} (get-ast-atom)]
+        :watch [{:keys [completed liked title index]} (get-ast-atom)]
         :padding task-padding
         m/Row
         .children
         [(f/widget
           :padding {:top 2}
+          ;; the checkbox doubles as the reorder handle (immediate drag, like icons)
+          (m/ReorderableDragStartListener .index index)
           (m/IconButton
            .icon (m/Icon (if completed
                            m/Icons.check_box

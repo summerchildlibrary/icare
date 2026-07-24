@@ -5,13 +5,14 @@
             [icare.ui.drawing :as drawing]
             [cljd.flutter :as f]))
 
-(defn task [db [task-id task]]
+(defn task [db index [task-id task]]
   (let [{:keys [task/title task/completed task/is-add-task?]} task
         todo-list-order (get-in db [:eav :global/config :config/todo-list-order])]
     (if is-add-task?
       {:ui-type ::add-task-task
        :key task-id
        :id task-id
+       :index index
        :on-add-task (fn [side-effects]
                       (fn [title]
                         (when-not (empty? title)
@@ -36,6 +37,7 @@
        :key task-id
        :id (str "task-" task-id)
        :title title
+       :index index
        :on-complete (fn [side-effects]
                       (fn []
                         (let [{:keys [transact! render!]} side-effects]
@@ -73,7 +75,7 @@
                                                                    (subvec tasks-without-moved adjusted-new-idx)))]
                                (transact! {'add {:global/config {:config/todo-list-order reordered-tasks}}})
                                (render!)))))
-     :tasks (mapv (partial task db) all-tasks)}))
+     :tasks (vec (map-indexed (partial task db) all-tasks))}))
 
 (def task-padding {:left 40 :bottom 30})
 
@@ -109,6 +111,9 @@
            .scrollController scroll-controller)
           (m/ReorderableListView
            .physics (m/AlwaysScrollableScrollPhysics)
+           ;; no long-press-to-reorder: it belongs to drawing now. Reorder by
+           ;; grabbing the checkbox (immediate drag), like dragging home icons.
+           .buildDefaultDragHandles false
            .children (mapv recursive-call tasks)
            ;;callbacks are fetched from the node atom at event time, a build-time :let would capture a closure over stale db data
            .onReorder (fn [old-idx new-idx]
@@ -120,13 +125,15 @@
        ::task
        (f/widget
         :key key
-        :watch [{:keys [title completed subitems]} (get-ast-atom)]
+        :watch [{:keys [title completed subitems index]} (get-ast-atom)]
         :managed [text-controller (m/TextEditingController .text title)]
         :padding task-padding
         m/Row
         .children
         [(f/widget
           :padding {:top 2}
+          ;; the checkbox doubles as the reorder handle: tap toggles, drag moves
+          (m/ReorderableDragStartListener .index index)
           (m/IconButton
            .icon (m/Icon (if completed
                            m/Icons.check_box
@@ -151,11 +158,15 @@
        ::add-task-task
        (f/widget
         :key key
+        :watch [{:keys [index]} (get-ast-atom)]
         :padding task-padding
         (m/Row)
         .children
         [(f/widget
           :padding {:top 2}
+          ;; draggable like the task checkboxes: where this row sits decides
+          ;; where newly added tasks are inserted
+          (m/ReorderableDragStartListener .index index)
           (m/IconButton
            .icon (m/Icon m/Icons.check_box_outline_blank
                          .size 26
