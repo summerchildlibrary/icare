@@ -18,6 +18,7 @@
    list-owner's pubkey for an expanded querido list."
   (:require ["package:flutter/material.dart" :as m]
             ["dart:ui" :as ui]
+            ["package:haptic_feedback/haptic_feedback.dart" :as haptics]
             [icare.ui.screens.pages.shared :refer [get-phone-measurements]]
             [cljd.flutter :as f]))
 
@@ -200,7 +201,7 @@
 
 ;; ── Widget ────────────────────────────────────────────────────────────────────
 
-(def ^:private dot-size 26)
+(def ^:private dot-size 30)
 
 (defn- circle
   "A plain colored circle. Pass border? true for the ringed white eraser look."
@@ -224,8 +225,11 @@
 
 (defn ast-store->widget [ast-store side-effects]
   (let [get-ast-atom #(get @ast-store "drawing-overlay")
-        ;; persist across renders: the stroke being drawn and the palette state
+        ;; persist across renders: the stroke being drawn, the dot being carried,
+        ;; where the dot was last dropped, and the palette state
         in-progress (atom nil)
+        carry-pos (atom nil)
+        dot-anchor (atom nil)
         palette-open? (atom false)]
     (f/widget
      :context ctx
@@ -233,16 +237,53 @@
      ;; watching the store itself also covers hot-reload before the first render
      :watch [store ast-store]
      :when (get store "drawing-overlay")
-     :let [{:keys [notch-height phone-width]} (get-phone-measurements ctx)
+     :let [{:keys [notch-height phone-width phone-height]} (get-phone-measurements ctx)
+           half (/ dot-size 2)
            ;; where the finger is, in content space, for the active context
            current-context (fn []
                              (or (:expanded-context @(get-ast-atom))
                                  (if (zero? @page-index) :home :my-list)))
+           context-x-offset (fn [context page-pos]
+                              (case context
+                                :home    (* (- 0.0 page-pos) phone-width)
+                                :my-list (* (- 1.0 page-pos) phone-width)
+                                0.0))
            content-point (fn [^ui/Offset global-position context]
                            (let [offset (scroll-offset (get @scroll-ctrl-atoms context))]
                              [(/ (.-dx global-position) phone-width)
                               (+ (.-dy global-position) offset)]))
+           ;; drop the dot: remember where it was left, in the content space of
+           ;; the screen it was dropped on, so it scrolls/swipes with the content
+           set-anchor! (fn [sx sy]
+                         (let [context (current-context)
+                               page-pos (page-position (page-controller) @page-index)
+                               y-off (scroll-offset (get @scroll-ctrl-atoms context))]
+                           (reset! dot-anchor {:context context
+                                               :nx (/ (- sx (context-x-offset context page-pos)) phone-width)
+                                               :cy (+ sy y-off)})))
+           ;; parked display: the anchor keeps its content position, but the
+           ;; shown dot clamps to the screen so it can never be lost offscreen
+           clamp-center (fn [[x y]]
+                          [(min (max x (+ 6.0 half)) (- phone-width 6.0 half))
+                           (min (max y (+ notch-height 6.0 half)) (- phone-height 24.0 half))])
+           anchor->screen (fn [{:keys [context nx cy]} page-pos]
+                            [(+ (* nx phone-width) (context-x-offset context page-pos))
+                             (- cy (scroll-offset (get @scroll-ctrl-atoms context)))])
+           carry-start (fn [^m/DragStartDetails details]
+                         (reset! palette-open? false)
+                         (let [^ui/Offset gp (.-globalPosition details)]
+                           (reset! carry-pos [(.-dx gp) (.-dy gp)])))
+           carry-move (fn [^m/DragUpdateDetails details]
+                        (let [^ui/Offset gp (.-globalPosition details)]
+                          (reset! carry-pos [(.-dx gp) (.-dy gp)])))
+           carry-end (fn [_]
+                       (when-let [[x y] @carry-pos]
+                         (set-anchor! x y))
+                       (reset! carry-pos nil))
            handle-start (fn [^m/LongPressStartDetails details]
+                          (reset! palette-open? false)
+                          ;; the pen touches down — let the finger feel it
+                          (haptics/Haptics.vibrate haptics/HapticsType.medium)
                           (let [context (current-context)
                                 dot-color (:dot-color @(get-ast-atom))
                                 ^ui/Offset gp (.-globalPosition details)
@@ -278,9 +319,12 @@
                                  (when (> (+ (* dx dx) (* dy dy)) 16.0)
                                    (swap! in-progress update :points conj nx cy)))))))
            handle-end (fn [_]
-                        (when-let [{:keys [screen color points erasing?]} @in-progress]
+                        (when-let [{:keys [screen color points erasing? finger]} @in-progress]
                           (when (and (not erasing?) (>= (count points) 2))
-                            (((:on-add-stroke @(get-ast-atom)) side-effects) screen color points)))
+                            (((:on-add-stroke @(get-ast-atom)) side-effects) screen color points))
+                          ;; the pen stays where the stroke ended
+                          (when-let [[fx fy] finger]
+                            (set-anchor! fx fy)))
                         (reset! in-progress nil))]
      (m/Stack
       .children
@@ -312,48 +356,74 @@
          (m/IgnorePointer)
          (m/SizedBox.expand)
          (m/CustomPaint .painter (make-painter layers phone-width))))
-       ;; gesture layer: long-press claims the pointer for drawing/erasing,
-       ;; everything else falls through to the app beneath
+       ;; the pen: a single always-mounted dot you can carry (drag), draw with
+       ;; (long-press then move), or open the palette from (tap). Its position is
+       ;; state-driven so active gestures survive rebuilds; when parked, it sits
+       ;; at its content anchor clamped to the screen edges.
        (f/widget
-        (m/GestureDetector
-         .behavior m/HitTestBehavior.translucent
-         .onLongPressStart handle-start
-         .onLongPressMoveUpdate handle-move
-         .onLongPressEnd handle-end)
-        (m/SizedBox.expand))
-       ;; the dot: rides under the finger while drawing, otherwise sits top right
-       ;; with the palette fanning out leftward
-       (f/widget
-        :watch [ip in-progress
-                open? palette-open?
-                {:keys [dot-color]} (get-ast-atom)]
-        (if ip
-          (let [[fx fy] (:finger ip)]
+        :watch [{:keys [dot-color expanded-context]} (get-ast-atom)
+                page-idx page-index]
+        :let [page-ctrl (page-controller)
+              mylist-ctrl (scroll-controller-for :my-list)
+              exp-ctrl (when expanded-context (scroll-controller-for expanded-context))]
+        (f/widget
+         :watch [ip in-progress
+                 carry carry-pos
+                 anchor dot-anchor
+                 open? palette-open?
+                 _ (m/Listenable.merge [page-ctrl mylist-ctrl exp-ctrl])]
+         :let [page-pos (page-position page-ctrl page-idx)
+               [cx cy] (cond
+                         (some? carry) carry
+                         (some? (:finger ip)) (:finger ip)
+                         (some? anchor) (clamp-center (anchor->screen anchor page-pos))
+                         :else [(- phone-width 16.0 half) (+ notch-height 8.0 half)])
+               left (- cx half)
+               top (- cy half)
+               idle? (and (nil? carry) (nil? ip))
+               palette-dots (vec
+                             (concat
+                              ;; the selected color is already on the dot itself
+                              (for [color-kw palette
+                                    :when (not= color-kw dot-color)]
+                                (dot (color-of color-kw) false
+                                     (fn []
+                                       (((:on-set-color @(get-ast-atom)) side-effects) color-kw)
+                                       (reset! palette-open? false))))
+                              (when (not= dot-color :eraser)
+                                [(dot m/Colors.white true
+                                      (fn []
+                                        (((:on-set-color @(get-ast-atom)) side-effects) :eraser)
+                                        (reset! palette-open? false)))])))
+               ;; each palette dot is dot-size wide plus its 10px left margin
+               palette-width (* (+ dot-size 10.0) (count palette-dots))
+               fan-left? (> cx (/ phone-width 2))]
+         (m/SizedBox.expand)
+         (m/Stack)
+         .children
+         [;; palette slot: kept in the child list either way so the dot below
+          ;; never changes position in the tree mid-gesture
+          (if (and open? idle?)
             (f/widget
-             (m/Positioned .left (- fx (/ dot-size 2)) .top (- fy (/ dot-size 2)))
-             (m/IgnorePointer)
-             (circle (if (= dot-color :eraser) m/Colors.white (color-of dot-color))
-                     (= dot-color :eraser))))
+             (m/Positioned .left (if fan-left?
+                                   (- left 6.0 palette-width)
+                                   (+ left dot-size 6.0))
+                           .top top)
+             (m/Row .mainAxisSize m/MainAxisSize.min)
+             .children palette-dots)
+            (f/widget
+             (m/Positioned .left 0.0 .top 0.0)
+             (m/SizedBox)))
           (f/widget
-           (m/Positioned .top (+ notch-height 8) .right 16)
-           (m/Row .mainAxisSize m/MainAxisSize.min)
-           .children
-           (vec
-            (concat
-             (when open?
-               (concat
-                ;; the selected color is already on the main dot, so don't repeat it
-                (for [color-kw palette
-                      :when (not= color-kw dot-color)]
-                  (dot (color-of color-kw) false
-                       (fn []
-                         (((:on-set-color @(get-ast-atom)) side-effects) color-kw)
-                         (reset! palette-open? false))))
-                (when (not= dot-color :eraser)
-                  [(dot m/Colors.white true
-                        (fn []
-                          (((:on-set-color @(get-ast-atom)) side-effects) :eraser)
-                          (reset! palette-open? false)))])))
-             [(dot (if (= dot-color :eraser) m/Colors.white (color-of dot-color))
-                   (= dot-color :eraser)
-                   (fn [] (swap! palette-open? not)))])))))]))))
+           (m/Positioned .left left .top top)
+           (m/GestureDetector
+            .behavior m/HitTestBehavior.opaque
+            .onTap (fn [] (swap! palette-open? not) nil)
+            .onPanStart carry-start
+            .onPanUpdate carry-move
+            .onPanEnd carry-end
+            .onLongPressStart handle-start
+            .onLongPressMoveUpdate handle-move
+            .onLongPressEnd handle-end)
+           (circle (if (= dot-color :eraser) m/Colors.white (color-of dot-color))
+                   (= dot-color :eraser)))]))]))))
