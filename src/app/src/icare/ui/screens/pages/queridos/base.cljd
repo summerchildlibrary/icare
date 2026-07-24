@@ -9,7 +9,6 @@
              :rename {ast-store->widget expanded-icon->widget}]
             [icare.ui.screens.pages.shared :refer [get-phone-measurements autoscroll-away-from-keyboard]]
             [icare.ui.screens.pages.queridos.shared :refer [home-icon-asset home-icon-title animated-blur animated-fade debug-border ctx->coords]]
-            [icare.uuid :refer [uuid-generator]]
             [icare.datafriend :as df]
             [icare.ui.physics :as physics]
             [cljd.flutter :as f]))
@@ -25,8 +24,8 @@
      :on-add-pubkey (fn [side-effects]
                       (fn [pubkey]
                         (when-not (empty? pubkey)
-                          (let [{:keys [transact! render!]} side-effects
-                                new-querido-id (uuid-generator)
+                          (let [{:keys [transact! render! make-uuid]} side-effects
+                                new-querido-id (make-uuid)
                                 ;;spawn near the middle of the canvas and let repulsion shove everyone into place
                                 spawn-x (+ 150.0 (* 40.0 (mod home-count 4)))
                                 spawn-y (+ 320.0 (* 40.0 (mod home-count 3)))]

@@ -1,7 +1,7 @@
 (ns datamigo.storage
   "Per-namespace (per-pubkey) persistence for the sync server. Each namespace is an
    aztree keyed timestamp -> {entity {attribute value}}, mirroring the
-   client's :ordered structure so the shared icare.negentropy protocol reconciles
+   client's :ordered structure so the shared negentropy protocol reconciles
    them directly.
 
    In-memory {pubkey-hex -> aztree} is the serving truth, reconstructed from LMDB
@@ -10,7 +10,7 @@
    blocks on a write and write transactions stay on one stable OS thread (LMDB
    requires thread-stable write txns). A crash loses at most the un-drained tail of
    the mailbox, which the next negentropy sync re-reconciles."
-  (:require [icare.aztree :as aztree]
+  (:require [aztree :as aztree]
             [clojure.edn :as edn])
   (:import (java.util.concurrent Executors ExecutorService)
            (java.util.concurrent.locks ReentrantLock)

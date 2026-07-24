@@ -15,7 +15,7 @@
    the PULL path (reading a friend's namespace) the client applies the diff locally
    and never commits."
   (:require [datamigo.storage :as storage]
-            [icare.negentropy :as negentropy]
+            [negentropy :as negentropy]
             [clojure.edn :as edn])
   (:import (com.sun.net.httpserver HttpServer HttpHandler HttpExchange)
            (fr.acinq.secp256k1 Secp256k1)

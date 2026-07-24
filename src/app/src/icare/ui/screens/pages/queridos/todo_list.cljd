@@ -4,41 +4,22 @@
             ["package:reorderable_grid/reorderable_grid.dart" :as reorderable-grid]
             ["dart:ui" :as ui]
             ["dart:math" :refer [sqrt]]
+            [icare.datafriend :as df]
             [icare.ui.screens.pages.shared :refer [hsv get-phone-measurements autoscroll-away-from-keyboard]]
             [icare.ui.screens.pages.queridos.shared :refer [home-icon-asset home-icon-title
-                                                            animated-sliver-fade animated-fade
-                                                            lerp-polar-offsets ctx->coords]]
-            [icare.uuid :refer [uuid-generator]]
+                                                            animated-sliver-fade animated-fade]]
             [cljd.flutter :as f]))
 
 (defn task [db querido-id [task-id task]]
-  (let [{:keys [task/title task/completed task/liked task/is-add-task?]} task
-        task-order (get-in db [:eav querido-id :querido/task-order])]
+  (let [{:keys [task/title task/completed task/is-add-task?]} task
+        ;; a friend's task lives in their (read-only) namespace, so our "like" is a
+        ;; separate entity in our OWN db keyed by the task's uuid, synced under our
+        ;; namespace. Read the like from our own :eav, not the friend's task.
+        liked (get-in db [:eav task-id :like/liked] false)]
     (if is-add-task?
       {:ui-type ::add-task-task
        :key task-id
-       :id (str "add-task-task-" querido-id)
-       :on-add-task (fn [side-effects]
-                      (fn [title]
-                        (when-not (empty? title)
-                          (let [{:keys [transact! render!]} side-effects
-                                new-task-id (uuid-generator)
-                                new-task-order (reduce (fn [new-order task-id]
-                                                         (cond
-                                                           (and (empty? new-order) (> (count task-order) 1) (= task-id :add-task-task))
-                                                           (conj new-order task-id new-task-id)
-
-                                                           (= task-id :add-task-task) (conj new-order new-task-id task-id)
-
-                                                           :else (conj new-order task-id)))
-                                                       []
-                                                       task-order)]
-                            (transact! {'add {new-task-id {:task/title title
-                                                           :task/completed false
-                                                           :task/liked false
-                                                           :task/subitems []}
-                                              querido-id {:querido/task-order new-task-order}}})
-                            (render!)))))}
+       :id (str "add-task-task-" querido-id)}
       {:ui-type ::task
        :key task-id
        :id (str "querido-task-" task-id)
@@ -47,14 +28,18 @@
        :on-like (fn [side-effects]
                   (fn []
                     (let [{:keys [transact! render!]} side-effects]
-                      (transact! {'add {task-id {:task/liked (not liked)}}})
+                      ;; write the like into our own namespace (transact! also syncs it up)
+                      (transact! {'add {task-id {:like/liked (not liked)}}})
                       (render!))))
        :completed completed})))
 
 (defn ui-list [db querido-id]
-  (let [{:keys [querido/name querido/asset querido/task-order]} (get-in db [:eav querido-id])
+  (let [{:keys [querido/name querido/asset querido/pub-key]} (-> (df/query db {querido-id {:querido/pub-key 'pk :querido/name 'n :querido/asset 'a}})
+                                                                 vals
+                                                                 first)
+        task-order (get-in db [pub-key :eav :global/config :config/todo-list-order])
         animated-assets (get-in db [:eav :global/config :config/animated-assets])
-        all-tasks       (mapv (fn [task-id] [task-id (get-in db [:eav task-id])]) task-order)]
+        all-tasks       (mapv (fn [task-id] [task-id (get-in db [pub-key :eav task-id])]) task-order)]
     {:id (str "list-base-" querido-id)
      :ui-type ::list
      :on-reorder-tasks (fn [side-effects]
@@ -115,42 +100,10 @@
      :title name
      :tasks (mapv (partial task db querido-id) all-tasks)}))
 
-(defn icon-repulsion [ctx image-coords text-coords]
-  (if-let [{:keys [position size]} (ctx->coords ctx)]
-    (let [clearance   20.0
-          ;; combined icon+title bounding box
-          i-left      (min (.-dx (:position image-coords))
-                           (.-dx (:position text-coords)))
-          i-right     (max (+ (.-dx (:position image-coords)) (.-width (:size image-coords)))
-                           (+ (.-dx (:position text-coords)) (.-width (:size text-coords))))
-          i-top       (.-dy (:position image-coords))
-          i-bottom    (+ (.-dy (:position text-coords)) (.-height (:size text-coords)))
-          i-cx        (/ (+ i-left i-right) 2)
-          i-cy        (/ (+ i-top i-bottom) 2)
-          i-half-h    (/ (- i-bottom i-top) 2)
-          ;; item
-          item-left   (.-dx position)
-          item-right  (+ item-left (.-width size))
-          item-cy     (+ (.-dy position) (/ (.-height size) 2))
-          item-half-h (/ (.-height size) 2)
-          item-cx     (+ item-left (/ (.-width size) 2))
-          ;; vertical proximity: fades push as item moves above/below icon
-          dy          (- item-cy i-cy)
-          v-range     (+ i-half-h item-half-h clearance)
-          v-strength  (* 0.5 (max 0.0 (- 1 (/ (if (< dy 0) (- dy) dy) v-range))))
-          ;; x push: move item away from icon horizontally to clear icon bbox
-          push-x      (if (>= item-cx i-cx)
-                        (* v-strength (max 0.0 (- (+ i-right clearance) item-left)))
-                        (* v-strength (- (max 0.0 (- item-right (- i-left clearance))))))]
-      {:push-x push-x
-       :push-y 0.0
-       :scale  (- 1.0 (* v-strength 0.5))})
-    {:push-x 0.0 :push-y 0.0 :scale 1.0}))
-
 (def task-padding {:left 30 :bottom 0})
 
 (def ^m/TextStyle task-text-style (m/TextStyle
-                                   .color m/Colors.grey
+                                   .color m/Colors.black
                                    .fontFamily "Inter"
                                    .fontWeight m/FontWeight.normal
                                    .fontSize 20))
@@ -173,7 +126,7 @@
         :get [:icon-transition-controller :expanded-icon-atom]
         :let [{:keys [title]} @(get-ast-atom)
               {:keys [notch-height phone-height phone-width]} (get-phone-measurements ctx)
-              content-start (/ (+ notch-height 150) phone-height)
+              content-start (/ (+ notch-height 50) phone-height)
               {:keys [image-coords text-coords]} @expanded-icon-atom
               image-destination ^m/Offset (:position image-coords)
               image-size        ^m/Size   (:size image-coords)
@@ -235,21 +188,22 @@
                       .child (m/SizedBox .height 400))])
           (m/Transform.translate
            .offset title-destination
-           .child title)
+           .child (f/widget
+                   ;; fade the icon+title toward grey (1.0 -> 0.4) as the list expands
+                   :watch [_ icon-transition-controller]
+                   (m/Opacity .opacity (- 1.0 (* 0.6 (.-value t))))
+                   title))
           (m/Transform.translate
            .offset image-destination
-           .child image)]))
+           .child (f/widget
+                   :watch [_ icon-transition-controller]
+                   (m/Opacity .opacity (- 1.0 (* 0.6 (.-value t))))
+                   image))]))
 
        ::task
        (f/widget
         :key key
-        :get [:scroll-controller :image-coords :text-coords]
-        :context ctx
-        :watch [_ scroll-controller
-                {:keys [completed liked title]} (get-ast-atom)]
-        :let [{:keys [push-x scale]} (icon-repulsion ctx image-coords text-coords)]
-        (m/Transform.translate .offset (m/Offset push-x 0.0))
-        (m/Transform.scale .scale scale .alignment m/Alignment.center)
+        :watch [{:keys [completed liked title]} (get-ast-atom)]
         :padding task-padding
         m/Row
         .children
@@ -260,29 +214,23 @@
                            m/Icons.check_box
                            m/Icons.check_box_outline_blank)
                          .size 26
-                         .color m.Colors/grey)
+                         .color m.Colors/black)
            .onPressed nil))
          (f/widget
           (m/SizedBox .width 200)
           (m/Text title
                   .maxLines nil
-           .style task-text-style))
+                  .style task-text-style))
          (m/IconButton
           .icon (m/Icon (if liked m/Icons.favorite m/Icons.favorite_border)
                         .size 26
-                        .color (if liked m/Colors.pink m/Colors.grey))
+                        .color (if liked m/Colors.pink m/Colors.red))
           .onPressed (fn []
                        (((:on-like @(get-ast-atom)) side-effects))))])
 
        ::add-task-task
        (f/widget
         :key key
-        :get [:scroll-controller :image-coords :text-coords]
-        :context ctx
-        :watch [_ scroll-controller]
-        :let [{:keys [push-x scale]} (icon-repulsion ctx image-coords text-coords)]
-        (m/Transform.translate .offset (m/Offset push-x 0.0))
-        (m/Transform.scale .scale scale .alignment m/Alignment.center)
         :padding task-padding
         (m/Row)
         .children
@@ -292,19 +240,7 @@
            .icon (m/Icon m/Icons.check_box_outline_blank
                          .size 26
                          .color m/Colors.grey)
-           .onPressed nil))
-         (f/widget
-          :managed [text-controller (m/TextEditingController)]
-          (m/SizedBox .width 200)
-          (m/TextField
-           .style task-text-style
-           .textInputAction m.TextInputAction/done
-           .cursorHeight 38
-           .onSubmitted (fn [new-task-title]
-                          (.clear text-controller)
-                          (((:on-add-task @(get-ast-atom)) side-effects) new-task-title))
-           .decoration (m/InputDecoration .border m/InputBorder.none)
-           .controller text-controller))])
+           .onPressed nil))])
 
        ::asset-picker
        (f/widget

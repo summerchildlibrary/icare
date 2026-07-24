@@ -13,9 +13,8 @@
             ["package:convert/convert.dart" :as dartconvert]
             ["package:nostr/nostr.dart" :refer [Keychain]]
             [cljd.edn :as edn]
-            [icare.aztree :as aztree]
             [icare.datafriend :as df]
-            [icare.negentropy :as negentropy]))
+            [negentropy :as negentropy]))
 
 (def server-url "http://localhost:8080") ;; TODO configurable / https in production
 
@@ -46,31 +45,25 @@
    the initiator's view. Returns {:only-ours [[k v]...] :only-theirs [[k v]...]
    :commit-token t}: only-ours are entries the client has that the server lacks,
    only-theirs the reverse. Callers pick direction (push vs pull)."
-  [namespace tree]
-  (loop [ranges (negentropy/initial-ranges tree)
+  [public-key-hex namespace]
+  (loop [ranges (negentropy/initial-ranges namespace)
          only-ours []
          only-theirs []
          commit-token nil
          rounds 0]
     (if (or (empty? ranges) (> rounds 64))
       {:only-ours only-ours :only-theirs only-theirs :commit-token commit-token}
-      (let [response (await (post-edn "/sync" {:namespace namespace :ranges ranges}))
+      (let [response (await (post-edn "/sync" {:namespace public-key-hex :ranges ranges}))
             {:keys [sub-ranges]} response
             token (:commit-token response)
-            {next-ranges :next-ranges new-ours :only-ours new-theirs :only-theirs}
-            (negentropy/process-response tree sub-ranges)]
+            {next-ranges :next-ranges new-ours :only-ours new-theirs :only-theirs} (negentropy/process-response namespace sub-ranges)]
         (recur next-ranges (into only-ours new-ours) (into only-theirs new-theirs) token (inc rounds))))))
 
 ;; ── Push (own namespace) ──────────────────────────────────────────────────────
 
 (defn ^Future push-sync!
-  "Sync the owner's namespace `tree` up to the server. Runs the negentropy rounds,
-   signs the resulting diff and commit token with `private-key-hex`, and commits.
-   `public-key-hex` is the namespace. Returns the server's commit response."
-  [public-key-hex private-key-hex tree]
-  (let [{:keys [only-ours only-theirs commit-token]} (await (run-sync-rounds public-key-hex tree))
-        ;; the server must converge to the client: put what the client has and the
-        ;; server lacks, delete what the server has and the client lacks.
+  [public-key-hex private-key-hex namespace]
+  (let [{:keys [only-ours only-theirs commit-token]} (await (run-sync-rounds public-key-hex namespace))
         diff {:puts only-ours :deletes (mapv first only-theirs)}]
     (if (and (empty? (:puts diff)) (empty? (:deletes diff)))
       {:ok true :noop true} ;; already in sync, nothing to commit
@@ -89,8 +82,6 @@
 
 (defn- drive-server-sync! [db-conn public-key-hex private-key-hex]
   (reset! pending? false)
-  ;; snapshot :ordered now; the aztree is immutable so the sync runs against a
-  ;; stable point-in-time even as the user keeps transacting.
   (-> (push-sync! public-key-hex private-key-hex (:ordered @db-conn))
       (.then (fn [_]
                (if @pending?
@@ -108,70 +99,65 @@
   [db-conn public-key-hex private-key-hex]
   (if @syncing?
     (reset! pending? true)
-    (do (reset! syncing? true) (drive-server-sync! db-conn public-key-hex private-key-hex)))
+    (do (reset! syncing? true)
+        (drive-server-sync! db-conn public-key-hex private-key-hex)))
   nil)
-
-;; ── Pull (a friend's namespace) ───────────────────────────────────────────────
-
-(defn ^Future pull-sync!
-  "Sync a friend's namespace down. `local-ordered` is the friend db's current
-   :ordered aztree; runs the negentropy rounds against it and returns the diff to
-   apply to that db: {:puts [[key value]...] :delete-keys [key...]}. Puts are
-   entries the server has and we lack (with values); delete-keys are entries we
-   have and the server no longer does. Apply with datafriend/apply-records, which
-   preserves the server's timestamps so later pulls stay incremental. Read-only on
-   the server."
-  [friend-public-key-hex local-ordered]
-  (let [{:keys [only-ours only-theirs]} (await (run-sync-rounds friend-public-key-hex local-ordered))]
-    {:puts only-theirs :delete-keys (mapv first only-ours)}))
-
-;; ── Watch (long-poll) ─────────────────────────────────────────────────────────
-
-(defn ^Future watch-once!
-  "Long-poll the server for a change to any of `friend-public-key-hexes`. Blocks up
-   to the server's timeout (~1 min) and returns the namespace hex that changed, or
-   nil on timeout. Callers loop this, pull-syncing the poked friend each time."
-  [friend-public-key-hexes]
-  (let [response (await (post-edn "/watch" {:namespaces friend-public-key-hexes}))]
-    (:poked response)))
-
-;; ── Friend pull loop ──────────────────────────────────────────────────────────
-;;
-;; Friends' data is kept in the db-conn map keyed by their pubkey-hex, each a full
-;; datafriend db queryable just like our own. On app open we pull each friend once,
-;; then long-poll: whenever a friend commits, the server pokes us and we pull just
-;; that friend's changes. Friend dbs are not persisted — each app open starts them
-;; empty and the first pull fetches everything.
 
 (defn ^Future pull-friend!
   "Pull one friend's latest changes into db-conn under their pubkey-hex. Runs the
    negentropy rounds against our current copy of the friend's db and applies the
    resulting diff, preserving the server's timestamps so the next pull is
-   incremental."
-  [db-conn friend-public-key-hex]
-  (let [friend-db (get @db-conn friend-public-key-hex (df/empty-db))
-        {:keys [puts delete-keys]} (await (pull-sync! friend-public-key-hex (:ordered friend-db)))
-        updated (df/apply-records friend-db puts delete-keys)]
-    (swap! db-conn assoc friend-public-key-hex updated)
-    nil))
+   incremental. When the pull actually changes anything, calls `on-update` (if
+   given) so callers can re-render off the freshly-updated db."
+  ([db-conn friend-public-key-hex] (pull-friend! db-conn friend-public-key-hex nil))
+  ([db-conn friend-public-key-hex on-update]
+   (let [friend-db (get @db-conn friend-public-key-hex (df/empty-db))
+         {:keys [only-ours only-theirs]} (await (run-sync-rounds friend-public-key-hex (:ordered friend-db)))
+         updated (df/apply-records friend-db only-theirs (mapv first only-ours))]
+     (prn "pull-friend!" friend-public-key-hex
+          "received" (count only-theirs) "puts," (count only-ours) "deletes;"
+          "friend now has" (count (:eav updated)) "entities")
+     (swap! db-conn assoc friend-public-key-hex updated)
+     ;; only re-render when the pull brought something new (puts or deletes)
+     (if (and on-update (or (seq only-theirs) (seq only-ours)))
+       (do (prn "pull-friend! -> calling on-update (rerender)") (on-update))
+       (prn "pull-friend! -> no change, skipping rerender"))
+     nil)))
 
 (def ^:private watch-retry-delay (Duration .seconds 5))
 
+(defn- current-friend-hexes
+  "The distinct friend pubkey-hexes currently in the db — re-derived each loop so
+   friends added at runtime are picked up without a restart."
+  [db-conn]
+  (->> (df/query @db-conn {'e {:querido/pub-key 'p}})
+       vals
+       (map :querido/pub-key)
+       distinct
+       vec))
+
 (defn ^Future watch-friends-loop!
   "Run for the life of the app: pull every friend once, then long-poll /watch. On
-   each poke, pull just the friend that changed; on timeout, simply re-poll. Errors
-   (e.g. the server being down) are logged and retried after a delay so a failing
-   server doesn't spin; the next successful pull re-reconciles any gap."
-  [db-conn friend-public-key-hexes]
-  (doseq [friend friend-public-key-hexes]
-    (try (await (pull-friend! db-conn friend))
-         (catch Exception e (prn "initial pull failed for" friend e))))
-  (loop []
-    (try
-      (let [poked (await (watch-once! friend-public-key-hexes))]
-        (when poked
-          (await (pull-friend! db-conn poked))))
-      (catch Exception e
-        (prn "watch/pull error:" e)
-        (await (Future.delayed watch-retry-delay))))
-    (recur)))
+   each poke, pull just the friend that changed; on timeout, simply re-poll. The
+   friend set is re-derived from the db each iteration, so a friend added at runtime
+   is pulled on the next round without a restart. `on-update` is called after any
+   pull that changes state, so the UI re-renders with the freshly pulled data.
+   Errors (e.g. the server being down) are logged and retried after a delay so a
+   failing server doesn't spin; the next successful pull re-reconciles any gap."
+  ([db-conn] (watch-friends-loop! db-conn nil))
+  ([db-conn on-update]
+   (loop [pulled #{}]
+     (let [friends (current-friend-hexes db-conn)
+           fresh (remove pulled friends)]
+       ;; Pull any friend we haven't pulled yet this session (initial + newly added).
+       (doseq [friend fresh]
+         (try (await (pull-friend! db-conn friend on-update))
+              (catch Exception e (prn "initial pull failed for" friend e))))
+       (let [pulled (into pulled fresh)]
+         (try
+           (when-let [poked (:poked (await (post-edn "/watch" {:namespaces friends})))]
+             (await (pull-friend! db-conn poked on-update)))
+           (catch Exception e
+             (prn "watch/pull error:" e)
+             (await (Future.delayed watch-retry-delay))))
+         (recur pulled))))))

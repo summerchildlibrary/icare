@@ -5,29 +5,9 @@
             ["dart:isolate" :as isolate]
             [cljd.edn :refer [read-string]]
             [icare.datafriend :as df]
-            [icare.negentropy :as negentropy]))
-
-;; Persistence lives on its own isolate so all LMDB work happens off the UI
-;; isolate. LMDB mirrors datafriend's :ordered structure, one record per entity:
-;;
-;;   key   = (pr-str timestamp)
-;;   value = (pr-str {entity {attribute value ...}})
-;;
-;; The value carries the whole entity map so a boot can rebuild every datafriend
-;; index from disk alone, and the key is the real timestamp so ordering (and
-;; :next-timestamp) survive across launches.
-;;
-;; The isolate is reactive; main (the authoritative side) drives it. Boot handshake:
-;; main spawns the isolate, which opens the store, reconstructs the db, sends it
-;; back tagged [:boot db] and keeps the db's :ordered tree in memory; main awaits
-;; [:boot db] and seeds datafriend before starting the app. Reconciliation is a
-;; negentropy round trip: main sends [:sync ranges] and the isolate replies
-;; [:sync-response sub-ranges]; when the diff is localized main sends [:reconcile
-;; puts deletes] which the isolate applies to LMDB and its tree.
+            [negentropy :as negentropy]))
 
 (def db-dir "icare")
-
-;; ── LMDB (runs inside the storage isolate) ────────────────────────────────────
 
 (defonce ^:private store (atom nil))
 
@@ -118,11 +98,6 @@
 
     (println (str "storage isolate: unknown message " (first message)))))
 
-;; ── Main side: coalescing sync driver ─────────────────────────────────────────
-
-;; Coalescing state for persist-to-disk!. While a sync is running, further calls
-;; only set pending?, so exactly one trailing run fires afterward against the
-;; latest db.
 (defonce ^:private persist-syncing? (atom false))
 (defonce ^:private persist-pending? (atom false))
 

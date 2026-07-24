@@ -1,5 +1,5 @@
 (ns icare.datafriend
-  (:require [icare.aztree :as aztree]))
+  (:require [aztree :as aztree]))
 
 ;; A datafriend db is a map of five structures:
 ;;   :eav :aev :ave   the query indexes {entity {attribute value}} and friends
@@ -46,9 +46,7 @@
    this does not re-timestamp, so a friend's or disk's :ordered keys stay identical
    to their source and later syncs stay incremental."
   [db puts delete-keys]
-  (let [;; deletes: recover the entity from the value at this timestamp, then drop
-        ;; its indexes and its ordered/e->key entry
-        db (reduce (fn [db timestamp]
+  (let [db (reduce (fn [db timestamp]
                      (let [entity (ffirst (get (:ordered db) timestamp))]
                        (-> db
                            (clear-entity-indexes entity)
@@ -56,12 +54,9 @@
                            (update :ordered dissoc timestamp)
                            (update :e->key dissoc entity))))
                    db delete-keys)
-        ;; puts: replace each entity's indexes and set its ordered/e->key verbatim
         db (reduce (fn [db [timestamp entity-map]]
                      (let [entity (ffirst entity-map)
                            attmap (get entity-map entity)
-                           ;; an entity may already exist under a different (older) key;
-                           ;; clear its old indexes and old ordered entry first
                            old-key (get-in db [:e->key entity])
                            db (cond-> (clear-entity-indexes db entity)
                                 (some? old-key) (update :ordered dissoc old-key))
@@ -227,7 +222,6 @@
                       []
                       attmap)))
           entity->attmap))
-
 
 (defn query
   [db entity->attmap & options]

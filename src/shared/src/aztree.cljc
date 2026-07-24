@@ -1,4 +1,4 @@
-(ns icare.aztree
+(ns aztree
   "An augmented zip-zip tree: a persistent, history-independent binary search tree
    where every node caches the XOR-folded fingerprint aggregate and the entry count
    of its subtree, so range-fingerprint, range-size and split-range run in O(log n).

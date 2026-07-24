@@ -10,13 +10,15 @@
             ["package:flutter_secure_storage/flutter_secure_storage.dart" :refer [FlutterSecureStorage]]
             ["dart:isolate" :as isolate]
             ["dart:ui" :as dart-ui]
+            ["package:uuid/uuid.dart" :refer [Uuid]]
             [cljd.flutter :as f]
             [cljd.dart.isolates :as isolates]
             [icare.datafriend :as df]
             [icare.storage :as storage]
             [icare.network :as network]
-            [icare.uuid :refer [uuid-generator]]
             [icare.ui :as ui]))
+
+(def uuid-generator (.-v4 (Uuid)))
 
 (defn default-initial-data [pub-key]
   (let [example-task-uuid (uuid-generator)
@@ -48,8 +50,7 @@
 
       example-querido-uuid (merge {:querido/name "alex computer"
                                    :querido/asset "star.gif"
-                                   :querido/pub-key "0299b1e9eee16c522767bc13c3a7247ce52b0113320ee1cb1da7e9eb85a000dc"
-                                   :querido/task-order []}
+                                   :querido/pub-key "0299b1e9eee16c522767bc13c3a7247ce52b0113320ee1cb1da7e9eb85a000dc"}
                                   (df/position-attributes :home 130 260))
 
       :add-task-task {:task/is-add-task? true
@@ -85,7 +86,7 @@
         [private-key public-key])
 
       (and (not contains-private-key?) (not contains-public-key?))
-      (let [{:flds [private public]} ^Keychain (.-generate Keychain)]
+      (let [{:flds [private public]} ^Keychain (.generate Keychain)]
         (await (.write storage .key "private-key" .value private))
         (await (.write storage .key "public-key" .value public))
         [private public])
@@ -143,22 +144,30 @@
                          _                        (prn "Device token:" device-token)
                          _                        (when device-token (df/transact db {'add {:global/config {:config/device-token device-token}}}))
                          conn                     (atom db)
-                         friend-pub-keys          (->> (df/query @conn {'e {:querido/pub-key 'p}})
-                                                       vals
-                                                       (map :querido/pub-key)
-                                                       distinct
-                                                       vec)
-                         _                        (network/watch-friends-loop! conn friend-pub-keys)]
+                         ;; re-render after a friend pull updates the db; guarded so
+                         ;; an early pull can't fire before the initial build-widgets!
+                         rerender!                (fn []
+                                                    (prn "rerender! called; widgets-built?=" @ui/widgets-built?)
+                                                    (when @ui/widgets-built?
+                                                      (prn "rerender! -> calling ui/render-ui!")
+                                                      (ui/render-ui! @conn)))
+                         _                        (network/watch-friends-loop! conn rerender!)]
                       {:db-conn conn :ports ports* :public-key public-key :private-key private-key})]
     :bypass (when-not booted
               (f/widget
                (m/SafeArea)
                (m/Text "Loading...")))
     :let [{:keys [db-conn ports public-key private-key]} booted
-          side-effects {:transact! (fn [diff] (swap! db-conn df/transact diff))
-                        :render! (fn [] (ui/render-ui! @db-conn))
-                        :persist! (fn [] (storage/persist-to-disk! ports db-conn))
-                        :sync-to-server! (fn [] (network/sync-to-server! db-conn public-key private-key))}]
+          side-effects {;; every local change transacts and then pushes our namespace
+                        ;; up to the server; sync-to-server! is coalesced, so a burst
+                        ;; of edits collapses into one trailing sync.
+                        :transact!       (fn [diff]
+                                           (swap! db-conn df/transact diff)
+                                           (network/sync-to-server! db-conn public-key private-key))
+                        :render!         (fn [] (ui/render-ui! @db-conn))
+                        :persist!        (fn [] (storage/persist-to-disk! ports db-conn))
+                        :sync-to-server! (fn [] (network/sync-to-server! db-conn public-key private-key))
+                        :make-uuid       uuid-generator}]
     (m/SafeArea ;;we handle the top and bottom manually for edge to edge rendering
      .bottom false
      .top false)

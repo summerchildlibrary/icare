@@ -2,7 +2,6 @@
   (:require ["package:flutter/material.dart" :as m]
             [icare.ui.screens.pages.shared :refer [hsv get-phone-measurements autoscroll-away-from-keyboard]]
             [icare.datafriend :as df]
-            [icare.uuid :refer [uuid-generator]]
             [cljd.flutter :as f]))
 
 (defn task [db [task-id task]]
@@ -15,8 +14,8 @@
        :on-add-task (fn [side-effects]
                       (fn [title]
                         (when-not (empty? title)
-                          (let [{:keys [transact! render!]} side-effects
-                                new-task-id (uuid-generator)
+                          (let [{:keys [transact! render! make-uuid]} side-effects
+                                new-task-id (make-uuid)
                                 new-todo-list-order (reduce (fn [new-order task-id]
                                                               (cond
                                                                 (and (empty? new-order) (> (count todo-list-order) 1) (= task-id :add-task-task))

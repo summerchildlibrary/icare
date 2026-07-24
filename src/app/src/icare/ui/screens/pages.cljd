@@ -1,0 +1,17 @@
+(ns icare.ui.screens.pages
+  (:require ["package:flutter/material.dart" :as m]
+            [icare.ui.screens.pages.queridos.base :as queridos]
+            [icare.ui.screens.pages.list.base :as list]
+            [cljd.flutter :as f]))
+
+(defn state->ast [db]
+  {:id "pages"
+   :ui-type ::base
+   :home-page (queridos/state->ast db)
+   :list-page (list/state->ast db)})
+
+(defn ast-store->widget [ast-store side-effects]
+  (f/widget
+   (m/PageView
+    .children [(queridos/ast-store->widget ast-store side-effects)
+               (list/ast-store->widget ast-store side-effects)])))

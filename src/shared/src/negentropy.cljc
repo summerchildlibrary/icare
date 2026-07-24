@@ -1,5 +1,5 @@
-(ns icare.negentropy
-  (:require [icare.aztree :as aztree]))
+(ns negentropy
+  (:require [aztree :as aztree]))
 
 ;; Negentropy set reconciliation between two aztrees keyed [timestamp entity] ->
 ;; {entity {attribute value}}. One side is authoritative (memory); the other
