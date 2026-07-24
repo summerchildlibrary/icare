@@ -2,6 +2,7 @@
   (:require ["package:flutter/material.dart" :as m]
             [icare.ui.screens.pages.shared :refer [hsv get-phone-measurements autoscroll-away-from-keyboard]]
             [icare.datafriend :as df]
+            [icare.ui.drawing :as drawing]
             [cljd.flutter :as f]))
 
 (defn task [db [task-id task]]
@@ -100,7 +101,9 @@
         m/Stack
         .children
         [(f/widget
-          :managed [scroll-controller (m/ScrollController)]
+          ;; borrowed from the drawing registry (which owns it, never disposed)
+          ;; so the overlay can anchor :my-list strokes to this scroll position
+          :let [scroll-controller (drawing/scroll-controller-for :my-list)]
           :watch [{:keys [tasks]} (get-ast-atom)]
           (autoscroll-away-from-keyboard
            .scrollController scroll-controller)

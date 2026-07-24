@@ -5,6 +5,7 @@
             ["dart:ui" :as ui]
             ["dart:math" :refer [sqrt]]
             [icare.datafriend :as df]
+            [icare.ui.drawing :as drawing]
             [icare.ui.screens.pages.shared :refer [hsv get-phone-measurements autoscroll-away-from-keyboard]]
             [icare.ui.screens.pages.queridos.shared :refer [home-icon-asset home-icon-title
                                                             animated-sliver-fade animated-fade]]
@@ -42,6 +43,7 @@
         all-tasks       (mapv (fn [task-id] [task-id (get-in db [pub-key :eav task-id])]) task-order)]
     {:id (str "list-base-" querido-id)
      :ui-type ::list
+     :pub-key pub-key
      :on-reorder-tasks (fn [side-effects]
                          (fn [old-idx new-idx]
                            (let [adjusted-new-idx (if (> new-idx old-idx) (dec new-idx) new-idx)] ;; Flutter's reorderable lists return strange indices, this is us dealing with that
@@ -124,7 +126,7 @@
        (f/widget
         :context ctx
         :get [:icon-transition-controller :expanded-icon-atom]
-        :let [{:keys [title]} @(get-ast-atom)
+        :let [{:keys [title pub-key]} @(get-ast-atom)
               {:keys [notch-height phone-height phone-width]} (get-phone-measurements ctx)
               content-start (/ (+ notch-height 50) phone-height)
               {:keys [image-coords text-coords]} @expanded-icon-atom
@@ -134,8 +136,10 @@
               title-size        ^m/Size   (:size text-coords)
               curved                                   (m/CurvedAnimation .parent icon-transition-controller .curve m/Curves.easeInSine)
               t                                        (.drive curved (m/Tween .begin 0.0 .end 1.0))]
-        :managed [scroll-controller (m/ScrollController)
-                  list-title-controller (m/TextEditingController .text title)]
+        :managed [list-title-controller (m/TextEditingController .text title)]
+        ;; borrowed from the drawing registry (which owns it, never disposed) so
+        ;; the overlay can anchor this list's strokes to its scroll position
+        :let [scroll-controller (drawing/scroll-controller-for pub-key)]
         :bind {:scroll-controller scroll-controller
                :image-coords image-coords
                :text-coords text-coords}

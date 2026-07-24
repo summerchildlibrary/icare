@@ -2,6 +2,7 @@
   (:require ["package:flutter/material.dart" :as m]
             [icare.ui.screens.pages.queridos.base :as queridos]
             [icare.ui.screens.pages.list.base :as list]
+            [icare.ui.drawing :as drawing]
             [cljd.flutter :as f]))
 
 (defn state->ast [db]
@@ -13,5 +14,10 @@
 (defn ast-store->widget [ast-store side-effects]
   (f/widget
    (m/PageView
+    ;; the drawing overlay derives its screen context (:home vs :my-list) from
+    ;; which page is showing, and watches this controller to slide drawings
+    ;; horizontally along with the page swipe
+    .controller (drawing/page-controller)
+    .onPageChanged (fn [idx] (reset! drawing/page-index idx) nil)
     .children [(queridos/ast-store->widget ast-store side-effects)
                (list/ast-store->widget ast-store side-effects)])))

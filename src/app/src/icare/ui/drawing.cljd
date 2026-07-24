@@ -1,0 +1,334 @@
+(ns icare.ui.drawing
+  "The coloring dot: a global drawing overlay. A small dot sits top-right showing
+   the current color; tapping it expands a palette (plus an eraser) leftward.
+   Long-pressing anywhere starts a stroke that follows the finger until lift.
+
+   Strokes are entities in our own namespace, so they ride the normal
+   transact -> sync -> pull -> rerender pipeline:
+     {stroke-id {:stroke/screen tag :stroke/color kw :stroke/points [nx cy ...]}}
+
+   Coordinates are content-space: x is normalized 0-1 by phone width (so doodles
+   survive different phone sizes), y is absolute content pixels INCLUDING the
+   scroll offset of the screen it was drawn on — so on scrollable lists the
+   drawing scrolls with the tasks. The paint layer translates each screen's
+   strokes by its live scroll offset, and by the PageView's live horizontal
+   position, so drawings ride along as you swipe between pages.
+
+   Screen tags: :home (queridos canvas), :my-list (personal list page), or the
+   list-owner's pubkey for an expanded querido list."
+  (:require ["package:flutter/material.dart" :as m]
+            ["dart:ui" :as ui]
+            [icare.ui.screens.pages.shared :refer [get-phone-measurements]]
+            [cljd.flutter :as f]))
+
+;; ── Ephemeral screen context ──────────────────────────────────────────────────
+;; Which PageView page is showing (0 home, 1 personal list), the PageView's
+;; controller, and a scroll controller per scrollable context. The registry OWNS
+;; the controllers (created on demand, never disposed) and the screens borrow
+;; them — so the paint layer can always safely listen to them, even across a
+;; list being unmounted and remounted. Pure UI state, lives outside the db.
+
+(defonce page-index (atom 0))
+(defonce ^:private page-ctrl-atom (atom nil))
+(defonce ^:private scroll-ctrl-atoms (atom {}))
+
+(defn page-controller ^m/PageController []
+  (or @page-ctrl-atom
+      (let [c (m/PageController)]
+        (reset! page-ctrl-atom c)
+        c)))
+
+(defn scroll-controller-for ^m/ScrollController [context]
+  (or (get @scroll-ctrl-atoms context)
+      (let [c (m/ScrollController)]
+        (swap! scroll-ctrl-atoms assoc context c)
+        c)))
+
+(defn- scroll-offset [ctrl]
+  (if (and (some? ctrl) (.-hasClients ^m/ScrollController ctrl))
+    (.-offset ^m/ScrollController ctrl)
+    0.0))
+
+(defn- page-position
+  "The PageView's live page position (fractional mid-swipe), falling back to the
+   settled page index before the controller has attached or laid out. Computed
+   from raw pixels rather than .page, because PageController clamps .page at the
+   edges and would freeze drawings during the overscroll rubber-band."
+  [^m/PageController ctrl fallback]
+  (try
+    (if (.-hasClients ctrl)
+      (let [pos (.-position ctrl)]
+        (/ (.-pixels pos) (max 1.0 (.-viewportDimension pos))))
+      fallback)
+    (catch dynamic _ fallback)))
+
+;; ── Palette ───────────────────────────────────────────────────────────────────
+
+(def palette [:black :red :orange :green :blue :purple])
+
+(defn color-of ^m/Color [color-kw]
+  (case color-kw
+    :black  m/Colors.black
+    :red    m/Colors.red
+    :orange m/Colors.orange
+    :green  m/Colors.green
+    :blue   m/Colors.blue
+    :purple m/Colors.purple
+    m/Colors.black))
+
+;; ── Painting ──────────────────────────────────────────────────────────────────
+
+(def ^:private stroke-width 4.0)
+
+(defn- stroke-paint [color-kw]
+  (let [p (ui/Paint)]
+    (set! (.-color p) (color-of color-kw))
+    (set! (.-style p) ui/PaintingStyle.stroke)
+    (set! (.-strokeWidth p) stroke-width)
+    (set! (.-strokeCap p) ui/StrokeCap.round)
+    (set! (.-strokeJoin p) ui/StrokeJoin.round)
+    p))
+
+(defn- fill-paint [color-kw]
+  (let [p (ui/Paint)]
+    (set! (.-color p) (color-of color-kw))
+    (set! (.-style p) ui/PaintingStyle.fill)
+    p))
+
+(defn- draw-points
+  "Draw one stroke. `points` is the flat content-space vector [nx cy nx cy ...];
+   screen x = nx * phone-width + x-offset, screen y = cy - y-offset."
+  [^ui/Canvas canvas points phone-width x-offset y-offset color]
+  (let [n (count points)]
+    (when (>= n 2)
+      (let [x0 (+ (* (nth points 0) phone-width) x-offset)
+            y0 (- (nth points 1) y-offset)]
+        (if (= n 2)
+          (.drawCircle canvas (ui/Offset x0 y0) (/ stroke-width 1.5) (fill-paint color))
+          (let [path (ui/Path)]
+            (.moveTo path x0 y0)
+            (loop [i 2]
+              (when (< i n)
+                (.lineTo path
+                         (+ (* (nth points i) phone-width) x-offset)
+                         (- (nth points (inc i)) y-offset))
+                (recur (+ i 2))))
+            (.drawPath canvas path (stroke-paint color))))))))
+
+(defn- make-painter
+  "Paint a set of layers, each one screen's strokes at its own translation:
+   {:strokes [...] :ip in-progress-or-nil :x x-offset :y y-offset}."
+  [layers phone-width]
+  (reify :extends (m/CustomPainter)
+    (paint [_ canvas size]
+      (doseq [{:keys [strokes ip x y]} layers]
+        ;; skip layers that are entirely off-screen (settled other page)
+        (when (< (- phone-width) x phone-width)
+          (doseq [{:keys [color points]} strokes]
+            (draw-points canvas points phone-width x y color))
+          (when ip
+            (draw-points canvas (:points ip) phone-width x y (:color ip))))))
+    (shouldRepaint [_ _] true)))
+
+;; ── Eraser hit-testing (content space) ────────────────────────────────────────
+
+(def ^:private erase-radius-sq (* 18.0 18.0))
+
+(defn- dist-sq-to-segment [px py x1 y1 x2 y2]
+  (let [dx (- x2 x1) dy (- y2 y1)
+        len2 (+ (* dx dx) (* dy dy))
+        t (if (zero? len2) 0.0 (max 0.0 (min 1.0 (/ (+ (* (- px x1) dx) (* (- py y1) dy)) len2))))
+        cx (+ x1 (* t dx)) cy (+ y1 (* t dy))
+        ex (- px cx) ey (- py cy)]
+    (+ (* ex ex) (* ey ey))))
+
+(defn- stroke-hit?
+  "Is the content-space point (px py) within the erase radius of the stroke?"
+  [points phone-width px py]
+  (let [n (count points)]
+    (cond
+      (< n 2) false
+      (= n 2) (< (dist-sq-to-segment px py (* (nth points 0) phone-width) (nth points 1)
+                                     (* (nth points 0) phone-width) (nth points 1)) erase-radius-sq)
+      :else
+      (loop [i 0]
+        (if (>= (+ i 3) n)
+          false
+          (if (< (dist-sq-to-segment px py
+                                     (* (nth points i) phone-width) (nth points (inc i))
+                                     (* (nth points (+ i 2)) phone-width) (nth points (+ i 3)))
+                 erase-radius-sq)
+            true
+            (recur (+ i 2))))))))
+
+;; ── AST ───────────────────────────────────────────────────────────────────────
+
+(defn state->ast [db]
+  (let [expanded (get-in db [:eav :global/config :config/expanded-querido])
+        expanded-context (when expanded (get-in db [:eav expanded :querido/pub-key]))
+        strokes-by-screen (reduce-kv (fn [m entity screen-tag]
+                                       (update m screen-tag (fnil conj [])
+                                               {:id entity
+                                                :color (get-in db [:eav entity :stroke/color])
+                                                :points (get-in db [:eav entity :stroke/points])}))
+                                     {}
+                                     (get-in db [:aev :stroke/screen] {}))]
+    {:id "drawing-overlay"
+     :ui-type ::overlay
+     :dot-color (or (get-in db [:eav :global/config :config/dot-color]) :black)
+     :expanded-context expanded-context
+     ;; not-empty: an empty {} would be mistaken for a collection of ast nodes by
+     ;; the normalizer's vacuous ast-node-collection? check and crash flatten-ast
+     :strokes-by-screen (not-empty strokes-by-screen)
+     :on-set-color (fn [side-effects]
+                     (fn [color-kw]
+                       (let [{:keys [transact! render!]} side-effects]
+                         (transact! {'add {:global/config {:config/dot-color color-kw}}})
+                         (render!))))
+     :on-add-stroke (fn [side-effects]
+                      (fn [screen-tag color points]
+                        (let [{:keys [transact! render! make-uuid]} side-effects]
+                          (transact! {'add {(make-uuid) {:stroke/screen screen-tag
+                                                         :stroke/color color
+                                                         :stroke/points points}}})
+                          (render!))))
+     :on-erase (fn [side-effects]
+                 (fn [stroke-ids]
+                   (let [{:keys [transact! render!]} side-effects]
+                     (transact! {'retract (into {} (map (fn [id] [id (get-in db [:eav id])])) stroke-ids)})
+                     (render!))))}))
+
+;; ── Widget ────────────────────────────────────────────────────────────────────
+
+(defn- dot
+  "A tappable colored circle. Pass :border? true for the white eraser dot."
+  [color border? on-tap]
+  (m/GestureDetector
+   .onTap (fn [] (on-tap) nil)
+   .child (m/Container
+           .width 26
+           .height 26
+           .margin (m/EdgeInsets.only .left 10)
+           .decoration (m/BoxDecoration
+                        .shape m/BoxShape.circle
+                        .color color
+                        .border (if border? (m/Border.all .color m/Colors.grey .width 1.5) nil)))))
+
+(defn ast-store->widget [ast-store side-effects]
+  (let [get-ast-atom #(get @ast-store "drawing-overlay")
+        ;; persist across renders: the stroke being drawn and the palette state
+        in-progress (atom nil)
+        palette-open? (atom false)]
+    (f/widget
+     :context ctx
+     ;; the overlay node only exists once a render has run with the new db->ast;
+     ;; watching the store itself also covers hot-reload before the first render
+     :watch [store ast-store]
+     :when (get store "drawing-overlay")
+     :let [{:keys [notch-height phone-width]} (get-phone-measurements ctx)
+           ;; where the finger is, in content space, for the active context
+           current-context (fn []
+                             (or (:expanded-context @(get-ast-atom))
+                                 (if (zero? @page-index) :home :my-list)))
+           content-point (fn [^ui/Offset global-position context]
+                           (let [offset (scroll-offset (get @scroll-ctrl-atoms context))]
+                             [(/ (.-dx global-position) phone-width)
+                              (+ (.-dy global-position) offset)]))
+           handle-start (fn [^m/LongPressStartDetails details]
+                          (let [context (current-context)
+                                dot-color (:dot-color @(get-ast-atom))
+                                [nx cy] (content-point (.-globalPosition details) context)]
+                            (if (= dot-color :eraser)
+                              (reset! in-progress {:screen context :erasing? true})
+                              (reset! in-progress {:screen context :color dot-color :points [nx cy]}))))
+           erase-at! (fn [context ^ui/Offset global-position]
+                       (let [offset (scroll-offset (get @scroll-ctrl-atoms context))
+                             px (.-dx global-position)
+                             py (+ (.-dy global-position) offset)
+                             strokes (get (:strokes-by-screen @(get-ast-atom)) context)
+                             hit-ids (into [] (comp (filter #(stroke-hit? (:points %) phone-width px py))
+                                                    (map :id))
+                                           strokes)]
+                         (when (seq hit-ids)
+                           (((:on-erase @(get-ast-atom)) side-effects) hit-ids))))
+           handle-move (fn [^m/LongPressMoveUpdateDetails details]
+                         (when-let [{:keys [screen erasing?]} @in-progress]
+                           (if erasing?
+                             (erase-at! screen (.-globalPosition details))
+                             (let [[nx cy] (content-point (.-globalPosition details) screen)
+                                   points (:points @in-progress)
+                                   last-x (* (nth points (- (count points) 2)) phone-width)
+                                   last-y (nth points (dec (count points)))
+                                   dx (- (* nx phone-width) last-x)
+                                   dy (- cy last-y)]
+                               ;; downsample: only record a point every ~4px of movement
+                               (when (> (+ (* dx dx) (* dy dy)) 16.0)
+                                 (swap! in-progress update :points conj nx cy))))))
+           handle-end (fn [_]
+                        (when-let [{:keys [screen color points erasing?]} @in-progress]
+                          (when (and (not erasing?) (>= (count points) 2))
+                            (((:on-add-stroke @(get-ast-atom)) side-effects) screen color points)))
+                        (reset! in-progress nil))]
+     (m/Stack
+      .children
+      [;; paint layer: each screen's strokes at its own scroll translation, and
+       ;; the whole thing rides the PageView's live horizontal position
+       (f/widget
+        :watch [{:keys [strokes-by-screen expanded-context]} (get-ast-atom)
+                page-idx page-index]
+        :let [page-ctrl (page-controller)
+              mylist-ctrl (scroll-controller-for :my-list)
+              exp-ctrl (when expanded-context (scroll-controller-for expanded-context))]
+        (f/widget
+         :watch [ip in-progress
+                 _ (m/Listenable.merge [page-ctrl mylist-ctrl exp-ctrl])]
+         :let [layers (if expanded-context
+                        [{:strokes (get strokes-by-screen expanded-context)
+                          :ip (when (= (:screen ip) expanded-context) ip)
+                          :x 0.0
+                          :y (scroll-offset exp-ctrl)}]
+                        (let [p (page-position page-ctrl page-idx)]
+                          [{:strokes (get strokes-by-screen :home)
+                            :ip (when (= (:screen ip) :home) ip)
+                            :x (* (- 0 p) phone-width)
+                            :y 0.0}
+                           {:strokes (get strokes-by-screen :my-list)
+                            :ip (when (= (:screen ip) :my-list) ip)
+                            :x (* (- 1 p) phone-width)
+                            :y (scroll-offset mylist-ctrl)}]))]
+         (m/IgnorePointer)
+         (m/SizedBox.expand)
+         (m/CustomPaint .painter (make-painter layers phone-width))))
+       ;; gesture layer: long-press claims the pointer for drawing/erasing,
+       ;; everything else falls through to the app beneath
+       (f/widget
+        (m/GestureDetector
+         .behavior m/HitTestBehavior.translucent
+         .onLongPressStart handle-start
+         .onLongPressMoveUpdate handle-move
+         .onLongPressEnd handle-end)
+        (m/SizedBox.expand))
+       ;; the dot + palette, top right
+       (f/widget
+        (m/Positioned .top (+ notch-height 8) .right 16)
+        (f/widget
+         :watch [open? palette-open?
+                 {:keys [dot-color]} (get-ast-atom)]
+         (m/Row .mainAxisSize m/MainAxisSize.min)
+         .children
+         (vec
+          (concat
+           (when open?
+             (concat
+              (for [color-kw palette]
+                (dot (color-of color-kw) false
+                     (fn []
+                       (((:on-set-color @(get-ast-atom)) side-effects) color-kw)
+                       (reset! palette-open? false))))
+              [(dot m/Colors.white true
+                    (fn []
+                      (((:on-set-color @(get-ast-atom)) side-effects) :eraser)
+                      (reset! palette-open? false)))]))
+           [(dot (if (= dot-color :eraser) m/Colors.white (color-of dot-color))
+                 (= dot-color :eraser)
+                 (fn [] (swap! palette-open? not)))]))))]))))

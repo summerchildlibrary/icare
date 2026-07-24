@@ -5,6 +5,7 @@
             [cljd.flutter :as f]
             [icare.ui.screens.qr :as qr]
             [icare.ui.screens.pages :as pages]
+            [icare.ui.drawing :as drawing]
             [icare.ui.normalized-ast :refer [ast->ast-store]]))
 
 ;;first we transform the application state into an abstract syntax tree (AST) which represents the entire UI. This is a pure function with no side effects.
@@ -14,6 +15,7 @@
         current-screen (or (get-in db [:eav :global/config :config/current-screen]) :pages)]
     {:id "root"
      :ui-type ::root
+     :drawing (drawing/state->ast db)
      :screen (condp = current-screen
                :qr        (qr/state->ast db)
                :pages     (pages/state->ast db)
@@ -37,16 +39,23 @@
                                     (condp = screen ;;screen is the id of the root node for each screen
                                       "pages"           (pages/ast-store->widget ast-store side-effects)
                                       "qr-base"         (qr/ast-store->widget ast-store side-effects)
-                                      (throw (Exception (str "Unknown screen id while deriving widgets: " screen)))))]
+                                      (throw (Exception (str "Unknown screen id while deriving widgets: " screen)))))
+             ;; the coloring-dot overlay: paint layer, long-press draw gesture, and
+             ;; the palette dot — always above whichever screen is showing. Built
+             ;; once here so its in-flight drawing state survives re-renders.
+             drawing-overlay       (drawing/ast-store->widget ast-store side-effects)]
    :watch   [{new-screen :screen}  (get @ast-store "root")]
    (do (when (not= new-screen @build-screen)
          (.then (.forward transition-controller)
                 (fn [_]
                   (reset! build-screen new-screen)
                   (.reverse transition-controller))))
-       (scale-down-fade-animation
-        .controller transition-controller
-        .child screen-widget))))
+       (m/Stack
+        .children
+        [(scale-down-fade-animation
+          .controller transition-controller
+          .child screen-widget)
+         drawing-overlay]))))
 
 (defonce widgets-built? (atom false))
 
