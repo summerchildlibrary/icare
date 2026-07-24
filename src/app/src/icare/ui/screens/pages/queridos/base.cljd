@@ -11,6 +11,7 @@
             [icare.ui.screens.pages.queridos.shared :refer [home-icon-asset home-icon-title animated-blur animated-fade debug-border ctx->coords]]
             [icare.datafriend :as df]
             [icare.ui.physics :as physics]
+            [icare.ui.drawing :as drawing]
             [cljd.flutter :as f]))
 
 (defn add-querido [db]
@@ -94,6 +95,30 @@
         size (.-size box)]
     {:position position :size size}))
 
+(defn- stroke-segments
+  "Flatten strokes into physics obstacle segments [x1 y1 x2 y2] in content px.
+   Strokes are recorded every ~4px which is far finer than collision needs, so
+   we resample every 4th point (plus the endpoint); a single-point stroke
+   becomes a degenerate point segment."
+  [strokes phone-width]
+  (into []
+        (mapcat
+         (fn [{:keys [points]}]
+           (let [n (count points)]
+             (if (< n 2)
+               []
+               (let [sampled (loop [i 0 acc []]
+                               (if (> (+ i 1) (dec n))
+                                 acc
+                                 (recur (+ i 8) (conj acc [(* (nth points i) phone-width)
+                                                           (nth points (inc i))]))))
+                     last-point [(* (nth points (- n 2)) phone-width) (nth points (dec n))]
+                     sampled (if (= (peek sampled) last-point) sampled (conj sampled last-point))]
+                 (if (< (count sampled) 2)
+                   (let [[x y] (first sampled)] [[x y x y]])
+                   (mapv (fn [[x1 y1] [x2 y2]] [x1 y1 x2 y2]) sampled (rest sampled))))))))
+        strokes))
+
 
 ;;TODO maybe we want to scale up here also
 (defn animated-content-fade [controller content]
@@ -122,24 +147,37 @@
         :key key
         :context ctx
         :let [{:keys [notch-height phone-height phone-width]} (get-phone-measurements ctx)
-              ;;walls are soft springs, these bounds are where icon centers come to rest
-              bounds {:left 90.0
-                      :top (+ notch-height 130.0)
-                      :right (- phone-width 90.0)
-                      :bottom (- phone-height 320.0)}]
+              ;;the canvas grows once it holds 8 icons and gains a row every 2 after,
+              ;;so the count fully determines the scrollable height
+              canvas-height (fn [icon-count]
+                              (+ phone-height (* 180.0 (max 0 (quot (- icon-count 6) 2)))))
+              ;;walls are soft springs, these bounds are where icon centers come to rest;
+              ;;the floor sits near the bottom of the (possibly scrolled) content
+              bounds-for (fn [icon-count]
+                           {:left 90.0
+                            :top (+ notch-height 130.0)
+                            :right (- phone-width 90.0)
+                            :bottom (- (canvas-height icon-count) 320.0)})]
         :vsync clock
         :managed [icon-transition-controller (m/AnimationController
                                               .vsync clock
                                               .duration (Duration .milliseconds 300))
                   expanded-icon-atom (atom nil) :dispose nil
                   ;;the simulation owns positions while bodies are awake, the db owns them once they sleep
-                  sim-state (atom {:world (physics/make-world (:physics @(get-ast-atom)) bounds)
+                  sim-state (atom {:world (physics/make-world (:physics @(get-ast-atom)) (bounds-for 0))
                                    :pose-atoms {}
                                    :prev-elapsed 0.0}) :dispose nil]
         :let [sync-bodies! (fn [icon-node-ids]
                              (swap! sim-state
                                     (fn [{:keys [world pose-atoms] :as sim}]
                                       (let [initial? (empty? (:bodies world))
+                                            ;;a changed icon count can move the floor; sleeping
+                                            ;;bodies near the old wall wake on their own once the
+                                            ;;wall force disappears and net repulsion can move them
+                                            world (let [new-bounds (bounds-for (count icon-node-ids))]
+                                                    (if (= new-bounds (:bounds world))
+                                                      world
+                                                      (assoc world :bounds new-bounds)))
                                             wanted (into {}
                                                          (map (fn [node-id]
                                                                 (let [{:keys [key x y]} @(get @ast-store node-id)]
@@ -165,6 +203,20 @@
                                                                pose-atoms
                                                                wanted)]
                                         (assoc sim :world world :pose-atoms pose-atoms)))))
+              ;;home strokes are capsule walls: keep the world's obstacle segments
+              ;;in sync with the drawn ink, waking everyone when the ink changes
+              ;;so sleeping crowds react to new lines (and to erased ones)
+              sync-obstacles! (fn [strokes-by-screen]
+                                (let [segments (stroke-segments (get strokes-by-screen :home) phone-width)]
+                                  (swap! sim-state
+                                         (fn [sim]
+                                           (if (= segments (get-in sim [:world :obstacles]))
+                                             sim
+                                             (update sim :world
+                                                     (fn [world]
+                                                       (-> world
+                                                           (assoc :obstacles segments)
+                                                           physics/wake-all))))))))
               commit-poses! (fn [slept-ids world]
                               (((:on-commit-poses @(get-ast-atom)) side-effects)
                                (into {}
@@ -211,9 +263,19 @@
          .alignment m/Alignment.center)
         .children
         [(f/widget
-          :watch [{:keys [icons]} (get-ast-atom)]
-          :let [_ (sync-bodies! icons)]
-          (m/SizedBox .width phone-width .height phone-height)
+          :watch [{:keys [icons]} (get-ast-atom)
+                  ;;the drawing overlay's node carries the stroke data; watching it
+                  ;;keeps the physics walls in step with drawing and erasing
+                  {:keys [strokes-by-screen]} (or (get @ast-store "drawing-overlay") (atom nil))]
+          :let [_ (sync-bodies! icons)
+                _ (sync-obstacles! strokes-by-screen)]
+          ;;the canvas scrolls vertically once icons outgrow the screen; the
+          ;;drawing overlay borrows this controller so :home strokes and the
+          ;;pen ride along. Dragging an icon still wins over scrolling, so
+          ;;scrolling starts from empty canvas.
+          (m/SingleChildScrollView
+           .controller (drawing/scroll-controller-for :home))
+          (m/SizedBox .width phone-width .height (canvas-height (count icons)))
           (m/Stack)
           .children (mapv recursive-call icons))
          (f/widget
@@ -265,6 +327,20 @@
                   text-controller (m/TextEditingController .text title)
                   drag-grab (atom nil) :dispose nil]
         :let [pose-atom (get (:pose-atoms @sim-state) key)
+              drag-start (fn [details]
+                           ;;remember where on the icon the finger grabbed it
+                           (let [[x y] @pose-atom
+                                 finger (.-globalPosition details)]
+                             (reset! drag-grab [(- x (.-dx finger)) (- y (.-dy finger))])
+                             ((:start! drag-api) key)))
+              drag-move (fn [details]
+                          (let [[grab-x grab-y] @drag-grab
+                                finger (.-globalPosition details)]
+                            ((:move! drag-api) key (+ (.-dx finger) grab-x) (+ (.-dy finger) grab-y))))
+              drag-end (fn [details]
+                         ;;hand the finger's velocity to the body, throws come for free
+                         (let [v (.-pixelsPerSecond (.-velocity details))]
+                           ((:end! drag-api) key (.-dx v) (.-dy v))))
               content (f/widget
                        (m/GestureDetector
                         .behavior m/HitTestBehavior.opaque
@@ -272,20 +348,17 @@
                                  (((:on-expand-icon @(get-ast-atom)) side-effects))
                                  (reset! expanded-icon-atom {:image-coords (key->coords image-global-key)
                                                              :text-coords (key->coords text-global-key)}))
-                        .onPanStart (fn [details]
-                                      ;;remember where on the icon the finger grabbed it
-                                      (let [[x y] @pose-atom
-                                            finger (.-globalPosition details)]
-                                        (reset! drag-grab [(- x (.-dx finger)) (- y (.-dy finger))])
-                                        ((:start! drag-api) key)))
-                        .onPanUpdate (fn [details]
-                                       (let [[grab-x grab-y] @drag-grab
-                                             finger (.-globalPosition details)]
-                                         ((:move! drag-api) key (+ (.-dx finger) grab-x) (+ (.-dy finger) grab-y))))
-                        .onPanEnd (fn [details]
-                                    ;;hand the finger's velocity to the body, throws come for free
-                                    (let [v (.-pixelsPerSecond (.-velocity details))]
-                                      ((:end! drag-api) key (.-dx v) (.-dy v)))))
+                        ;;paired axis recognizers instead of pan: a pan needs kPanSlop
+                        ;;while the canvas scroll view only needs kTouchSlop, so pans
+                        ;;lose vertical-ish drags to scrolling. Same-axis recognizers
+                        ;;tie and the deeper one (the icon) wins; either callback gets
+                        ;;the full 2D position so the drag follows the finger freely.
+                        .onVerticalDragStart drag-start
+                        .onVerticalDragUpdate drag-move
+                        .onVerticalDragEnd drag-end
+                        .onHorizontalDragStart drag-start
+                        .onHorizontalDragUpdate drag-move
+                        .onHorizontalDragEnd drag-end)
                        (m/SizedBox .width (* 2 icon-half-width) .height (* 2 icon-half-height))
                        (m/Column)
                        .children

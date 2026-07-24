@@ -148,6 +148,10 @@
            .keyboardType m/TextInputType.text
            .autocorrect false
            .maxLines nil
+           ;;no long-press word selection: contested gesture arenas (drag handles,
+           ;;scroll, pen) can rob the field of its tap-down and Flutter's selectWord
+           ;;then crashes on a null _lastTapDownPosition
+           .enableInteractiveSelection false
            .style (.copyWith task-text-style .color (if completed (hsv 0 0 0.5) m/Colors.black))
            .onSubmitted (fn [new-title]
                           (((:on-edit-task-title @(get-ast-atom)) side-effects) new-title))
@@ -179,6 +183,7 @@
            .style task-text-style
            .textInputAction m.TextInputAction/done
            .cursorHeight 38
+           .enableInteractiveSelection false
            .onSubmitted (fn [new-task-title]
                           (.clear text-controller)
                           (((:on-add-task @(get-ast-atom)) side-effects) new-task-title))

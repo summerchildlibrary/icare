@@ -334,11 +334,12 @@
         :watch [{:keys [strokes-by-screen expanded-context]} (get-ast-atom)
                 page-idx page-index]
         :let [page-ctrl (page-controller)
+              home-ctrl (scroll-controller-for :home)
               mylist-ctrl (scroll-controller-for :my-list)
               exp-ctrl (when expanded-context (scroll-controller-for expanded-context))]
         (f/widget
          :watch [ip in-progress
-                 _ (m/Listenable.merge [page-ctrl mylist-ctrl exp-ctrl])]
+                 _ (m/Listenable.merge [page-ctrl home-ctrl mylist-ctrl exp-ctrl])]
          :let [layers (if expanded-context
                         [{:strokes (get strokes-by-screen expanded-context)
                           :ip (when (= (:screen ip) expanded-context) ip)
@@ -348,7 +349,7 @@
                           [{:strokes (get strokes-by-screen :home)
                             :ip (when (= (:screen ip) :home) ip)
                             :x (* (- 0 p) phone-width)
-                            :y 0.0}
+                            :y (scroll-offset home-ctrl)}
                            {:strokes (get strokes-by-screen :my-list)
                             :ip (when (= (:screen ip) :my-list) ip)
                             :x (* (- 1 p) phone-width)
@@ -364,6 +365,7 @@
         :watch [{:keys [dot-color expanded-context]} (get-ast-atom)
                 page-idx page-index]
         :let [page-ctrl (page-controller)
+              home-ctrl (scroll-controller-for :home)
               mylist-ctrl (scroll-controller-for :my-list)
               exp-ctrl (when expanded-context (scroll-controller-for expanded-context))]
         (f/widget
@@ -371,7 +373,7 @@
                  carry carry-pos
                  anchor dot-anchor
                  open? palette-open?
-                 _ (m/Listenable.merge [page-ctrl mylist-ctrl exp-ctrl])]
+                 _ (m/Listenable.merge [page-ctrl home-ctrl mylist-ctrl exp-ctrl])]
          :let [page-pos (page-position page-ctrl page-idx)
                [cx cy] (cond
                          (some? carry) carry
@@ -419,9 +421,16 @@
            (m/GestureDetector
             .behavior m/HitTestBehavior.opaque
             .onTap (fn [] (swap! palette-open? not) nil)
-            .onPanStart carry-start
-            .onPanUpdate carry-move
-            .onPanEnd carry-end
+            ;; paired axis recognizers instead of pan: pan needs kPanSlop while a
+            ;; scroll view only needs kTouchSlop, so a pan would lose vertical
+            ;; carries to the scrollable underneath. Both callbacks carry the full
+            ;; 2D position, so whichever axis wins, the carry follows the finger.
+            .onVerticalDragStart carry-start
+            .onVerticalDragUpdate carry-move
+            .onVerticalDragEnd carry-end
+            .onHorizontalDragStart carry-start
+            .onHorizontalDragUpdate carry-move
+            .onHorizontalDragEnd carry-end
             .onLongPressStart handle-start
             .onLongPressMoveUpdate handle-move
             .onLongPressEnd handle-end)

@@ -40,6 +40,8 @@
                        :physics/damping 4.0
                        :physics/static-friction 300.0
                        :physics/wall-stiffness 200.0
+                       :physics/wall-damping 15.0
+                       :physics/obstacle-radius 85.0
                        :physics/sleep-speed 4.0
                        :physics/sleep-frames 12
                        :physics/max-speed 3000.0}

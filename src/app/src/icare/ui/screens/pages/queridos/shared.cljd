@@ -16,6 +16,9 @@
    .controller controller
    .enabled (not (false? enabled))
    .autocorrect false
+   ;;no long-press word selection: contested gesture arenas can rob the field of
+   ;;its tap-down and Flutter's selectWord then crashes on a null tap position
+   .enableInteractiveSelection false
    .textInputAction m/TextInputAction.done
    .textAlign m/TextAlign.center
    .maxLines 3
