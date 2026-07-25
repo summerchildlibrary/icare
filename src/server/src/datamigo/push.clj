@@ -15,6 +15,7 @@
    prior state, and a bulk first sync (which has no deletes) stays quiet on its
    own."
   (:require [clojure.data.json :as json]
+            [clojure.string :as str]
             [clj-http.client :as http])
   (:import (com.google.auth.oauth2 GoogleCredentials)
            (java.io File FileInputStream)
@@ -110,6 +111,15 @@
 
 ;; ── Completion detection ──────────────────────────────────────────────────────
 
+(defn- capitalize-first
+  "Upper-case the first character, leaving the rest alone — names are user-entered
+   and often lower-case, and clojure.string/capitalize would also lower-case the
+   remainder, turning \"JB\" into \"Jb\"."
+  [s]
+  (if (seq s)
+    (str (str/upper-case (subs s 0 1)) (subs s 1))
+    s))
+
 (defn completion-pushes
   "Pushes owed for a commit, or nil. `tree` must be the namespace's tree as it
    stands BEFORE the diff is applied, since the prior versions live under the
@@ -146,7 +156,8 @@
                        (for [[token {:keys [name entities]}] subscribers
                              :when (contains? entities entity)]
                          {:device-token token
-                          :title (str (or name "Someone") " completed \"" (:task/title attmap) "\"")})))
+                          :title (str (capitalize-first (or name "Someone"))
+                                      " finished \"" (:task/title attmap) "\"")})))
              completed)))))
 
 (defn debug-registry
