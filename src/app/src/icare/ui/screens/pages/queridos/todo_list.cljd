@@ -29,10 +29,13 @@
        :index index
        :on-like (fn [side-effects]
                   (fn []
-                    (let [{:keys [transact! render!]} side-effects]
+                    (let [{:keys [transact! render! register-interests!]} side-effects]
                       ;; write the like into our own namespace (transact! also syncs it up)
                       (transact! {'add {task-id {:like/liked (not liked)}}})
-                      (render!))))
+                      (render!)
+                      ;; and tell the server to push us about this task now, rather
+                      ;; than whenever the watch loop next comes round
+                      (register-interests!))))
        :completed completed})))
 
 (defn ui-list [db querido-id]

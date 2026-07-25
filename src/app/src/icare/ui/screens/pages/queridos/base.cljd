@@ -25,7 +25,7 @@
      :on-add-pubkey (fn [side-effects]
                       (fn [pubkey]
                         (when-not (empty? pubkey)
-                          (let [{:keys [transact! render! make-uuid]} side-effects
+                          (let [{:keys [transact! render! make-uuid pull-friend!]} side-effects
                                 new-querido-id (make-uuid)
                                 ;;spawn near the middle of the canvas and let repulsion shove everyone into place
                                 spawn-x (+ 150.0 (* 40.0 (mod home-count 4)))
@@ -35,7 +35,12 @@
                                                                      :querido/pub-key pubkey
                                                                      :querido/task-order []}
                                                                     (df/position-attributes :home spawn-x spawn-y))}})
-                            (render!)))))}))
+                            (render!)
+                            ;;pull them now rather than waiting on the watch loop: the /watch
+                            ;;currently parked was registered without this pubkey, so no poke
+                            ;;for it can reach us and the loop cannot even notice the new
+                            ;;friend until that poll times out a minute later
+                            (pull-friend! pubkey)))))}))
 
 (defn icon [db expanded-querido-id [querido-id querido]]
   (let [{:keys [querido/name querido/asset position/x position/y]} querido

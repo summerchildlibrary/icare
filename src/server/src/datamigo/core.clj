@@ -19,6 +19,7 @@
   (let [server (HttpServer/create (InetSocketAddress. port) 0)]
     (.setExecutor server (Executors/newFixedThreadPool thread-pool-size))
     (.createContext server "/ping" (http/handler http/handle-ping))
+    (.createContext server "/register" (http/handler http/handle-register))
     (.createContext server "/sync" (http/handler http/handle-sync))
     (.createContext server "/commit" (http/handler http/handle-commit))
     (.createContext server "/watch" (http/handler http/handle-watch))

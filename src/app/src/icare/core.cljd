@@ -50,9 +50,9 @@
                          :task/completed false
                          :task/subitems []}
 
-      example-querido-uuid (merge {:querido/name "alex computer"
+      example-querido-uuid (merge {:querido/name "claude"
                                    :querido/asset "star.gif"
-                                   :querido/pub-key "0299b1e9eee16c522767bc13c3a7247ce52b0113320ee1cb1da7e9eb85a000dc"}
+                                   :querido/pub-key "2597afb70fd3ff7eccbf52c5f0360c730f7327b552b14c6602a234b6c3a25ce6"}
                                   (df/position-attributes :home 130 260))
 
       :add-task-task {:task/is-add-task? true
@@ -175,6 +175,17 @@
                                            (swap! db-conn df/transact diff)
                                            (network/sync-to-server! db-conn public-key private-key))
                         :render!         (fn [] (ui/render-ui! @db-conn))
+                        ;;register push interests right now, for when waiting on the
+                        ;;watch loop's cycle would be too slow (liking a task)
+                        :register-interests! (fn []
+                                               (-> (network/register-interests! db-conn)
+                                                   (.catchError (fn [e] (prn "interest registration failed:" e)))))
+                        ;;pull one friend right now, for when waiting on the watch
+                        ;;loop's cycle would be too slow (adding a friend)
+                        :pull-friend!    (fn [pubkey]
+                                           (-> (network/pull-friend! db-conn pubkey
+                                                                     (fn [] (ui/render-ui! @db-conn)))
+                                               (.catchError (fn [e] (prn "immediate pull failed:" e)))))
                         :persist!        (fn [] (storage/persist-to-disk! ports db-conn))
                         :sync-to-server! (fn [] (network/sync-to-server! db-conn public-key private-key))
                         :make-uuid       uuid-generator}]

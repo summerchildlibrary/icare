@@ -163,34 +163,56 @@
                     (when (seq theirs) [friend theirs]))))
           friends)))
 
+(defn ^Future register-interests!
+  "Tell the server what to push us, now. The watch loop sends the same payload,
+   but only once per cycle and only while parked, so a fresh like would otherwise
+   sit unregistered — and be lost outright if the app were backgrounded first.
+   The interest map is recomputed from the db, so this stays a pure refresh: no
+   bookkeeping to drift, and unliking corrects itself."
+  [db-conn]
+  (let [db @db-conn
+        friends (current-friend-hexes db-conn)]
+    (await (post-edn "/register"
+                     {:device-token (get-in db [:eav :global/config :config/device-token])
+                      :interests (liked-interests db friends)}))
+    nil))
+
 (defn ^Future watch-friends-loop!
-  "Run for the life of the app: pull every friend once, then long-poll /watch. On
-   each poke, pull just the friend that changed; on timeout, simply re-poll. The
-   friend set is re-derived from the db each iteration, so a friend added at runtime
-   is pulled on the next round without a restart. `on-update` is called after any
-   pull that changes state, so the UI re-renders with the freshly pulled data.
-   Errors (e.g. the server being down) are logged and retried after a delay so a
-   failing server doesn't spin; the next successful pull re-reconciles any gap."
+  "Run for the life of the app: reconcile every friend, then park on /watch until
+   someone commits or the poll times out, and repeat.
+
+   The sweep is what guarantees convergence, not the poke. A poke is only offered
+   to watchers parked at the instant the commit lands — the server registers a
+   queue for the duration of one long-poll and discards it on the way out — so a
+   commit arriving while we are pulling, backing off, or reconnecting reaches
+   nobody and is never redelivered. Relying on pokes alone meant a single missed
+   one stranded that friend's data for the life of the app. Pokes are therefore a
+   latency optimisation: they cut the poll short so the next sweep runs now rather
+   than up to a minute from now.
+
+   Sweeping every friend each cycle is cheap — an already-in-sync namespace settles
+   in one round with no leaves visited. The friend set is re-derived each iteration,
+   so friends added at runtime need no restart, and `on-update` fires after any pull
+   that actually changed something."
   ([db-conn] (watch-friends-loop! db-conn nil))
   ([db-conn on-update]
-   (loop [pulled #{}]
-     (let [friends (current-friend-hexes db-conn)
-           fresh (remove pulled friends)]
-       ;; Pull any friend we haven't pulled yet this session (initial + newly added).
-       (doseq [friend fresh]
+   (loop []
+     (let [friends (current-friend-hexes db-conn)]
+       (doseq [friend friends]
+         ;; catch dynamic rather than Exception: a Dart Error (a failed cast while
+         ;; rendering, say) is not an Exception, and one escaping here would kill
+         ;; this loop for the life of the app and silently stop all syncing.
          (try (await (pull-friend! db-conn friend on-update))
-              (catch Exception e (prn "initial pull failed for" friend e))))
-       (let [pulled (into pulled fresh)]
-         (try
-           ;; the watch call doubles as our push registration: it already names
-           ;; the friends we follow, so it carries the device token and the tasks
-           ;; of theirs we've liked. Re-sent every round, so it self-heals.
-           (when-let [poked (:poked (await (post-edn "/watch"
-                                                    {:namespaces friends
-                                                     :device-token (get-in @db-conn [:eav :global/config :config/device-token])
-                                                     :interests (liked-interests @db-conn friends)})))]
-             (await (pull-friend! db-conn poked on-update)))
-           (catch Exception e
-             (prn "watch/pull error:" e)
-             (await (Future.delayed watch-retry-delay))))
-         (recur pulled))))))
+              (catch dynamic e (prn "pull failed for" friend e))))
+       (try
+         ;; the watch call doubles as our push registration: it already names the
+         ;; friends we follow, so it carries the device token and the tasks of
+         ;; theirs we have liked. Re-sent every round, so it self-heals.
+         (await (post-edn "/watch"
+                          {:namespaces friends
+                           :device-token (get-in @db-conn [:eav :global/config :config/device-token])
+                           :interests (liked-interests @db-conn friends)}))
+         (catch dynamic e
+           (prn "watch error:" e)
+           (await (Future.delayed watch-retry-delay))))
+       (recur)))))

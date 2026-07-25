@@ -170,6 +170,19 @@
 
 (def ^:private watch-timeout-ms (* 60 1000))
 
+(defn handle-register
+  "Record push interests and return immediately. Body: {:device-token t
+   :interests {namespace [entity...]}}.
+
+   /watch carries the same payload, but it parks for a minute, so interests
+   created by a fresh like would not reach the server until the current poll
+   expired — and would be lost entirely if the app were backgrounded first. This
+   is the eager path; /watch keeps sending them as a self-healing refresh."
+  [^HttpExchange exchange]
+  (let [{:keys [device-token interests]} (read-body exchange)]
+    (push/register-interests! device-token interests)
+    (respond! exchange 200 {:ok true})))
+
 (defn handle-watch
   "Long-poll. Body: {:namespaces [friend-hex...]} plus, optionally,
    :device-token and :interests {namespace [entity...]} to receive pushes while
