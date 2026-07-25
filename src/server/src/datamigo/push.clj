@@ -43,12 +43,25 @@
     (.getTokenValue (.getAccessToken creds))))
 
 (defn send-push-notification! [{:keys [title body device-token]}]
-  (http/post fcm-url
-             {:headers {"Authorization" (str "Bearer " (access-token))}
-              :content-type :json
-              :body (json/write-str
-                     {:message {:token device-token
-                                :notification {:title title :body body}}})}))
+  ;; throw-exceptions false so a rejection comes back as data: FCM puts the real
+  ;; reason in the body (UNREGISTERED, SENDER_ID_MISMATCH, INVALID_ARGUMENT,
+  ;; third-party auth errors), which an exception would reduce to a status code.
+  (let [token (try (access-token)
+                   (catch Exception e
+                     (println "  push: could not obtain an FCM access token —"
+                              "the service account is probably wrong or unreadable:" e)
+                     nil))]
+    (if-not token
+      {:status :no-access-token}
+      (let [resp (http/post fcm-url
+                            {:headers {"Authorization" (str "Bearer " token)}
+                             :content-type :json
+                             :throw-exceptions false
+                             :body (json/write-str
+                                    {:message {:token device-token
+                                               :notification {:title title :body body}}})})]
+        (println "  push: FCM ->" (:status resp) (:body resp))
+        resp))))
 
 ;; ── Interest registry ─────────────────────────────────────────────────────────
 ;;
@@ -149,6 +162,8 @@
 (defn dispatch!
   "Fire and forget, so a commit never blocks on FCM."
   [pushes]
+  (when (seq pushes)
+    (println "  push: dispatching" (count pushes) "notification(s); credentials present?" (available?)))
   (when (and (seq pushes) (available?))
     (.submit sender ^Runnable
              (fn []
