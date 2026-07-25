@@ -8,7 +8,7 @@
              :refer [ui-list ast-store->widget]
              :rename {ast-store->widget expanded-icon->widget}]
             [icare.ui.screens.pages.shared :refer [get-phone-measurements autoscroll-away-from-keyboard]]
-            [icare.ui.screens.pages.queridos.shared :refer [home-icon-asset home-icon-title animated-blur animated-fade debug-border ctx->coords]]
+            [icare.ui.screens.pages.queridos.shared :refer [home-icon-asset home-icon-title animated-blur animated-fade debug-border ctx->coords scrim-opacity]]
             [icare.datafriend :as df]
             [icare.ui.physics :as physics]
             [icare.ui.drawing :as drawing]
@@ -307,7 +307,7 @@
                 .begin 0.5
                 .end 1)
                (m/Container
-                .color (m/Colors.white.withOpacity 0.6)
+                .color (m/Colors.white.withOpacity scrim-opacity)
                 .width phone-width
                 .height phone-height))
               (animated-blur icon-transition-controller)

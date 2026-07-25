@@ -32,11 +32,19 @@
             .color m/Colors.black
             .fontSize 22)))
 
+;; How thoroughly an expanding querido veils the page behind it. The drawing
+;; overlay is global — it sits above this blur in the tree and so cannot be
+;; reached by the BackdropFilter — and has to reproduce the same veil over its
+;; own ink, so these two must not drift apart.
+(def blur-sigma 12.0)
+(def scrim-opacity 0.6)
+(def scrim-curve (m/Interval 0.5 1.0 .curve m/Curves.easeInOut))
+
 (defn animated-blur
   ([controller]
    (f/widget
     :managed [curved          (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut) :dispose nil
-              blur-animation  (.drive curved (m/Tween .begin 0.0 .end 12))                     :dispose nil]
+              blur-animation  (.drive curved (m/Tween .begin 0.0 .end blur-sigma))             :dispose nil]
     :let [empty-space (m/SizedBox.shrink)]
     :watch [_ controller]
     (m/BackdropFilter
@@ -45,7 +53,7 @@
   ([controller blur-width blur-height]
    (f/widget
     :managed [curved          (m/CurvedAnimation .parent controller .curve m/Curves.easeInOut) :dispose nil
-              blur-animation  (.drive curved (m/Tween .begin 0.0 .end 12))                     :dispose nil]
+              blur-animation  (.drive curved (m/Tween .begin 0.0 .end blur-sigma))             :dispose nil]
     :let [sized-space (m/Container .width blur-width .height blur-height .color m/Colors.transparent)]
     m/ClipRect
     :watch [_ controller]
