@@ -60,22 +60,45 @@
                       :task/completed false
                       :task/subitems []}}}))
 
-(defn ^Future get-device-token-future []
+(defn- ^Future fcm-token
+  "The FCM token, or nil if notifications are not authorised."
+  [messaging]
+  (await (-> (.getToken messaging)
+             (.catchError (fn [e] (prn "Failed to get device token:" e) nil)))))
+
+(defn ^Future get-device-token-future
+  "The device token if notifications are ALREADY authorised, else nil.
+
+   Deliberately does not prompt. Asking at launch spends the one permission
+   request the app ever gets before the user has seen anything that needs it —
+   see request-notifications!, which asks at the moment it becomes meaningful."
+  []
+  (let [messaging (firebase-messaging/FirebaseMessaging.instance)
+        settings (await (.getNotificationSettings messaging))
+        status (.-authorizationStatus settings)]
+    (when-not (or (= status firebase-messaging/AuthorizationStatus.denied)
+                  (= status firebase-messaging/AuthorizationStatus.notDetermined))
+      (await (fcm-token messaging)))))
+
+(defn ^Future request-notifications!
+  "Prompt for notification permission if it has not been decided, then return the
+   token (nil if declined). Called when the user first likes a task, since that is
+   the point at which notifications mean something concrete: your friend finishing
+   the thing you liked.
+
+   Asks for full authorisation rather than provisional. Provisional is granted
+   silently but delivers with no banner and no sound, straight to Notification
+   Centre — which is indistinguishable from the feature being broken, and was."
+  []
   (let [messaging (firebase-messaging/FirebaseMessaging.instance)
         settings (await (.getNotificationSettings messaging))
         status (.-authorizationStatus settings)]
     (when (= status firebase-messaging/AuthorizationStatus.notDetermined)
-      (await (.requestPermission messaging
-                .alert true
-                .sound true
-                .badge true
-                .provisional true)))
-    (when-not (= status firebase-messaging/AuthorizationStatus.denied)
-      (-> (.getToken messaging)
-          (.then (fn [new-token]
-                   new-token))
-          (.catchError (fn [e]
-                         (prn "Failed to get device token: " e)))))))
+      (await (.requestPermission messaging .alert true .sound true .badge true)))
+    (let [settings (await (.getNotificationSettings messaging))]
+      (when-not (= (.-authorizationStatus settings)
+                   firebase-messaging/AuthorizationStatus.denied)
+        (await (fcm-token messaging))))))
 
 (defn ^Future get-secure-credentials []
   (let [storage (FlutterSecureStorage)
@@ -180,10 +203,19 @@
                                            (swap! db-conn df/transact diff)
                                            (network/sync-to-server! db-conn public-key private-key))
                         :render!         (fn [] (ui/render-ui! @db-conn))
-                        ;;register push interests right now, for when waiting on the
-                        ;;watch loop's cycle would be too slow (liking a task)
+                        ;;liking is the moment notifications start to mean something,
+                        ;;so it is where we ask for permission (once) and where we
+                        ;;register interests immediately rather than waiting on the
+                        ;;watch loop's cycle
                         :register-interests! (fn []
-                                               (-> (network/register-interests! db-conn)
+                                               (-> (if (get-in @db-conn [:eav :global/config :config/device-token])
+                                                     (network/register-interests! db-conn)
+                                                     (.then (request-notifications!)
+                                                            (fn [token]
+                                                              (when token
+                                                                (swap! db-conn df/transact
+                                                                       {'add {:global/config {:config/device-token token}}}))
+                                                              (network/register-interests! db-conn))))
                                                    (.catchError (fn [e] (prn "interest registration failed:" e)))))
                         ;;pull one friend right now, for when waiting on the watch
                         ;;loop's cycle would be too slow (adding a friend)

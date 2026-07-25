@@ -60,7 +60,10 @@
                              :body (json/write-str
                                     {:message {:token device-token
                                                :notification {:title title :body body}}})})]
-        (println "  push: FCM ->" (:status resp) (:body resp))
+        ;; a rejection is the only way to learn a token went stale (UNREGISTERED)
+        ;; or belongs to another project (SENDER_ID_MISMATCH), so keep it visible
+        (when-not (<= 200 (:status resp) 299)
+          (println "push rejected by FCM:" (:status resp) (:body resp)))
         resp))))
 
 ;; ── Interest registry ─────────────────────────────────────────────────────────
@@ -128,28 +131,15 @@
                                              (not (:task/completed prior)))
                                     [entity attmap]))))
                         puts)]
-    ;; TEMPORARY DIAGNOSTIC: say which of the three conditions failed, since all
-    ;; three are invisible from the client and any one of them means no push.
-    (when (seq completed)
-      (println "  push: completions in this commit:" (mapv first completed))
-      (println "  push: subscribers for this namespace:"
-               (if subscribers (mapv (fn [[t es]] [(subs t 0 (min 12 (count t))) es]) subscribers)
-                   "NONE — nobody registered interest in this namespace"))
-      (println "  push: whole registry:"
-               (into {} (map (fn [[ns m]] [(subs ns 0 12) (count m)])) @interests)))
     (when (and subscribers (seq completed))
       (not-empty
        (into []
              (mapcat (fn [[entity attmap]]
-                       (let [matched (for [[token entity-set] subscribers
-                                           :when (contains? entity-set entity)]
-                                       {:device-token token
-                                        :title "Task completed"
-                                        :body (str (:task/title attmap))})]
-                         (when (empty? matched)
-                           (println "  push: completion of" entity
-                                    "matched no subscriber's entity set"))
-                         matched)))
+                       (for [[token entity-set] subscribers
+                             :when (contains? entity-set entity)]
+                         {:device-token token
+                          :title "Task completed"
+                          :body (str (:task/title attmap))})))
              completed)))))
 
 (defn debug-registry
@@ -162,8 +152,8 @@
 (defn dispatch!
   "Fire and forget, so a commit never blocks on FCM."
   [pushes]
-  (when (seq pushes)
-    (println "  push: dispatching" (count pushes) "notification(s); credentials present?" (available?)))
+  (when (and (seq pushes) (not (available?)))
+    (println "push skipped:" (count pushes) "notification(s) owed but no FCM credentials"))
   (when (and (seq pushes) (available?))
     (.submit sender ^Runnable
              (fn []
