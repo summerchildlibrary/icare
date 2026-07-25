@@ -33,6 +33,16 @@
 (defonce ^:private page-ctrl-atom (atom nil))
 (defonce ^:private scroll-ctrl-atoms (atom {}))
 
+;; the icon expand/collapse AnimationController, registered by the queridos base;
+;; strokes crossfade with it (home ink fades out as a list expands over it, the
+;; list's own ink fades in, and the reverse on collapse)
+(defonce expand-transition (atom nil))
+
+(defn- expand-transition-value []
+  (if-let [c @expand-transition]
+    (.-value ^m/AnimationController c)
+    0.0))
+
 (defn page-controller ^m/PageController []
   (or @page-ctrl-atom
       (let [c (m/PageController)]
@@ -81,31 +91,31 @@
 
 (def ^:private stroke-width 4.0)
 
-(defn- stroke-paint [color-kw]
+(defn- stroke-paint [color-kw opacity]
   (let [p (ui/Paint)]
-    (set! (.-color p) (color-of color-kw))
+    (set! (.-color p) (.withOpacity (color-of color-kw) opacity))
     (set! (.-style p) ui/PaintingStyle.stroke)
     (set! (.-strokeWidth p) stroke-width)
     (set! (.-strokeCap p) ui/StrokeCap.round)
     (set! (.-strokeJoin p) ui/StrokeJoin.round)
     p))
 
-(defn- fill-paint [color-kw]
+(defn- fill-paint [color-kw opacity]
   (let [p (ui/Paint)]
-    (set! (.-color p) (color-of color-kw))
+    (set! (.-color p) (.withOpacity (color-of color-kw) opacity))
     (set! (.-style p) ui/PaintingStyle.fill)
     p))
 
 (defn- draw-points
   "Draw one stroke. `points` is the flat content-space vector [nx cy nx cy ...];
    screen x = nx * phone-width + x-offset, screen y = cy - y-offset."
-  [^ui/Canvas canvas points phone-width x-offset y-offset color]
+  [^ui/Canvas canvas points phone-width x-offset y-offset color opacity]
   (let [n (count points)]
     (when (>= n 2)
       (let [x0 (+ (* (nth points 0) phone-width) x-offset)
             y0 (- (nth points 1) y-offset)]
         (if (= n 2)
-          (.drawCircle canvas (ui/Offset x0 y0) (/ stroke-width 1.5) (fill-paint color))
+          (.drawCircle canvas (ui/Offset x0 y0) (/ stroke-width 1.5) (fill-paint color opacity))
           (let [path (ui/Path)]
             (.moveTo path x0 y0)
             (loop [i 2]
@@ -114,21 +124,23 @@
                          (+ (* (nth points i) phone-width) x-offset)
                          (- (nth points (inc i)) y-offset))
                 (recur (+ i 2))))
-            (.drawPath canvas path (stroke-paint color))))))))
+            (.drawPath canvas path (stroke-paint color opacity))))))))
 
 (defn- make-painter
-  "Paint a set of layers, each one screen's strokes at its own translation:
-   {:strokes [...] :ip in-progress-or-nil :x x-offset :y y-offset}."
+  "Paint a set of layers, each one screen's strokes at its own translation and
+   fade: {:strokes [...] :ip in-progress-or-nil :x x-offset :y y-offset
+   :opacity 0..1 (nil means opaque)}."
   [layers phone-width]
   (reify :extends (m/CustomPainter)
     (paint [_ canvas size]
-      (doseq [{:keys [strokes ip x y]} layers]
-        ;; skip layers that are entirely off-screen (settled other page)
-        (when (< (- phone-width) x phone-width)
-          (doseq [{:keys [color points]} strokes]
-            (draw-points canvas points phone-width x y color))
-          (when ip
-            (draw-points canvas (:points ip) phone-width x y (:color ip))))))
+      (doseq [{:keys [strokes ip x y opacity]} layers]
+        (let [opacity (or opacity 1.0)]
+          ;; skip faded-out layers and layers entirely off-screen (other page)
+          (when (and (> opacity 0.01) (< (- phone-width) x phone-width))
+            (doseq [{:keys [color points]} strokes]
+              (draw-points canvas points phone-width x y color opacity))
+            (when ip
+              (draw-points canvas (:points ip) phone-width x y (:color ip) opacity))))))
     (shouldRepaint [_ _] true)))
 
 ;; ── Eraser hit-testing (content space) ────────────────────────────────────────
@@ -339,21 +351,29 @@
               exp-ctrl (when expanded-context (scroll-controller-for expanded-context))]
         (f/widget
          :watch [ip in-progress
-                 _ (m/Listenable.merge [page-ctrl home-ctrl mylist-ctrl exp-ctrl])]
-         :let [layers (if expanded-context
-                        [{:strokes (get strokes-by-screen expanded-context)
-                          :ip (when (= (:screen ip) expanded-context) ip)
-                          :x 0.0
-                          :y (scroll-offset exp-ctrl)}]
-                        (let [p (page-position page-ctrl page-idx)]
-                          [{:strokes (get strokes-by-screen :home)
-                            :ip (when (= (:screen ip) :home) ip)
-                            :x (* (- 0 p) phone-width)
-                            :y (scroll-offset home-ctrl)}
-                           {:strokes (get strokes-by-screen :my-list)
-                            :ip (when (= (:screen ip) :my-list) ip)
-                            :x (* (- 1 p) phone-width)
-                            :y (scroll-offset mylist-ctrl)}]))]
+                 _ (m/Listenable.merge [page-ctrl home-ctrl mylist-ctrl exp-ctrl
+                                        @expand-transition])]
+         :let [;;crossfade with the icon expansion: page ink fades out as a list
+               ;;expands over it, the list's ink fades in, and both reverse on
+               ;;collapse (expanded-context stays set until the reverse finishes)
+               t (if expanded-context (expand-transition-value) 0.0)
+               p (page-position page-ctrl page-idx)
+               layers (cond-> [{:strokes (get strokes-by-screen :home)
+                                :ip (when (= (:screen ip) :home) ip)
+                                :x (* (- 0 p) phone-width)
+                                :y (scroll-offset home-ctrl)
+                                :opacity (- 1.0 t)}
+                               {:strokes (get strokes-by-screen :my-list)
+                                :ip (when (= (:screen ip) :my-list) ip)
+                                :x (* (- 1 p) phone-width)
+                                :y (scroll-offset mylist-ctrl)
+                                :opacity (- 1.0 t)}]
+                        expanded-context
+                        (conj {:strokes (get strokes-by-screen expanded-context)
+                               :ip (when (= (:screen ip) expanded-context) ip)
+                               :x 0.0
+                               :y (scroll-offset exp-ctrl)
+                               :opacity t}))]
          (m/IgnorePointer)
          (m/SizedBox.expand)
          (m/CustomPaint .painter (make-painter layers phone-width))))

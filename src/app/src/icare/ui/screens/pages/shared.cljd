@@ -31,24 +31,28 @@
                                 (Future.delayed
                                  (Duration .milliseconds 300)
                                  (fn []
-                                   (let [phone-insets (m/MediaQuery.viewInsetsOf ctx)
-                                         keyboard-to-bottom (.-bottom phone-insets)
-                                         phone-size (m/MediaQuery.sizeOf ctx)
-                                         phone-length (.-height phone-size)
-                                         focused-to-top (.-dy (.-offset focused))
-                                         focused-to-bottom (- phone-length focused-to-top)
-                                         extra-height 60
-                                         focus-scroll-delta (max
-                                                             0
-                                                             (+ extra-height
-                                                                (- keyboard-to-bottom focused-to-bottom)))
-                                         scroll-offset (.-offset scrollController)
-                                         focus-scroll (+ scroll-offset focus-scroll-delta)]
-                                     (when (pos? keyboard-to-bottom)
-                                       (.animateTo scrollController
-                                                   focus-scroll
-                                                   .duration (Duration .milliseconds 300)
-                                                   .curve m/Curves.linear)))))))
+                                   ;;the widget may have unmounted while the delay ran
+                                   ;;(e.g. deleting a querido tears the list down), so the
+                                   ;;context and controller may both be dead by now
+                                   (when (and (.-mounted ctx) (.-hasClients scrollController))
+                                     (let [phone-insets (m/MediaQuery.viewInsetsOf ctx)
+                                           keyboard-to-bottom (.-bottom phone-insets)
+                                           phone-size (m/MediaQuery.sizeOf ctx)
+                                           phone-length (.-height phone-size)
+                                           focused-to-top (.-dy (.-offset focused))
+                                           focused-to-bottom (- phone-length focused-to-top)
+                                           extra-height 60
+                                           focus-scroll-delta (max
+                                                               0
+                                                               (+ extra-height
+                                                                  (- keyboard-to-bottom focused-to-bottom)))
+                                           scroll-offset (.-offset scrollController)
+                                           focus-scroll (+ scroll-offset focus-scroll-delta)]
+                                       (when (pos? keyboard-to-bottom)
+                                         (.animateTo scrollController
+                                                     focus-scroll
+                                                     .duration (Duration .milliseconds 300)
+                                                     .curve m/Curves.linear))))))))
              :dispose nil
              _ (doto m/FocusManager.instance (.addListener focus-callback))
              :dispose (.removeListener focus-callback)]

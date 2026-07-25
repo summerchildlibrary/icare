@@ -152,12 +152,12 @@
               canvas-height (fn [icon-count]
                               (+ phone-height (* 180.0 (max 0 (quot (- icon-count 6) 2)))))
               ;;walls are soft springs, these bounds are where icon centers come to rest;
-              ;;the floor sits near the bottom of the (possibly scrolled) content
+              ;;a smaller clearance lets icons settle lower toward the bottom of the screen
               bounds-for (fn [icon-count]
                            {:left 90.0
                             :top (+ notch-height 130.0)
                             :right (- phone-width 90.0)
-                            :bottom (- (canvas-height icon-count) 320.0)})]
+                            :bottom (- (canvas-height icon-count) 240.0)})]
         :vsync clock
         :managed [icon-transition-controller (m/AnimationController
                                               .vsync clock
@@ -167,7 +167,9 @@
                   sim-state (atom {:world (physics/make-world (:physics @(get-ast-atom)) (bounds-for 0))
                                    :pose-atoms {}
                                    :prev-elapsed 0.0}) :dispose nil]
-        :let [sync-bodies! (fn [icon-node-ids]
+        :let [;;the drawing overlay crossfades strokes with the expand/collapse animation
+              _ (reset! drawing/expand-transition icon-transition-controller)
+              sync-bodies! (fn [icon-node-ids]
                              (swap! sim-state
                                     (fn [{:keys [world pose-atoms] :as sim}]
                                       (let [initial? (empty? (:bodies world))
