@@ -149,18 +149,33 @@
        distinct
        vec))
 
+(defn- friend-names
+  "{pubkey name} from our own queridos — what *we* call each friend."
+  [db]
+  (into {}
+        (keep (fn [[_ q]]
+                (when-let [pk (:querido/pub-key q)]
+                  [pk (:querido/name q)])))
+        (df/query db {'e {:querido/pub-key 'p :querido/name 'n}})))
+
 (defn- liked-interests
-  "{friend-pubkey [task-id ...]} for the tasks of theirs we've liked — what we
-   want the server to push to us when they complete something. Our likes are
+  "{friend-pubkey {:name n :entities [task-id ...]}} for the tasks of theirs we've
+   liked — what we want pushed to us when they complete something. Our likes are
    entities in our own db carrying :like/liked; their tasks live in their pulled
-   namespace, so the interest set is just the intersection."
+   namespace, so the interest set is just the intersection.
+
+   The name goes up with it so the server can title the notification without
+   knowing anything about who owns a namespace. It is our own label for them, which
+   is also the name we would want to read in the notification."
   [db friends]
-  (let [liked (set (keys (df/query db {'e {:like/liked true}})))]
+  (let [liked (set (keys (df/query db {'e {:like/liked true}})))
+        names (friend-names db)]
     (into {}
           (keep (fn [friend]
                   (let [their-eav (get-in db [friend :eav])
                         theirs (filterv #(contains? their-eav %) liked)]
-                    (when (seq theirs) [friend theirs]))))
+                    (when (seq theirs)
+                      [friend {:name (get names friend) :entities theirs}]))))
           friends)))
 
 (defn ^Future register-interests!

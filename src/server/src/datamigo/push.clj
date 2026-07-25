@@ -59,7 +59,8 @@
                              :throw-exceptions false
                              :body (json/write-str
                                     {:message {:token device-token
-                                               :notification {:title title :body body}}})})]
+                                               :notification (cond-> {:title title}
+                                                               body (assoc :body body))}})})]
         ;; a rejection is the only way to learn a token went stale (UNREGISTERED)
         ;; or belongs to another project (SENDER_ID_MISMATCH), so keep it visible
         (when-not (<= 200 (:status resp) 299)
@@ -95,10 +96,14 @@
                                           (if (empty? tokens') m (assoc m namespace tokens'))))
                                       {}
                                       registry)]
-               (reduce-kv (fn [m namespace entities]
-                            (if (seq entities)
-                              (assoc-in m [namespace device-token] (set entities))
-                              m))
+               (reduce-kv (fn [m namespace v]
+                            ;; {:name n :entities [...]}, or a bare vector from a
+                            ;; client that predates names
+                            (let [{:keys [name entities]} (if (map? v) v {:entities v})]
+                              (if (seq entities)
+                                (assoc-in m [namespace device-token]
+                                          {:name name :entities (set entities)})
+                                m)))
                           cleared
                           interests-map))))
     nil))
@@ -135,11 +140,13 @@
       (not-empty
        (into []
              (mapcat (fn [[entity attmap]]
-                       (for [[token entity-set] subscribers
-                             :when (contains? entity-set entity)]
+                       ;; the name is whatever the *subscriber* calls this person,
+                       ;; which is what they want to read — the server never has to
+                       ;; know anything about who owns a namespace
+                       (for [[token {:keys [name entities]}] subscribers
+                             :when (contains? entities entity)]
                          {:device-token token
-                          :title "Task completed"
-                          :body (str (:task/title attmap))})))
+                          :title (str (or name "Someone") " completed \"" (:task/title attmap) "\"")})))
              completed)))))
 
 (defn debug-registry
