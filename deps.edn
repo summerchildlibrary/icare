@@ -15,5 +15,11 @@
                                    com.google.auth/google-auth-library-oauth2-http {:mvn/version "1.19.0"}}
                       :jvm-opts ["--add-opens" "java.base/java.nio=ALL-UNNAMED"
                                  "--add-opens" "java.base/sun.nio.ch=ALL-UNNAMED"
-                                 "--enable-native-access=ALL-UNNAMED"]
+                                 "--enable-native-access=ALL-UNNAMED"
+                                 ;; Clojure's built-in socket REPL, for inspecting a
+                                 ;; running server (the push registry lives only in
+                                 ;; memory). Binds to localhost, so reach it over an
+                                 ;; ssh tunnel — never expose 5555, it is arbitrary
+                                 ;; code execution as the server user.
+                                 "-Dclojure.server.repl={:port 5555 :accept clojure.core.server/repl}"]
                       :main-opts ["-m" "datamigo.core"]}}}

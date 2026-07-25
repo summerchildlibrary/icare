@@ -98,29 +98,51 @@
    prior version of that entity, that prior version was not complete, and some
    subscriber named the entity."
   [namespace tree {:keys [puts deletes]}]
-  (when-let [subscribers (not-empty (get @interests namespace))]
-    (let [;; previous versions by entity, via direct lookups on the deleted keys
-          previous (into {}
-                         (keep (fn [timestamp]
-                                 (when-let [entry (get tree timestamp)]
-                                   (first entry))))
-                         deletes)]
+  (let [subscribers (not-empty (get @interests namespace))
+        ;; previous versions by entity, via direct lookups on the deleted keys
+        previous (into {}
+                       (keep (fn [timestamp]
+                               (when-let [entry (get tree timestamp)]
+                                 (first entry))))
+                       deletes)
+        ;; every task in this commit that just went false -> true
+        completed (into []
+                        (keep (fn [[_timestamp entity-map]]
+                                (let [[entity attmap] (first entity-map)
+                                      prior (get previous entity)]
+                                  (when (and (:task/completed attmap)
+                                             (some? prior)
+                                             (not (:task/completed prior)))
+                                    [entity attmap]))))
+                        puts)]
+    ;; TEMPORARY DIAGNOSTIC: say which of the three conditions failed, since all
+    ;; three are invisible from the client and any one of them means no push.
+    (when (seq completed)
+      (println "  push: completions in this commit:" (mapv first completed))
+      (println "  push: subscribers for this namespace:"
+               (if subscribers (mapv (fn [[t es]] [(subs t 0 (min 12 (count t))) es]) subscribers)
+                   "NONE — nobody registered interest in this namespace"))
+      (println "  push: whole registry:"
+               (into {} (map (fn [[ns m]] [(subs ns 0 12) (count m)])) @interests)))
+    (when (and subscribers (seq completed))
       (not-empty
        (into []
-             (mapcat (fn [[_timestamp entity-map]]
-                       (let [[entity attmap] (first entity-map)
-                             prior (get previous entity)]
-                         ;; rising edge only: a prior version must exist and must
-                         ;; not have been complete
-                         (when (and (:task/completed attmap)
-                                    (some? prior)
-                                    (not (:task/completed prior)))
-                           (for [[token entity-set] subscribers
-                                 :when (contains? entity-set entity)]
-                             {:device-token token
-                              :title "Task completed"
-                              :body (str (:task/title attmap))})))))
-             puts)))))
+             (mapcat (fn [[entity attmap]]
+                       (let [matched (for [[token entity-set] subscribers
+                                           :when (contains? entity-set entity)]
+                                       {:device-token token
+                                        :title "Task completed"
+                                        :body (str (:task/title attmap))})]
+                         (when (empty? matched)
+                           (println "  push: completion of" entity
+                                    "matched no subscriber's entity set"))
+                         matched)))
+             completed)))))
+
+(defn debug-registry
+  "The live interest registry, for poking at from a REPL."
+  []
+  @interests)
 
 (defonce ^ExecutorService sender (Executors/newSingleThreadExecutor))
 
