@@ -180,6 +180,13 @@
    is the eager path; /watch keeps sending them as a self-healing refresh."
   [^HttpExchange exchange]
   (let [{:keys [device-token interests]} (read-body exchange)]
+    ;; TEMPORARY DIAGNOSTIC: an empty registry could mean this was never called,
+    ;; called without a token, or called with nothing to register — and all three
+    ;; look identical from the client, which just gets {:ok true} either way.
+    (println "REGISTER token:" (if device-token
+                                 (str (subs device-token 0 (min 12 (count device-token))) "…")
+                                 "NIL — nothing will be stored")
+             "interests:" (if (seq interests) interests "EMPTY"))
     (push/register-interests! device-token interests)
     (respond! exchange 200 {:ok true})))
 
@@ -194,6 +201,11 @@
         queue (LinkedBlockingQueue.)]
     ;; the watcher queue is per-poll; push interest outlives it, which is the
     ;; whole point — it is how you get told about a commit while disconnected
+    (println "WATCH token:" (if device-token
+                              (str (subs device-token 0 (min 12 (count device-token))) "…")
+                              "NIL")
+             "interests:" (if (seq interests) interests "EMPTY")
+             "namespaces:" (count namespaces))
     (push/register-interests! device-token interests)
     (register-watcher! namespaces queue)
     (try
