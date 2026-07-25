@@ -152,7 +152,12 @@
                                                                 datafriend-db)
                          device-token             (await (get-device-token-future))
                          _                        (prn "Device token:" device-token)
-                         _                        (when device-token (df/transact db {'add {:global/config {:config/device-token device-token}}}))
+                         ;;rebind db: df/transact is pure, so discarding its result
+                         ;;left the token out of the database entirely — the client
+                         ;;then sent nil to /register and nothing was ever stored
+                         db                       (cond-> db
+                                                    device-token
+                                                    (df/transact {'add {:global/config {:config/device-token device-token}}}))
                          conn                     (atom db)
                          ;; re-render after a friend pull updates the db; guarded so
                          ;; an early pull can't fire before the initial build-widgets!
