@@ -67,11 +67,16 @@
                              (fn [new-name]
                                (let [{:keys [transact! render!]} side-effects]
                                  (if (empty? new-name)
-                                   ;;retracting the whole entity includes its pose, which removes it from the canvas
-                                   (transact! {'retract (into {querido-id (get-in db [:eav querido-id])
+                                   ;;retracting the whole entity includes its pose, which removes it from the canvas;
+                                   ;;also drop the strokes drawn on this friend's list (tagged with their pubkey),
+                                   ;;else they'd orphan in our db forever
+                                   (let [our-strokes (keys (df/query db {'s {:stroke/screen pub-key}}))]
+                                     (transact! {'retract (-> {querido-id (get-in db [:eav querido-id])
                                                                :global/config {:config/expanded-querido querido-id}}
-                                                              (map (fn [task-id] [task-id (get-in db [:eav task-id])]))
-                                                              (remove #(= % :add-task-task) task-order))})
+                                                              (into (map (fn [task-id] [task-id (get-in db [:eav task-id])]))
+                                                                    (remove #(= % :add-task-task) task-order))
+                                                              (into (map (fn [sid] [sid (get-in db [:eav sid])]))
+                                                                    our-strokes))}))
                                    (transact! {'add {querido-id {:querido/name new-name}}}))
                                  (render!))))
      :on-edit-asset (fn [side-effects]

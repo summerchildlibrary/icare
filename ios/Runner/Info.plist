@@ -71,5 +71,15 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- iOS 14+ gates LAN access behind a user prompt; without this key the
+	     prompt never appears and connections fail with errno 65 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>iCare connects to your sync server on the local network.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- dev: allow cleartext HTTP to the sync server on the local network -->
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

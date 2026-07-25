@@ -83,8 +83,16 @@
         contains-public-key? (await (.containsKey storage .key "public-key"))]
     (cond
       (and contains-private-key? contains-public-key?)
+      ;;derive the public key from the private one rather than trusting what is
+      ;;stored: an older build could persist a mismatched pair, and because the
+      ;;iOS keychain survives app deletion that mismatch outlives a reinstall and
+      ;;every commit signature is then rejected by the server. Deriving self-heals.
       (let [private-key (await (.read storage .key "private-key"))
-            public-key (await (.read storage .key "public-key"))]
+            stored-public (await (.read storage .key "public-key"))
+            public-key (.-public (Keychain private-key))]
+        (when (not= stored-public public-key)
+          (prn "stored public key did not match the private key; repairing" stored-public "->" public-key)
+          (await (.write storage .key "public-key" .value public-key)))
         [private-key public-key])
 
       (and (not contains-private-key?) (not contains-public-key?))

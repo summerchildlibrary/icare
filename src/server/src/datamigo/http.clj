@@ -15,6 +15,7 @@
    the PULL path (reading a friend's namespace) the client applies the diff locally
    and never commits."
   (:require [datamigo.storage :as storage]
+            [datamigo.push :as push]
             [negentropy :as negentropy]
             [clojure.edn :as edn])
   (:import (com.sun.net.httpserver HttpServer HttpHandler HttpExchange)
@@ -126,32 +127,61 @@
    one for the namespace (consumed on use, superseded by later syncs), which stops
    replay. On success: patch memory, enqueue the LMDB write, poke watchers."
   [^HttpExchange exchange]
-  (let [{:keys [namespace diff commit-token signature]} (read-body exchange)
+  (let [{:keys [namespace diff-edn commit-token signature]} (read-body exchange)
         pubkey-bytes (hex->bytes namespace)
-        message (sha256 (pr-str [namespace diff commit-token]))]
+        ;; Verify against the exact string the client signed and sent. Re-serializing
+        ;; a parsed diff is NOT byte-stable — Clojure promotes maps larger than 8
+        ;; entries from array-map (insertion order) to hash-map (hash order), so the
+        ;; re-print came back reordered and every such signature failed.
+        message (sha256 (str namespace "|" diff-edn "|" commit-token))
+        diff (edn/read-string diff-edn)]
+    (println "COMMIT attempt from namespace" namespace
+             "puts" (count (:puts diff)) "deletes" (count (:deletes diff)))
     (cond
       (not (consume-token! namespace commit-token))
-      (respond! exchange 403 {:error "invalid or stale commit token"})
+      (do (println "  -> REJECTED: invalid or stale commit token")
+          (respond! exchange 403 {:error "invalid or stale commit token"}))
 
       (not (and signature (verify-schnorr pubkey-bytes message (hex->bytes signature))))
-      (respond! exchange 403 {:error "invalid signature"})
+      (do (println "  -> REJECTED: invalid signature")
+          (respond! exchange 403 {:error "invalid signature"}))
 
       :else
-      (do
+      ;; completions are detected against the tree as it stands BEFORE patching:
+      ;; the prior versions live under exactly the keys patch-tree! is about to
+      ;; delete, so this must not move below it
+      (let [pushes (push/completion-pushes
+                    namespace
+                    (storage/get-or-load-tree namespace pubkey-bytes)
+                    diff)]
         (storage/patch-tree! namespace diff)
         (storage/enqueue-diff! pubkey-bytes diff)
         (poke-watchers! namespace)
+        (push/dispatch! pushes)
         (respond! exchange 200 {:ok true})))))
+
+(defn handle-ping
+  "Plain GET so a phone browser can prove it can reach this server on the LAN."
+  [^HttpExchange exchange]
+  (let [bytes (.getBytes "datamigo ok\n" "UTF-8")]
+    (.sendResponseHeaders exchange 200 (alength bytes))
+    (with-open [out (.getResponseBody exchange)]
+      (.write out bytes))))
 
 (def ^:private watch-timeout-ms (* 60 1000))
 
 (defn handle-watch
-  "Long-poll. Body: {:namespaces [friend-hex...]}. Park up to a minute; return
-   {:poked ns-hex} when any watched namespace commits, or {:poked nil} on timeout.
-   The client re-issues to keep watching."
+  "Long-poll. Body: {:namespaces [friend-hex...]} plus, optionally,
+   :device-token and :interests {namespace [entity...]} to receive pushes while
+   not polling. Park up to a minute; return {:poked ns-hex} when any watched
+   namespace commits, or {:poked nil} on timeout. The client re-issues to keep
+   watching, which also refreshes its push interests."
   [^HttpExchange exchange]
-  (let [{:keys [namespaces]} (read-body exchange)
+  (let [{:keys [namespaces device-token interests]} (read-body exchange)
         queue (LinkedBlockingQueue.)]
+    ;; the watcher queue is per-poll; push interest outlives it, which is the
+    ;; whole point — it is how you get told about a commit while disconnected
+    (push/register-interests! device-token interests)
     (register-watcher! namespaces queue)
     (try
       (let [poked (.poll queue watch-timeout-ms TimeUnit/MILLISECONDS)]

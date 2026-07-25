@@ -16,7 +16,10 @@
             [icare.datafriend :as df]
             [negentropy :as negentropy]))
 
-(def server-url "http://localhost:8080") ;; TODO configurable / https in production
+;; cloudflared tunnel to the dev server: HTTPS, so iOS App Transport Security
+;; allows it on a physical device (cleartext http to a LAN IP would be blocked).
+;; This URL is regenerated every tunnel session — swap it when the tunnel restarts.
+(def server-url "https://cosmetic-graphics-material-moving.trycloudflare.com") ;; TODO configurable
 
 (defonce ^:private http-client (io/HttpClient))
 
@@ -67,10 +70,16 @@
         diff {:puts only-ours :deletes (mapv first only-theirs)}]
     (if (and (empty? (:puts diff)) (empty? (:deletes diff)))
       {:ok true :noop true} ;; already in sync, nothing to commit
-      (let [message-hash-hex (sha256-hex (pr-str [public-key-hex diff commit-token]))
+      ;; Sign the exact string we transmit, and send that string verbatim. Signing
+      ;; a structure instead means the server must re-serialize what it parsed to
+      ;; check the signature — and that is not byte-stable: Clojure switches maps
+      ;; from array-map (insertion order) to hash-map (hash order) above 8 entries,
+      ;; so any map that large came back reordered and every signature failed.
+      (let [diff-edn (pr-str diff)
+            message-hash-hex (sha256-hex (str public-key-hex "|" diff-edn "|" commit-token))
             signature (.sign (Keychain private-key-hex) message-hash-hex)]
         (await (post-edn "/commit" {:namespace public-key-hex
-                                    :diff diff
+                                    :diff-edn diff-edn
                                     :commit-token commit-token
                                     :signature signature}))))))
 
@@ -136,6 +145,20 @@
        distinct
        vec))
 
+(defn- liked-interests
+  "{friend-pubkey [task-id ...]} for the tasks of theirs we've liked — what we
+   want the server to push to us when they complete something. Our likes are
+   entities in our own db carrying :like/liked; their tasks live in their pulled
+   namespace, so the interest set is just the intersection."
+  [db friends]
+  (let [liked (set (keys (df/query db {'e {:like/liked true}})))]
+    (into {}
+          (keep (fn [friend]
+                  (let [their-eav (get-in db [friend :eav])
+                        theirs (filterv #(contains? their-eav %) liked)]
+                    (when (seq theirs) [friend theirs]))))
+          friends)))
+
 (defn ^Future watch-friends-loop!
   "Run for the life of the app: pull every friend once, then long-poll /watch. On
    each poke, pull just the friend that changed; on timeout, simply re-poll. The
@@ -155,7 +178,13 @@
               (catch Exception e (prn "initial pull failed for" friend e))))
        (let [pulled (into pulled fresh)]
          (try
-           (when-let [poked (:poked (await (post-edn "/watch" {:namespaces friends})))]
+           ;; the watch call doubles as our push registration: it already names
+           ;; the friends we follow, so it carries the device token and the tasks
+           ;; of theirs we've liked. Re-sent every round, so it self-heals.
+           (when-let [poked (:poked (await (post-edn "/watch"
+                                                    {:namespaces friends
+                                                     :device-token (get-in @db-conn [:eav :global/config :config/device-token])
+                                                     :interests (liked-interests @db-conn friends)})))]
              (await (pull-friend! db-conn poked on-update)))
            (catch Exception e
              (prn "watch/pull error:" e)

@@ -1,0 +1,137 @@
+(ns datamigo.push
+  "Push notifications over FCM, folded into the sync server.
+
+   The server stays deliberately dumb: it knows exactly one app-level rule —
+   when a commit flips a task's :task/completed from falsy to true, whoever
+   registered interest in that task entity gets a push.
+
+   Interest is registered on /watch, which already carries the caller's friend
+   list, and is held per namespace. The commit path costs a single hash lookup
+   when nobody is subscribed to that namespace, which is the common case.
+
+   Finding the previous version of an entity needs no scanning: a transact moves
+   an entity to a fresh timestamp, so the same commit that puts the new version
+   deletes the old one. The diff's :deletes are therefore direct pointers to the
+   prior state, and a bulk first sync (which has no deletes) stays quiet on its
+   own."
+  (:require [clojure.data.json :as json]
+            [clj-http.client :as http])
+  (:import (com.google.auth.oauth2 GoogleCredentials)
+           (java.io File FileInputStream)
+           (java.util.concurrent Executors ExecutorService)))
+
+;; ── FCM ───────────────────────────────────────────────────────────────────────
+
+(def project-id "do-do-online")
+(def fcm-url (str "https://fcm.googleapis.com/v1/projects/" project-id "/messages:send"))
+(def service-account-path "do-do-online-firebase-adminsdk-fbsvc-809d342389.json")
+(def fcm-scope "https://www.googleapis.com/auth/firebase.messaging")
+
+(defn available?
+  "Push is optional: without the service account file the sync server still runs,
+   it just never sends anything."
+  []
+  (.exists (File. service-account-path)))
+
+(defonce ^:private credentials
+  (delay (-> (GoogleCredentials/fromStream (FileInputStream. service-account-path))
+             (.createScoped [fcm-scope]))))
+
+(defn- access-token []
+  (let [^GoogleCredentials creds @credentials]
+    (.refreshIfExpired creds)
+    (.getTokenValue (.getAccessToken creds))))
+
+(defn send-push-notification! [{:keys [title body device-token]}]
+  (http/post fcm-url
+             {:headers {"Authorization" (str "Bearer " (access-token))}
+              :content-type :json
+              :body (json/write-str
+                     {:message {:token device-token
+                                :notification {:title title :body body}}})}))
+
+;; ── Interest registry ─────────────────────────────────────────────────────────
+;;
+;; {namespace-hex {device-token #{entity ...}}}
+;;
+;; Keyed by token rather than entity so a client re-registering simply replaces
+;; its own set; subscriber counts per namespace are small (your friends), so the
+;; per-put check stays trivial once the namespace gate has been passed.
+;;
+;; In memory only. A restart just means clients re-register on their next watch
+;; poll, which is at most a minute away.
+
+(defonce ^:private interests (atom {}))
+
+(defn register-interests!
+  "Record which entities `device-token` wants pushed, per namespace.
+   `interests-map` is {namespace-hex [entity ...]}.
+
+   Clients send their whole interest map on every watch poll, so this drops the
+   token everywhere first and then re-adds it — otherwise unfriending someone
+   would leave a stale subscription behind."
+  [device-token interests-map]
+  (when device-token
+    (swap! interests
+           (fn [registry]
+             (let [cleared (reduce-kv (fn [m namespace tokens]
+                                        (let [tokens' (dissoc tokens device-token)]
+                                          (if (empty? tokens') m (assoc m namespace tokens'))))
+                                      {}
+                                      registry)]
+               (reduce-kv (fn [m namespace entities]
+                            (if (seq entities)
+                              (assoc-in m [namespace device-token] (set entities))
+                              m))
+                          cleared
+                          interests-map))))
+    nil))
+
+;; ── Completion detection ──────────────────────────────────────────────────────
+
+(defn completion-pushes
+  "Pushes owed for a commit, or nil. `tree` must be the namespace's tree as it
+   stands BEFORE the diff is applied, since the prior versions live under the
+   keys the diff is about to delete.
+
+   A push is owed when a put marks a task complete, the same commit deletes a
+   prior version of that entity, that prior version was not complete, and some
+   subscriber named the entity."
+  [namespace tree {:keys [puts deletes]}]
+  (when-let [subscribers (not-empty (get @interests namespace))]
+    (let [;; previous versions by entity, via direct lookups on the deleted keys
+          previous (into {}
+                         (keep (fn [timestamp]
+                                 (when-let [entry (get tree timestamp)]
+                                   (first entry))))
+                         deletes)]
+      (not-empty
+       (into []
+             (mapcat (fn [[_timestamp entity-map]]
+                       (let [[entity attmap] (first entity-map)
+                             prior (get previous entity)]
+                         ;; rising edge only: a prior version must exist and must
+                         ;; not have been complete
+                         (when (and (:task/completed attmap)
+                                    (some? prior)
+                                    (not (:task/completed prior)))
+                           (for [[token entity-set] subscribers
+                                 :when (contains? entity-set entity)]
+                             {:device-token token
+                              :title "Task completed"
+                              :body (str (:task/title attmap))})))))
+             puts)))))
+
+(defonce ^ExecutorService sender (Executors/newSingleThreadExecutor))
+
+(defn dispatch!
+  "Fire and forget, so a commit never blocks on FCM."
+  [pushes]
+  (when (and (seq pushes) (available?))
+    (.submit sender ^Runnable
+             (fn []
+               (doseq [push pushes]
+                 (try (send-push-notification! push)
+                      (catch Exception e
+                        (println (str "push failed: " e))))))))
+  nil)
