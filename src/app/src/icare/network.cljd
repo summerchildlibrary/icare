@@ -19,7 +19,7 @@
 ;; cloudflared tunnel to the dev server: HTTPS, so iOS App Transport Security
 ;; allows it on a physical device (cleartext http to a LAN IP would be blocked).
 ;; This URL is regenerated every tunnel session — swap it when the tunnel restarts.
-(def server-url "https://cosmetic-graphics-material-moving.trycloudflare.com") ;; TODO configurable
+(def server-url "http://167.172.19.91:8080") ;; TODO configurable
 
 (defonce ^:private http-client (io/HttpClient))
 
@@ -36,7 +36,11 @@
   [path body]
   (let [uri (Uri/parse (str server-url path))
         request (await (.postUrl ^io/HttpClient http-client uri))]
-    (.write request (pr-str body))
+    ;; write UTF-8 bytes rather than letting the sink choose: Dart's
+    ;; HttpClientRequest defaults to ISO-8859-1 when the content type carries no
+    ;; charset, and latin1 throws on any code unit above 255 — so a single smart
+    ;; quote from iOS autocorrect broke every sync carrying that task.
+    (.add request (convert/utf8.encode (pr-str body)))
     (let [response (await (.close request))
           text (await (.join (.transform response convert/utf8.decoder)))]
       (edn/read-string text))))

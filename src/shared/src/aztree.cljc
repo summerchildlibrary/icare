@@ -46,7 +46,11 @@
    caller uses to fingerprint a value; changing hash functions happens here."
   [value]
   (let [string (pr-str value)
-        bytes (utf8-bytes string)
+        ;; hint the array on the JVM: every aget below sits in the innermost loop,
+        ;; and without it each byte read goes through reflection — around two
+        ;; orders of magnitude slower, on the path every tree assoc takes.
+        #?@(:clj  [^bytes bytes (utf8-bytes string)]
+            :cljd [bytes (utf8-bytes string)])
         length (byte-length bytes)
         block-count (quot length 16)]
     (loop [block-index 0 high 0 low 0]
@@ -304,6 +308,21 @@
         :else
         (+ accumulator (node-count (.-left n)))))))
 
+(defn- node-select-key
+  "Key of the n-th entry (0-indexed) of this subtree, or nil if n is out of range.
+   Descends using the cached subtree counts, so it walks a single root-to-leaf
+   path rather than materializing the entries it skips over."
+  [node n]
+  (loop [node node n n]
+    (if (nil? node)
+      nil
+      (let [nd ^AZNode node
+            left-count (node-count (.-left nd))]
+        (cond
+          (< n left-count) (recur (.-left nd) n)
+          (= n left-count) (.-entry-key nd)
+          :else            (recur (.-right nd) (- n left-count 1)))))))
+
 (defn- key-in-range? [compare-keys low high candidate-key]
   (and (or (nil? low) (<= (compare-keys low candidate-key) 0))
        (or (nil? high) (neg? (compare-keys candidate-key high)))))
@@ -484,8 +503,14 @@
    than `bucket-count` sub-ranges are returned when the range holds fewer entries.
    This is the recursive subdivision negentropy uses to localize a differing range."
   [tree low high bucket-count]
-  (let [items (range-items tree low high)
-        total (count items)]
+  (let [root (.-root ^AZTree tree)
+        compare-keys (.-compare-keys ^AZTree tree)
+        ;; boundaries are selected by rank through the cached subtree counts, so
+        ;; this costs O(bucket-count * log n) and allocates nothing. Materializing
+        ;; the range to index into it would be O(n) on every round — and on the
+        ;; first round the range is the whole tree, of which we keep 16 keys.
+        start (if (nil? low) 0 (prefix-count root low compare-keys 0))
+        total (range-size tree low high)]
     (if (<= total 1)
       ;; A range with 0 or 1 items is its own single bucket. An empty range still
       ;; yields [[low high]] (not []) so the responder emits an :items leaf for it:
@@ -496,7 +521,8 @@
             per-bucket (quot (+ total buckets -1) buckets)
             boundary-keys (loop [item-index per-bucket boundaries []]
                             (if (< item-index total)
-                              (recur (+ item-index per-bucket) (conj boundaries (first (nth items item-index))))
+                              (recur (+ item-index per-bucket)
+                                     (conj boundaries (node-select-key root (+ start item-index))))
                               boundaries))
             edges (concat [low] boundary-keys [high])]
         (mapv (fn [range-low range-high] [range-low range-high]) edges (rest edges))))))

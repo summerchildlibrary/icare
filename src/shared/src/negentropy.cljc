@@ -59,16 +59,32 @@
    `their-items` for the same range. Returns [only-ours only-theirs], each a vector
    of [key value]: only-ours are entries the initiator has and the responder lacks;
    only-theirs are entries the responder has and the initiator lacks (with their
-   values). Matching keys are identical entries (the key carries the update
-   timestamp) and need no action. The caller picks direction — a push applies
-   only-ours as puts and only-theirs as deletes on the responder; a pull does the
-   reverse on the initiator."
+   values). The caller picks direction — a push applies only-ours as puts and
+   only-theirs as deletes on the responder; a pull does the reverse on the
+   initiator.
+
+   Entries are identified by key AND value fingerprint, not by key alone. Keying
+   only on the key assumes a key can never name two different entries, which holds
+   exactly as long as timestamps are never reused. When that breaks — a client
+   whose :next-timestamp restarted hands an old key to a new entity — a key-only
+   diff reports the range as identical even though the range fingerprints
+   disagree, so the two sides stay permanently divergent with no way to converge.
+
+   Fingerprinting costs nothing on the wire: at a leaf both sides' values are
+   already in hand. A collision then lands the key in *both* lists, which the
+   apply paths handle correctly since patch-tree! and apply-records each delete
+   before they put, so the authoritative side's value replaces the other's."
   [tree low high their-items]
-  (let [our-items  (aztree/range-items tree low high)
-        our-keys   (set (map first our-items))
-        their-keys (set (map first their-items))
-        only-ours   (filterv (fn [[k _]] (not (contains? their-keys k))) our-items)
-        only-theirs (filterv (fn [[k _]] (not (contains? our-keys k))) their-items)]
+  (let [our-items   (aztree/range-items tree low high)
+        id          (fn [[k v]] [k (aztree/fingerprint v)])
+        our-ids     (mapv id our-items)
+        their-ids   (mapv id their-items)
+        ours        (set our-ids)
+        theirs      (set their-ids)
+        only-ours   (into [] (keep (fn [[item i]] (when-not (contains? theirs i) item)))
+                          (map vector our-items our-ids))
+        only-theirs (into [] (keep (fn [[item i]] (when-not (contains? ours i) item)))
+                          (map vector their-items their-ids))]
     [only-ours only-theirs]))
 
 (defn process-response
