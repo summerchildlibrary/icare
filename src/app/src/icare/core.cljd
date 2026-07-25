@@ -189,6 +189,20 @@
                                                     (when @ui/widgets-built?
                                                       (prn "rerender! -> calling ui/render-ui!")
                                                       (ui/render-ui! @conn)))
+                         ;;FCM rotates tokens (reinstall, restore, its own schedule).
+                         ;;Without this the stored token silently goes stale: the
+                         ;;server keeps pushing to a dead address, FCM answers
+                         ;;UNREGISTERED, and notifications stop for good while the
+                         ;;app looks perfectly healthy.
+                         _                        (.listen (.-onTokenRefresh (firebase-messaging/FirebaseMessaging.instance))
+                                                           (fn [new-token]
+                                                             (prn "Device token refreshed:" new-token)
+                                                             (when new-token
+                                                               (swap! conn df/transact
+                                                                      {'add {:global/config {:config/device-token new-token}}})
+                                                               (-> (network/register-interests! conn)
+                                                                   (.catchError (fn [e] (prn "re-register after token refresh failed:" e)))))
+                                                             nil))
                          _                        (network/watch-friends-loop! conn rerender!)]
                       {:db-conn conn :ports ports* :public-key public-key :private-key private-key})]
     :bypass (when-not booted
