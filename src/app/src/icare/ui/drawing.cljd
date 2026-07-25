@@ -21,7 +21,7 @@
             ;; VelocityTracker is not re-exported by material
             ["package:flutter/gestures.dart" :as gestures]
             ["dart:ui" :as ui]
-            ["dart:math" :refer [exp sqrt]]
+            ["dart:math" :refer [sqrt]]
             ["package:haptic_feedback/haptic_feedback.dart" :as haptics]
             [icare.ui.screens.pages.shared :refer [get-phone-measurements]]
             [icare.ui.screens.pages.queridos.shared :refer [blur-sigma scrim-opacity scrim-curve]]
@@ -225,10 +225,17 @@
 ;; throw and coasts to a halt, so the dot feels like an object you set down
 ;; rather than a value you assigned.
 
-(def ^:private fling-friction 8.0)     ;; e^(-8t) decay: a toss travels v0/8 px
-(def ^:private fling-restitution 0.4)  ;; edges give a little instead of swallowing the throw
-(def ^:private fling-min-speed 60.0)   ;; px/s under which it is already at rest
-(def ^:private fling-max-speed 2500.0) ;; a hard flick should not launch it across the screen
+;; Deceleration is constant rather than proportional to speed: an exponential
+;; decay spends most of its time in a long, slow tail, which reads as the dot
+;; easing along a curve. A flat rate ramps the speed down in a straight line
+;; and stops crisply.
+(def ^:private fling-deceleration 5000.0) ;; px/s^2, so a toss travels v0^2/10000 px
+(def ^:private fling-restitution 0.4)     ;; edges give a little instead of swallowing the throw
+(def ^:private fling-min-speed 60.0)      ;; px/s under which it is already at rest
+(def ^:private fling-max-speed 1800.0)    ;; a hard flick should not launch it across the screen
+
+;; how near an edge counts as leaving the pen against the wall
+(def ^:private park-margin 24.0)
 
 (defn- circle
   "A plain colored circle. Pass border? true for the ringed white eraser look."
@@ -291,15 +298,6 @@
                            (let [offset (scroll-offset (get @scroll-ctrl-atoms context))]
                              [(/ (.-dx global-position) phone-width)
                               (+ (.-dy global-position) offset)]))
-           ;; drop the dot: remember where it was left, in the content space of
-           ;; the screen it was dropped on, so it scrolls/swipes with the content
-           set-anchor! (fn [sx sy]
-                         (let [context (current-context)
-                               page-pos (page-position (page-controller) @page-index)
-                               y-off (scroll-offset (get @scroll-ctrl-atoms context))]
-                           (reset! dot-anchor {:context context
-                                               :nx (/ (- sx (context-x-offset context page-pos)) phone-width)
-                                               :cy (+ sy y-off)})))
            ;; parked display: the anchor keeps its content position, but the
            ;; shown dot clamps to the screen so it can never be lost offscreen
            min-x (+ 6.0 half)
@@ -309,9 +307,33 @@
            clamp-center (fn [[x y]]
                           [(min (max x min-x) max-x)
                            (min (max y min-y) max-y)])
-           anchor->screen (fn [{:keys [context nx cy]} page-pos]
+           ;; Set the pen down against an edge and it sticks to the screen rather
+           ;; than to the page: it stops scrolling with the content. This already
+           ;; happened by accident — a dot whose content position scrolled past an
+           ;; edge got held there by clamp-center — and the accident is worth
+           ;; having on purpose, so leaving it on a wall is how you ask for it.
+           against-wall? (fn [sx sy]
+                           (or (< sx (+ min-x park-margin)) (> sx (- max-x park-margin))
+                               (< sy (+ min-y park-margin)) (> sy (- max-y park-margin))))
+           ;; drop the dot: remember where it was left, in the content space of
+           ;; the screen it was dropped on, so it scrolls/swipes with the content —
+           ;; unless it was left on a wall, when :sy pins it to the screen instead
+           set-anchor! (fn [sx sy]
+                         (let [context (current-context)
+                               page-pos (page-position (page-controller) @page-index)
+                               y-off (scroll-offset (get @scroll-ctrl-atoms context))]
+                           (reset! dot-anchor
+                                   (cond-> {:context context
+                                            :nx (/ (- sx (context-x-offset context page-pos)) phone-width)
+                                            :cy (+ sy y-off)}
+                                     (against-wall? sx sy) (assoc :sy sy)))))
+           anchor->screen (fn [{:keys [context nx cy sy]} page-pos]
                             [(+ (* nx phone-width) (context-x-offset context page-pos))
-                             (- cy (scroll-offset (get @scroll-ctrl-atoms context)))])
+                             ;; :sy means parked on a wall — screen fixed, so scrolling
+                             ;; the page underneath slides past it
+                             (if (some? sy)
+                               sy
+                               (- cy (scroll-offset (get @scroll-ctrl-atoms context))))])
            ;; .stop and .start are void, so these must not fall out of the tail —
            ;; Dart infers Null for the function and then rejects the void return
            stop-ticker! (fn []
@@ -330,9 +352,13 @@
                                dt (min 0.05 (max 0.0 (- now @fling-prev)))]
                            (reset! fling-prev now)
                            (when-let [{:keys [x y vx vy]} @fling]
-                             (let [decay (exp (- (* fling-friction dt)))
-                                   vx (* vx decay)
-                                   vy (* vy decay)
+                             (let [speed (sqrt (+ (* vx vx) (* vy vy)))
+                                   shed (* fling-deceleration dt)
+                                   ;;shave a fixed amount off the speed, keeping
+                                   ;;direction, and never overshoot into reverse
+                                   scale (if (> speed shed) (/ (- speed shed) speed) 0.0)
+                                   vx (* vx scale)
+                                   vy (* vy scale)
                                    x (+ x (* vx dt))
                                    y (+ y (* vy dt))
                                    [x vx] (cond
