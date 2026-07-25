@@ -3,24 +3,29 @@
   The world and bodies are plain maps and (step world dt) is a pure function,
   so the whole simulation is testable and inspectable as data.
   Positions are owned by the simulation while bodies are awake,
-  the database is authoritative once they sleep (sleep = commit)."
+  the database is authoritative once they sleep (sleep = commit).
+
+  The tuning below is constants rather than a db entity. None of it is per-user,
+  and holding it in the db meant a retune in code could not reach an install that
+  already had the old numbers synced down from the server."
   (:require ["dart:math" :as math]))
 
-(def default-config
-  {:repulsion-strength 2200.0 ;;peak acceleration between overlapping bodies, px/s^2
-   :repulsion-radius 150.0    ;;bodies further apart than this don't interact, px
-   :damping 4.0               ;;velocity decay, 1/s
-   :static-friction 300.0     ;;repulsion below this doesn't move bodies, so crowds can reach equilibrium and sleep, px/s^2
-   :wall-stiffness 200.0      ;;spring acceleration per px of wall penetration, 1/s^2, stiff so crowded walls only yield a few px
-   :wall-damping 15.0         ;;extra velocity decay while penetrating a wall, 1/s; absorbs the rebound so walls catch instead of bounce
-   :obstacle-radius 85.0      ;;capsule radius around stroke segments, px; ~icon half-size so the art rests against the line
-   :sleep-speed 4.0           ;;bodies slower than this are candidates for sleep, px/s
-   :sleep-frames 12           ;;consecutive slow substeps before a body sleeps
-   :max-speed 3000.0})        ;;px/s, keeps throws from tunneling out of the world
+;; ── Tuning ────────────────────────────────────────────────────────────────────
 
-(defn make-world [config bounds]
-  {:config (merge default-config config)
-   :bounds bounds
+(def repulsion-strength 2200.0) ;;peak acceleration between overlapping bodies, px/s^2
+(def repulsion-radius 150.0)    ;;bodies further apart than this don't interact, px
+(def damping 10.0)              ;;velocity decay, 1/s; high so a throw is a short straight
+                                ;;shot rather than a long arc bent by everyone it passes
+(def static-friction 300.0)     ;;repulsion below this doesn't move bodies, so crowds can reach equilibrium and sleep, px/s^2
+(def wall-stiffness 200.0)      ;;spring acceleration per px of wall penetration, 1/s^2, stiff so crowded walls only yield a few px
+(def wall-damping 15.0)         ;;extra velocity decay while penetrating a wall, 1/s; absorbs the rebound so walls catch instead of bounce
+(def obstacle-radius 85.0)      ;;capsule radius around stroke segments, px; ~icon half-size so the art rests against the line
+(def sleep-speed 4.0)           ;;bodies slower than this are candidates for sleep, px/s
+(def sleep-frames 12)           ;;consecutive slow substeps before a body sleeps
+(def max-speed 3000.0)          ;;px/s, keeps throws from tunneling out of the world
+
+(defn make-world [bounds]
+  {:bounds bounds
    :obstacles [] ;;stroke segments [x1 y1 x2 y2] acting as capsule walls
    :bodies {}})
 
@@ -58,77 +63,73 @@
 
 (defn- repulsion
   "Soft radial push away from every body within repulsion radius."
-  [config body others]
+  [body others]
   (reduce (fn [[fx fy] other]
             (let [dx (- (:x body) (:x other))
                   dy (- (:y body) (:y other))
-                  d  (math/sqrt (+ (* dx dx) (* dy dy)))
-                  radius (:repulsion-radius config)]
+                  d  (math/sqrt (+ (* dx dx) (* dy dy)))]
               (cond
-                (>= d radius) [fx fy]
+                (>= d repulsion-radius) [fx fy]
                 ;;fully overlapping bodies get a deterministic sideways shove
-                (< d 0.001) [(+ fx (:repulsion-strength config)) fy]
-                :else (let [mag (* (:repulsion-strength config) (- 1.0 (/ d radius)))]
+                (< d 0.001) [(+ fx repulsion-strength) fy]
+                :else (let [mag (* repulsion-strength (- 1.0 (/ d repulsion-radius)))]
                         [(+ fx (* mag (/ dx d))) (+ fy (* mag (/ dy d)))]))))
           [0.0 0.0]
           others))
 
 (defn- wall-force
   "Springs that push body centers back inside the bounds."
-  [config {:keys [left top right bottom]} {:keys [x y]}]
-  (let [k (:wall-stiffness config)]
-    [(cond (< x left)  (* k (- left x))
-           (> x right) (* k (- right x))
-           :else 0.0)
-     (cond (< y top)    (* k (- top y))
-           (> y bottom) (* k (- bottom y))
-           :else 0.0)]))
+  [{:keys [left top right bottom]} {:keys [x y]}]
+  [(cond (< x left)  (* wall-stiffness (- left x))
+         (> x right) (* wall-stiffness (- right x))
+         :else 0.0)
+   (cond (< y top)    (* wall-stiffness (- top y))
+         (> y bottom) (* wall-stiffness (- bottom y))
+         :else 0.0)])
 
 (defn- obstacle-force
   "Capsule springs around stroke segments: bodies within obstacle-radius of a
    segment get pushed out along the normal from the closest point, with the same
    spring stiffness as the bounds walls. Returns [fx fy contact?]."
-  [config obstacles {:keys [x y]}]
-  (let [radius (:obstacle-radius config 85.0)
-        k (:wall-stiffness config)]
-    (reduce (fn [[fx fy contact? :as acc] [x1 y1 x2 y2]]
-              ;;cheap AABB reject before the segment math
-              (if (or (< x (- (min x1 x2) radius)) (> x (+ (max x1 x2) radius))
-                      (< y (- (min y1 y2) radius)) (> y (+ (max y1 y2) radius)))
-                acc
-                (let [dx (- x2 x1) dy (- y2 y1)
-                      len2 (+ (* dx dx) (* dy dy))
-                      t (if (zero? len2)
-                          0.0
-                          (max 0.0 (min 1.0 (/ (+ (* (- x x1) dx) (* (- y y1) dy)) len2))))
-                      cx (+ x1 (* t dx)) cy (+ y1 (* t dy))
-                      ex (- x cx) ey (- y cy)
-                      d (math/sqrt (+ (* ex ex) (* ey ey)))]
-                  (cond
-                    (>= d radius) acc
-                    ;;dead centre on the line: deterministic sideways shove
-                    (< d 0.001) [(+ fx k) fy true]
-                    :else (let [mag (* k (- radius d))]
-                            [(+ fx (* mag (/ ex d))) (+ fy (* mag (/ ey d))) true])))))
-            [0.0 0.0 false]
-            obstacles)))
+  [obstacles {:keys [x y]}]
+  (reduce (fn [[fx fy contact? :as acc] [x1 y1 x2 y2]]
+            ;;cheap AABB reject before the segment math
+            (if (or (< x (- (min x1 x2) obstacle-radius)) (> x (+ (max x1 x2) obstacle-radius))
+                    (< y (- (min y1 y2) obstacle-radius)) (> y (+ (max y1 y2) obstacle-radius)))
+              acc
+              (let [dx (- x2 x1) dy (- y2 y1)
+                    len2 (+ (* dx dx) (* dy dy))
+                    t (if (zero? len2)
+                        0.0
+                        (max 0.0 (min 1.0 (/ (+ (* (- x x1) dx) (* (- y y1) dy)) len2))))
+                    cx (+ x1 (* t dx)) cy (+ y1 (* t dy))
+                    ex (- x cx) ey (- y cy)
+                    d (math/sqrt (+ (* ex ex) (* ey ey)))]
+                (cond
+                  (>= d obstacle-radius) acc
+                  ;;dead centre on the line: deterministic sideways shove
+                  (< d 0.001) [(+ fx wall-stiffness) fy true]
+                  :else (let [mag (* wall-stiffness (- obstacle-radius d))]
+                          [(+ fx (* mag (/ ex d))) (+ fy (* mag (/ ey d))) true])))))
+          [0.0 0.0 false]
+          obstacles))
 
 (defn- effective-force
   "The force that would actually move a body: friction gated repulsion plus walls
   and stroke obstacles. Static friction zeroes tiny residual repulsion, without it
   a crowded canvas creeps forever and never settles. Walls and obstacles are
   constraints, not interactions, they always act. Returns [fx fy obstacle-contact?]."
-  [config bounds obstacles bodies id body]
+  [bounds obstacles bodies id body]
   (let [others (vals (dissoc bodies id))
-        [rx ry] (repulsion config body others)
+        [rx ry] (repulsion body others)
         r-force (math/sqrt (+ (* rx rx) (* ry ry)))
-        rx (if (< r-force (:static-friction config)) 0.0 rx)
-        ry (if (< r-force (:static-friction config)) 0.0 ry)
-        [wx wy] (wall-force config bounds body)
-        [ox oy contact?] (obstacle-force config obstacles body)]
+        rx (if (< r-force static-friction) 0.0 rx)
+        ry (if (< r-force static-friction) 0.0 ry)
+        [wx wy] (wall-force bounds body)
+        [ox oy contact?] (obstacle-force obstacles body)]
     [(+ rx wx ox) (+ ry wy oy) contact?]))
 
-(defn- step-body [config bounds obstacles bodies id body dt]
+(defn- step-body [bounds obstacles bodies id body dt]
   (cond
     ;;kinematic bodies are driven from outside (the user's finger)
     (:kinematic? body) body
@@ -137,35 +138,33 @@
     ;;this keeps bodies asleep while a neighbour merely glides past, and keeps bodies
     ;;resting against a yielding wall (balanced forces) asleep
     (:sleeping? body)
-    (let [[fx fy] (effective-force config bounds obstacles bodies id body)]
-      (if (> (math/sqrt (+ (* fx fx) (* fy fy))) (:static-friction config))
+    (let [[fx fy] (effective-force bounds obstacles bodies id body)]
+      (if (> (math/sqrt (+ (* fx fx) (* fy fy))) static-friction)
         (wake body)
         body))
 
     :else
-    (let [[fx fy obstacle-contact?] (effective-force config bounds obstacles bodies id body)
+    (let [[fx fy obstacle-contact?] (effective-force bounds obstacles bodies id body)
           ;;semi implicit euler with implicit damping; a body inside a wall or
           ;;pressed against a stroke gets extra damping so the contact absorbs
           ;;the impact rather than trampolining it back
           {:keys [left top right bottom]} bounds
-          ;;default for worlds created before this key existed (e.g. across hot reload)
-          wall-damping (:wall-damping config 0.0)
           in-x-wall? (or (< (:x body) left) (> (:x body) right) obstacle-contact?)
           in-y-wall? (or (< (:y body) top) (> (:y body) bottom) obstacle-contact?)
-          damp-x (/ 1.0 (+ 1.0 (* (+ (:damping config) (if in-x-wall? wall-damping 0.0)) dt)))
-          damp-y (/ 1.0 (+ 1.0 (* (+ (:damping config) (if in-y-wall? wall-damping 0.0)) dt)))
+          damp-x (/ 1.0 (+ 1.0 (* (+ damping (if in-x-wall? wall-damping 0.0)) dt)))
+          damp-y (/ 1.0 (+ 1.0 (* (+ damping (if in-y-wall? wall-damping 0.0)) dt)))
           vx (* (+ (:vx body) (* fx dt)) damp-x)
           vy (* (+ (:vy body) (* fy dt)) damp-y)
           speed (math/sqrt (+ (* vx vx) (* vy vy)))
-          rescale (if (> speed (:max-speed config)) (/ (:max-speed config) speed) 1.0)
+          rescale (if (> speed max-speed) (/ max-speed speed) 1.0)
           vx (* vx rescale)
           vy (* vy rescale)
           x (+ (:x body) (* vx dt))
           y (+ (:y body) (* vy dt))
           ;;rest is rest, even leaning on a yielding wall, sleep is purely about motion
-          still? (< speed (:sleep-speed config))
+          still? (< speed sleep-speed)
           still-frames (if still? (inc (:still-frames body)) 0)
-          sleeping? (>= still-frames (:sleep-frames config))]
+          sleeping? (>= still-frames sleep-frames)]
       {:x x :y y
        :vx (if sleeping? 0.0 vx)
        :vy (if sleeping? 0.0 vy)
@@ -175,13 +174,12 @@
 
 (def ^:private substep-seconds (/ 1.0 120.0))
 
-(defn- step-once [{:keys [config bounds obstacles bodies] :as world} dt]
-  (let [obstacles (or obstacles [])] ;;worlds created before obstacles existed
-    (assoc world :bodies
-           (reduce-kv (fn [acc id body]
-                        (assoc acc id (step-body config bounds obstacles bodies id body dt)))
-                      {}
-                      bodies))))
+(defn- step-once [{:keys [bounds obstacles bodies] :as world} dt]
+  (assoc world :bodies
+         (reduce-kv (fn [acc id body]
+                      (assoc acc id (step-body bounds obstacles bodies id body dt)))
+                    {}
+                    bodies)))
 
 (defn step
   "Advances the world by dt seconds in fixed substeps.

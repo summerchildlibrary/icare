@@ -63,11 +63,9 @@
   (let [config (get-in db [:eav :global/config])
         expanded-querido-id (:config/expanded-querido config)
         home-ids (sort (df/get-entities db {:attribute :position/canvas :value :home}))
-        all-queridos (mapv (fn [querido-id] [querido-id (get-in db [:eav querido-id])]) home-ids)
-        physics-config (into {} (map (fn [[k v]] [(keyword (name k)) v])) (get-in db [:eav :global/physics]))]
+        all-queridos (mapv (fn [querido-id] [querido-id (get-in db [:eav querido-id])]) home-ids)]
     {:id "home-base"
      :ui-type ::base
-     :physics physics-config
      :add-querido (add-querido db)
      :expanded-icon (when expanded-querido-id
                       (ui-list db expanded-querido-id))
@@ -169,7 +167,7 @@
                                               .duration (Duration .milliseconds 300))
                   expanded-icon-atom (atom nil) :dispose nil
                   ;;the simulation owns positions while bodies are awake, the db owns them once they sleep
-                  sim-state (atom {:world (physics/make-world (:physics @(get-ast-atom)) (bounds-for 0))
+                  sim-state (atom {:world (physics/make-world (bounds-for 0))
                                    :pose-atoms {}
                                    :prev-elapsed 0.0}) :dispose nil]
         :let [;;the drawing overlay crossfades strokes with the expand/collapse animation
