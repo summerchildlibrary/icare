@@ -1,2 +1,17 @@
 #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
 #include "Generated.xcconfig"
+
+// LMDB is reached through dlsym(RTLD_DEFAULT, "mdb_env_create") at runtime, so
+// nothing in Dart or ObjC refers to it statically and the linker sees the whole
+// library as unreachable. flutter_lmdb2's podspec -force_loads liblmdb.a, but a
+// release link then dead-strips every byte of it back out, and the app dies on
+// boot with "symbol not found". Debug survives only because it does not
+// dead-strip. Verified by nm: without this, the release binary contains no mdb_
+// symbols and no MDB_ strings at all.
+DEAD_CODE_STRIPPING = NO
+
+// Flutter's documented fix for dart:ffi (docs.flutter.dev/platform-integration/
+// ios/c-interop). It is not sufficient on its own here — it governs the strip
+// phase, which never gets the chance to run on code the linker already dropped —
+// but it is what keeps the global symbols once an archive build does strip.
+STRIP_STYLE = non-global
