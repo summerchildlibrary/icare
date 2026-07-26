@@ -42,7 +42,7 @@
           (await (.txnCommit store* txn))
           ;; all records are adds, no deletes
           (df/apply-records (df/empty-db) records []))
-        (catch Exception e
+        (catch dynamic e
           (await (.txnAbort store* txn))
           (throw (Exception (str "Failed to read from lmdb storage: " e))))))))
 
@@ -60,7 +60,7 @@
         (await (.putUtf8 store* txn (pr-str ordered-key) (pr-str entity-map))))
       (await (.txnCommit store* txn))
       {:success nil}
-      (catch Exception e
+      (catch dynamic e
         (await (.txnAbort store* txn))
         (println (str "STORAGE WRITE FAILED, disk has diverged from memory! error: " e))
         {:failure e}))))
@@ -77,26 +77,36 @@
    tree and replies `[:boot db]`; `[:sync ranges]` replies `[:sync-response ...]`;
    `[:reconcile puts deletes]` applies the diff to LMDB and the tree."
   [^isolate/SendPort from-storage message]
-  (case (first message)
-    :boot
-    (let [boot-db (await (open db-dir))]
-      (reset! disk-ordered (:ordered boot-db))
-      (.send from-storage [:boot boot-db]))
+  ;;Anything thrown here escapes an async .listen callback, and the isolate is
+  ;;spawned with errorsAreFatal, so it dies — leaving whoever is awaiting a reply
+  ;;waiting for one that can never arrive. That is a silent hang with no console
+  ;;on a release build, so failures are caught and sent back as data instead.
+  ;;dynamic, not Exception: in Dart an Error is not an Exception, and the
+  ;;interesting failures down here (state, type, unimplemented) are Errors.
+  (try
+    (case (first message)
+      :boot
+      (let [boot-db (await (open db-dir))]
+        (reset! disk-ordered (:ordered boot-db))
+        (.send from-storage [:boot boot-db]))
 
-    :sync
-    (let [[_ ranges] message]
-      (.send from-storage [:sync-response (negentropy/respond @disk-ordered ranges)]))
+      :sync
+      (let [[_ ranges] message]
+        (.send from-storage [:sync-response (negentropy/respond @disk-ordered ranges)]))
 
-    :reconcile
-    (let [[_ puts delete-keys] message]
-      (swap! disk-ordered
-             (fn [tree]
-               (as-> tree tree
-                 (reduce dissoc tree delete-keys)
-                 (reduce (fn [t [k v]] (assoc t k v)) tree puts))))
-      (await (apply-reconciliation! puts delete-keys)))
+      :reconcile
+      (let [[_ puts delete-keys] message]
+        (swap! disk-ordered
+               (fn [tree]
+                 (as-> tree tree
+                   (reduce dissoc tree delete-keys)
+                   (reduce (fn [t [k v]] (assoc t k v)) tree puts))))
+        (await (apply-reconciliation! puts delete-keys)))
 
-    (println (str "storage isolate: unknown message " (first message)))))
+      (println (str "storage isolate: unknown message " (first message))))
+    (catch dynamic e st
+      (println (str "storage isolate failed handling " (first message) ": " e "\n" st))
+      (.send from-storage [:error (first message) (str e) (str st)]))))
 
 (defonce ^:private persist-syncing? (atom false))
 (defonce ^:private persist-pending? (atom false))
